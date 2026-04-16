@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(firebase --version)",
+      "Bash(firebase login:*)",
+      "Read(//f/jack/**)",
+      "Read(//f//**)",
+      "Bash(firebase projects:list)",
+      "Bash(node scripts/set-admin.mjs murshedkoli@gmail.com)",
+      "Bash(npm run:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(npx tsc:*)",
+      "Bash(claude plugin *)",
+      "Bash(git clone *)",
+      "Read(//tmp/**)"
+    ]
+  }
+}

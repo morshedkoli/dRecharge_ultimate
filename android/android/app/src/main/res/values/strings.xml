@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">Allows dRecharge Agent to automate multi-step USSD dialogs.</string>
+    <string name="accessibility_service_summary">Reads the active USSD dialog, enters the next menu step, and submits it.</string>
+</resources>
