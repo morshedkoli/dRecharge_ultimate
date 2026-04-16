@@ -25,6 +25,8 @@ export default function QueuePage() {
     count: s.key === "all" ? jobs.length : jobs.filter((j) => j.status === s.key).length,
   }));
 
+  const validJobs = jobs.filter((j) => !!j.jobId);
+
   return (
     <div className="p-6 sm:p-10 max-w-7xl mx-auto space-y-8 pb-12">
       {/* Header */}
@@ -61,7 +63,7 @@ export default function QueuePage() {
             <span className="text-xs font-bold uppercase tracking-widest font-manrope">Queue</span>
           </div>
           <span className="text-xs font-bold font-manrope text-on-surface-variant">
-            {loading ? "..." : `${jobs.length} job${jobs.length !== 1 ? "s" : ""}`}
+            {loading ? "..." : `${validJobs.length} job${validJobs.length !== 1 ? "s" : ""}`}
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -84,21 +86,21 @@ export default function QueuePage() {
                   <div className="h-4 bg-surface-container rounded-lg animate-pulse" />
                 </td></tr>
               ))}
-              {!loading && jobs.map((job) => (
+              {!loading && validJobs.map((job) => (
                 <tr key={job.jobId} className="group hover:bg-surface-container/20 transition-colors">
-                  <td className="px-8 py-5 font-mono text-xs text-on-surface-variant">{job.jobId.slice(0, 10)}…</td>
+                  <td className="px-8 py-5 font-mono text-xs text-on-surface-variant">{job.jobId?.slice(0, 10) ?? "—"}…</td>
                   <td className="px-8 py-5">
                     <span className="text-[10px] font-bold uppercase tracking-wider font-manrope text-on-surface-variant bg-surface-container px-2.5 py-1 rounded-full">
                       {job.serviceId?.slice(0, 8) || "—"}
                     </span>
                   </td>
-                  <td className="px-8 py-5 font-mono text-on-surface text-sm">{maskNumber(job.recipientNumber)}</td>
+                  <td className="px-8 py-5 font-mono text-on-surface text-sm">{job.recipientNumber ? maskNumber(job.recipientNumber) : "—"}</td>
                   <td className="px-8 py-5 font-bold text-[#134235] font-inter"><WalletAmount amount={job.amount} /></td>
                   <td className="px-8 py-5"><StatusBadge status={job.status} /></td>
                   <td className="px-8 py-5 text-on-surface-variant text-xs">{job.lockedByDevice ?? "—"}</td>
                   <td className="px-8 py-5 text-on-surface-variant text-xs">{relativeTime(job.createdAt)}</td>
                   <td className="px-8 py-5">
-                    <Link href={`/admin/queue/${job.jobId}`}
+                    <Link href={`/admin/queue/${job.jobId ?? ""}`}
                       className="inline-flex items-center gap-1 text-primary text-xs font-bold font-manrope hover:underline">
                       View <ArrowRight className="w-3 h-3" />
                     </Link>

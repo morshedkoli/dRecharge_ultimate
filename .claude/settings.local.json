@@ -13,7 +13,9 @@
       "Bash(npx tsc:*)",
       "Bash(claude plugin *)",
       "Bash(git clone *)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(flutter devices *)",
+      "Bash(flutter clean *)"
     ]
   }
 }

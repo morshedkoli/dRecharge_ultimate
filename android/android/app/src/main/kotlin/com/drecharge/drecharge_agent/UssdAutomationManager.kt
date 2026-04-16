@@ -4,16 +4,21 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.telecom.TelecomManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.net.toUri
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
-import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 object UssdAutomationManager {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -84,6 +89,25 @@ object UssdAutomationManager {
         if (event == null) return
 
         val root = service.rootInActiveWindow ?: event.source ?: return
+
+        // ── SIM picker auto-dismiss (fallback) ───────────────────────────────────────
+        // Some OEM ROMs still show a SIM picker even when TelecomManager.placeCall()
+        // is used. Detect it: a dialog with clickable SIM buttons but NO EditText
+        // (EditText only appears in a real USSD prompt screen).
+        if (findFirstNodeByClass(root, "android.widget.EditText") == null) {
+            val simButton = findSimButton(root, activeSession.simSlot)
+            if (simButton != null) {
+                simButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                // Reset timeout so the USSD dialog has time to appear after SIM pick.
+                scheduleTimeout(
+                    "Timed out waiting for the USSD dialog after SIM pick.",
+                    activeSession.stepTimeoutMs.toLong(),
+                )
+                return
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────────────
+
         val signature = collectTexts(root).joinToString("|").trim()
         if (signature.isNotEmpty() && signature == activeSession.lastSignature) {
             return
@@ -132,9 +156,43 @@ object UssdAutomationManager {
         )
     }
 
+    /**
+     * Dial a USSD code on [simSlot] (1-based) without showing the SIM picker dialog.
+     *
+     * Strategy:
+     *  1. TelecomManager.placeCall() with the PhoneAccountHandle matching [simSlot]
+     *     index — the only cross-OEM way to bypass the picker reliably.
+     *  2. Intent.ACTION_CALL with OEM slot extras as a fallback for very old ROMs or
+     *     emulators where TelecomManager accounts are unavailable.
+     */
+    @Suppress("MissingPermission")
     private fun dialUssd(activity: FlutterActivity, code: String, simSlot: Int) {
-        val encoded = Uri.encode(code)
-        val intent = Intent(Intent.ACTION_CALL, "tel:$encoded".toUri()).apply {
+        val uri = Uri.encode(code).let { "tel:$it".toUri() }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val telecom = activity.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+            if (telecom != null) {
+                try {
+                    val accounts = telecom.callCapablePhoneAccounts
+                    // simSlot is 1-based; account list is ordered by SIM slot index.
+                    val targetIndex = (simSlot - 1).coerceAtLeast(0)
+                    val handle = accounts.getOrNull(targetIndex) ?: accounts.firstOrNull()
+                    if (handle != null) {
+                        val extras = Bundle().apply {
+                            putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle)
+                        }
+                        telecom.placeCall(uri, extras)
+                        return // ✅ SIM picker will NOT appear
+                    }
+                } catch (_: Exception) {
+                    // Permission denied or no accounts — fall through to intent
+                }
+            }
+        }
+
+        // Fallback: Intent with OEM slot extras (may still show picker on some ROMs,
+        // but the accessibility handler above will auto-click the correct SIM button).
+        val intent = Intent(Intent.ACTION_CALL, uri).apply {
             putExtra("com.android.phone.extra.slot", simSlot - 1)
             putExtra("slot", simSlot - 1)
             putExtra("slot_id", simSlot - 1)
@@ -145,12 +203,15 @@ object UssdAutomationManager {
     }
 
     private fun recordStep(session: UssdSession, order: Int, type: String, value: String) {
+        val iso8601 = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
         session.executedSteps.add(
             mapOf(
                 "order" to order,
                 "type" to type,
                 "value" to value,
-                "executedAt" to Instant.now().toString(),
+                "executedAt" to iso8601,
                 "success" to true,
             ),
         )
@@ -224,6 +285,58 @@ object UssdAutomationManager {
             }
         }
         return null
+    }
+
+    /**
+     * Finds the button for [simSlot] (1-based) inside a SIM picker dialog.
+     *
+     * Matching order:
+     *  1. Text/content-description matches "SIM 1", "SIM 2", "Slot 1", "Card 1" etc.
+     *  2. Positional fallback — clicks the Nth (0-indexed) clickable button.
+     *
+     * Returns null if no SIM picker is detected (i.e. not a picker screen or no buttons).
+     */
+    private fun findSimButton(root: AccessibilityNodeInfo, simSlot: Int): AccessibilityNodeInfo? {
+        val simIndex = simSlot - 1 // 0-based
+        val clickableButtons = mutableListOf<AccessibilityNodeInfo>()
+        collectClickableButtons(root, clickableButtons)
+
+        if (clickableButtons.isEmpty()) return null
+
+        // 1. Label match: "SIM 1", "SIM 2", "Slot 1", "Card 1", etc.
+        val labelPatterns = listOf(
+            Regex("sim\\s*$simSlot", RegexOption.IGNORE_CASE),
+            Regex("slot\\s*$simSlot", RegexOption.IGNORE_CASE),
+            Regex("card\\s*$simSlot", RegexOption.IGNORE_CASE),
+        )
+        for (btn in clickableButtons) {
+            val txt = btn.text?.toString() ?: btn.contentDescription?.toString() ?: continue
+            if (labelPatterns.any { it.containsMatchIn(txt) }) return btn
+        }
+
+        // 2. Positional fallback: click the Nth button (0-indexed)
+        if (simIndex < clickableButtons.size && clickableButtons.size <= 3) {
+            // Only use positional match when there are ≤3 buttons to avoid false-positives
+            // on real USSD dialogs that have multiple action buttons.
+            return clickableButtons[simIndex]
+        }
+        return null
+    }
+
+    private fun collectClickableButtons(
+        node: AccessibilityNodeInfo?,
+        result: MutableList<AccessibilityNodeInfo>,
+    ) {
+        if (node == null) return
+        if (node.isClickable &&
+            (node.className?.toString()?.contains("Button") == true ||
+                node.className?.toString()?.contains("TextView") == true)
+        ) {
+            result.add(node)
+        }
+        for (i in 0 until node.childCount) {
+            collectClickableButtons(node.getChild(i), result)
+        }
     }
 
     private fun setNodeText(node: AccessibilityNodeInfo, value: String) {
