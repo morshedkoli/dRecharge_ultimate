@@ -82,6 +82,8 @@ export async function POST(request: NextRequest) {
           amount,
           ussdFlow: parsedUssdFlow,
           rawUssdFlow: ussdFlowTemplate,
+          simSlot: service.simSlot ?? 1,
+          smsTimeout: service.smsTimeout ?? 30,
           successSmsFormat: service.successSmsFormat || "",
           failureSmsFormat: service.failureSmsFormat || "",
           status: "queued",

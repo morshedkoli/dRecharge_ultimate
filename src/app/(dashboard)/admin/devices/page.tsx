@@ -39,7 +39,9 @@ function AgentQrCode({ payload, size = 220 }: { payload: string; size?: number }
 }
 
 export default function DevicesPage() {
-  const { devices, loading } = useAgentDevices();
+  const { devices, loading, refetch } = useAgentDevices();
+  const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set());
+  const visibleDevices = devices.filter(d => d.status !== "revoked" && !revokedIds.has(d.deviceId));
   const [agentBaseUrl, setAgentBaseUrl] = useState<string>("");
   const [bootstrapUrl, setBootstrapUrl] = useState<string>("");
   const [endpointLoading, setEndpointLoading] = useState(true);
@@ -194,7 +196,7 @@ export default function DevicesPage() {
         </div>
       )}
 
-      {!loading && devices.length === 0 && (
+      {!loading && visibleDevices.length === 0 && (
         <div className="bg-white border border-black/5 rounded-2xl p-16 text-center premium-shadow">
           <div className="w-16 h-16 bg-surface-container rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Smartphone className="w-8 h-8 text-on-surface-variant" />
@@ -204,9 +206,9 @@ export default function DevicesPage() {
         </div>
       )}
 
-      {!loading && devices.length > 0 && (
+      {!loading && visibleDevices.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {devices.map((device) => (
+          {visibleDevices.map((device) => (
             <div key={device.deviceId} className="bg-white border border-black/5 rounded-2xl p-8 card-hover transition-all duration-300 premium-shadow">
               <div className="flex items-start justify-between mb-6">
                 <div className="p-3 bg-[#E8F1EE] rounded-xl">
@@ -249,9 +251,12 @@ export default function DevicesPage() {
                   confirmVariant="destructive"
                   onConfirm={async () => {
                     try {
+                      setRevokedIds(prev => new Set([...prev, device.deviceId]));
                       await revokeDevice(device.deviceId);
                       toast.success("Device access revoked");
+                      await refetch();
                     } catch (e: unknown) {
+                      setRevokedIds(prev => { const s = new Set(prev); s.delete(device.deviceId); return s; });
                       const msg = e instanceof Error ? e.message : "Failed to revoke device";
                       toast.error(msg);
                       throw e; // re-throw so ConfirmDialog shows the error too

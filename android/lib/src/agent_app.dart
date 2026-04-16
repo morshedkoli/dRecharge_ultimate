@@ -384,6 +384,9 @@ class _AppShellState extends State<_AppShell> {
       final acquired = await BackendService.acquireJobLock(job.jobId);
       if (!acquired) return;
 
+      // Re-fetch the job after locking to get the freshest state.
+      // All execution parameters (ussdFlow, simSlot, smsTimeout, SMS formats)
+      // are embedded in the job — no separate service API call needed.
       final liveJob = await BackendService.fetchJob(job.jobId) ?? job;
       if (!mounted) return;
       setState(() {
@@ -394,35 +397,28 @@ class _AppShellState extends State<_AppShell> {
       _appendLog('Acquired job ${liveJob.jobId} for ${liveJob.recipientNumber}.');
       await _sendHeartbeat();
 
-      final service = await BackendService.fetchService(liveJob.serviceId);
-      if (service == null || !service.isActive) {
+      // Validate that the job has a ussdFlow to execute.
+      final resolvedFlow = liveJob.ussdFlow?.trim() ?? '';
+      if (resolvedFlow.isEmpty) {
         await _reportFailure(
           job: liveJob,
-          reason: 'Service is missing or inactive.',
+          reason: 'Job has no resolved USSD flow.',
           stepsExecuted: const <Map<String, dynamic>>[],
           rawSms: '',
         );
         return;
       }
 
-      final flowSegments = BackendService.resolveUssdFlow(job: liveJob, service: service);
-      if (flowSegments.isEmpty) {
-        await _reportFailure(
-          job: liveJob,
-          reason: 'Resolved USSD flow is empty.',
-          stepsExecuted: const <Map<String, dynamic>>[],
-          rawSms: '',
-        );
-        return;
-      }
+      // Split the pre-resolved flow into dialer steps.
+      final flowSegments = resolvedFlow.split('-');
+      _appendLog('Executing flow: ${flowSegments.join(' -> ')} on SIM ${liveJob.simSlot}');
 
-      _appendLog('Executing flow: ${flowSegments.join(' -> ')}');
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       List<Map<String, dynamic>> stepsExecuted;
       try {
         stepsExecuted = await _nativeBridge.executeUssdFlow(
           flowSegments: flowSegments,
-          simSlot: service.simSlot,
+          simSlot: liveJob.simSlot,     // from job (snapshotted from service)
         );
       } catch (error) {
         await _reportFailure(
@@ -434,17 +430,17 @@ class _AppShellState extends State<_AppShell> {
         return;
       }
 
+      // Wait for SMS confirmation using the job's embedded SMS format & timeout.
       final matchedSms = await _waitForConfirmationSms(
         sinceMs: startedAtMs,
         job: liveJob,
-        service: service,
       );
 
       final rawSms = matchedSms?.body ?? '';
       final parsedResult = matchedSms == null
           ? <String, dynamic>{
               'success': false,
-              'reason': 'No confirmation SMS received within ${service.smsTimeout}s',
+              'reason': 'No confirmation SMS received within ${liveJob.smsTimeout}s',
             }
           : <String, dynamic>{
               'success': false,
@@ -497,18 +493,18 @@ class _AppShellState extends State<_AppShell> {
     }
   }
 
+  /// Waits for an SMS confirmation using the job's embedded SMS format and timeout.
   Future<SmsEntry?> _waitForConfirmationSms({
     required int sinceMs,
     required ExecutionJob job,
-    required ServiceConfig service,
   }) async {
-    final deadline = DateTime.now().add(Duration(seconds: service.smsTimeout));
+    final timeoutSeconds = job.smsTimeout;
+    final deadline = DateTime.now().add(Duration(seconds: timeoutSeconds));
     while (DateTime.now().isBefore(deadline)) {
       final messages = await _nativeBridge.readRecentSms(sinceMs: sinceMs, maxMessages: 12);
-      final picked = BackendService.pickConfirmationSms(
+      final picked = BackendService.pickConfirmationSmsFromJob(
         messages: messages,
         job: job,
-        service: service,
       );
       if (picked != null) return picked;
       await Future<void>.delayed(const Duration(seconds: 4));

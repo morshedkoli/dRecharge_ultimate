@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
         amount: job.amount,
         ussdFlow: job.ussdFlow,
         rawUssdFlow: job.rawUssdFlow,
+        simSlot: job.simSlot ?? 1,
+        smsTimeout: job.smsTimeout ?? 30,
         successSmsFormat: job.successSmsFormat,
         failureSmsFormat: job.failureSmsFormat,
         status: job.status,

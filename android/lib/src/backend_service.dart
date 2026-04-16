@@ -310,45 +310,90 @@ class BackendService {
 
   // ─── Utilities ──────────────────────────────────────────────────────────────
 
-  /// Resolves placeholders in USSD flow segments.
+  /// Resolves USSD flow into dial segments.
+  ///
+  /// Prefers [job.ussdFlow] which is already server-side resolved
+  /// (all placeholders substituted with real values by the backend).
+  /// Falls back to re-resolving the raw [service.ussdFlow] template
+  /// only when the job field is absent.
   static List<String> resolveUssdFlow({
     required ExecutionJob job,
     required ServiceConfig service,
   }) {
-    final amountStr = job.amount.toString();
-    final pin = service.pin;
+    // Use the pre-resolved flow from the job when available.
+    // The server already substituted {recipientNumber}, {amount}, {pin}.
+    final resolvedFlow = (job.ussdFlow != null && job.ussdFlow!.trim().isNotEmpty)
+        ? job.ussdFlow!
+        : _resolveTemplate(service.ussdFlow, job, service);
 
-    return service.ussdFlow.split(',,').map((step) {
-      return step
-          .replaceAll('{target}', job.recipientNumber)
-          .replaceAll('{amount}', amountStr)
-          .replaceAll('{pin}', pin);
-    }).toList();
+    return resolvedFlow.split('-');
   }
 
-  /// Finds an SMS matching the service's confirmation template.
+  /// Fallback: manually substitute placeholders in the raw service template.
+  /// Supports both {recipientNumber} and the legacy {target} alias.
+  static String _resolveTemplate(
+    String template,
+    ExecutionJob job,
+    ServiceConfig service,
+  ) {
+    final amountStr = job.amount.toString();
+    final pin = service.pin;
+    return template
+        .replaceAll('{recipientNumber}', job.recipientNumber)
+        .replaceAll('{target}', job.recipientNumber) // legacy alias
+        .replaceAll('{amount}', amountStr)
+        .replaceAll('{pin}', pin);
+  }
+
+  /// Finds a confirmation SMS using the [successSmsFormat] embedded in the job.
+  /// This is the primary method — all data comes from the job object returned
+  /// by the queue API, which was snapshotted from the service at transaction time.
+  static SmsEntry? pickConfirmationSmsFromJob({
+    required List<SmsEntry> messages,
+    required ExecutionJob job,
+  }) {
+    return _matchSms(
+      messages: messages,
+      template: job.successSmsFormat ?? '',
+      recipientNumber: job.recipientNumber,
+    );
+  }
+
+  /// Legacy: Finds an SMS matching the service's confirmation template.
+  /// Prefer [pickConfirmationSmsFromJob] when the job object is available.
   static SmsEntry? pickConfirmationSms({
     required List<SmsEntry> messages,
     required ExecutionJob job,
     required ServiceConfig service,
   }) {
-    if (messages.isEmpty) return null;
-    final template = service.successSmsFormat;
-    if (template.trim().isEmpty) {
-      return null;
-    }
+    return _matchSms(
+      messages: messages,
+      template: service.successSmsFormat,
+      recipientNumber: job.recipientNumber,
+    );
+  }
 
-    String patternStr = template.replaceAll(RegExp(r'\{[^}]+\}'), r'.*?');
+  /// Shared SMS matching logic. Converts a format template with
+  /// {placeholders} into a regex and scans the message list.
+  static SmsEntry? _matchSms({
+    required List<SmsEntry> messages,
+    required String template,
+    required String recipientNumber,
+  }) {
+    if (messages.isEmpty || template.trim().isEmpty) return null;
+
+    // Build a loose regex: replace any {placeholder} with .*?
+    final patternStr = template.replaceAll(RegExp(r'\{[^}]+\}'), r'.*?');
     try {
       final regex = RegExp(patternStr, caseSensitive: false);
       for (final msg in messages) {
-        if (regex.hasMatch(msg.body)) {
-          return msg;
-        }
+        if (regex.hasMatch(msg.body)) return msg;
       }
     } catch (_) {
+      // Regex failed — fall back to keyword search
       for (final msg in messages) {
-        if (msg.body.toLowerCase().contains('successful') || msg.body.toLowerCase().contains(job.recipientNumber)) {
+        if (msg.body.toLowerCase().contains('successful') ||
+            msg.body.contains(recipientNumber)) {
           return msg;
         }
       }

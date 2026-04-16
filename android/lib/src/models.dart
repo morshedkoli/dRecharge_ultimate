@@ -22,6 +22,8 @@ class ExecutionJob {
     required this.attempt,
     this.ussdFlow,
     this.rawUssdFlow,
+    this.simSlot = 1,
+    this.smsTimeout = 30,
     this.successSmsFormat,
     this.failureSmsFormat,
     this.createdAt,
@@ -37,6 +39,8 @@ class ExecutionJob {
   final int attempt;
   final String? ussdFlow;
   final String? rawUssdFlow;
+  final int simSlot;
+  final int smsTimeout;
   final String? successSmsFormat;
   final String? failureSmsFormat;
   final DateTime? createdAt;
@@ -57,6 +61,12 @@ class ExecutionJob {
           : int.tryParse('${data['attempt']}') ?? 0,
       ussdFlow: data['ussdFlow']?.toString(),
       rawUssdFlow: data['rawUssdFlow']?.toString(),
+      simSlot: data['simSlot'] is int
+          ? data['simSlot'] as int
+          : int.tryParse('${data['simSlot']}') ?? 1,
+      smsTimeout: data['smsTimeout'] is int
+          ? data['smsTimeout'] as int
+          : int.tryParse('${data['smsTimeout']}') ?? 30,
       successSmsFormat: data['successSmsFormat']?.toString(),
       failureSmsFormat: data['failureSmsFormat']?.toString(),
       createdAt: data['createdAt'] != null

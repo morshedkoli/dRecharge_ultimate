@@ -11,6 +11,8 @@ export interface IExecutionJob extends Document<string> {
   amount: number;
   ussdFlow?: string;
   rawUssdFlow?: string;
+  simSlot?: number;
+  smsTimeout?: number;
   successSmsFormat?: string;
   failureSmsFormat?: string;
   status: JobStatus;
@@ -40,6 +42,8 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     amount: { type: Number, required: true },
     ussdFlow: { type: String },
     rawUssdFlow: { type: String },
+    simSlot: { type: Number },
+    smsTimeout: { type: Number },
     successSmsFormat: { type: String },
     failureSmsFormat: { type: String },
     status: {
