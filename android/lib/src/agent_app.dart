@@ -11,6 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'package:device_info_plus/device_info_plus.dart';
+
 import 'backend_service.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -57,8 +59,6 @@ class _AppShellState extends State<_AppShell> {
   final _nativeBridge = NativeBridge();
   final _backendUrlController = TextEditingController();
   final _tokenController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _simProviderController = TextEditingController();
 
   AgentConfig? _config;
   bool _backendConfigured = false;
@@ -88,8 +88,6 @@ class _AppShellState extends State<_AppShell> {
     _heartbeatTimer?.cancel();
     _backendUrlController.dispose();
     _tokenController.dispose();
-    _nameController.dispose();
-    _simProviderController.dispose();
     super.dispose();
   }
 
@@ -114,11 +112,6 @@ class _AppShellState extends State<_AppShell> {
       } else if (savedConfig != null && !authenticated) {
         await BackendService.clearConfig();
       }
-
-      _nameController.text =
-          _config?.name.isNotEmpty == true ? _config!.name : 'Agent Device';
-      _simProviderController.text =
-          _config?.simProvider.isNotEmpty == true ? _config!.simProvider : 'SIM 1';
 
       await _refreshCapabilities();
     } catch (error) {
@@ -169,9 +162,6 @@ class _AppShellState extends State<_AppShell> {
     }
 
     final wasRegistered = _config != null;
-    final preservedName = _nameController.text;
-    final preservedSimProvider = _simProviderController.text;
-
     setState(() {
       _savingBackendUrl = true;
       _lastError = null;
@@ -194,8 +184,6 @@ class _AppShellState extends State<_AppShell> {
 
       if (!mounted) return;
 
-      _nameController.text = preservedName;
-      _simProviderController.text = preservedSimProvider;
       _tokenController.clear();
 
       setState(() {
@@ -218,8 +206,6 @@ class _AppShellState extends State<_AppShell> {
 
   Future<void> _resetBackendUrl() async {
     final wasRegistered = _config != null;
-    final preservedName = _nameController.text;
-    final preservedSimProvider = _simProviderController.text;
     setState(() {
       _savingBackendUrl = true;
       _lastError = null;
@@ -233,8 +219,6 @@ class _AppShellState extends State<_AppShell> {
       }
       if (!mounted) return;
       _backendUrlController.text = BackendService.currentBaseUrl;
-      _nameController.text = preservedName;
-      _simProviderController.text = preservedSimProvider;
       _tokenController.clear();
       setState(() {
         _backendConfigured = false;
@@ -256,12 +240,20 @@ class _AppShellState extends State<_AppShell> {
 
   // ── Registration ─────────────────────────────────────────────────────────
 
+  Future<String> _getDeviceName() async {
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      final androidInfo = await deviceInfo.androidInfo;
+      return '${androidInfo.brand} ${androidInfo.model}'.trim();
+    } catch (_) {
+      return 'Android Device';
+    }
+  }
+
   Future<void> _registerDevice() async {
     if (_registering) return;
-    if (_tokenController.text.trim().isEmpty ||
-        _nameController.text.trim().isEmpty ||
-        _simProviderController.text.trim().isEmpty) {
-      setState(() => _lastError = 'Token, device name, and SIM label are required.');
+    if (_tokenController.text.trim().isEmpty) {
+      setState(() => _lastError = 'Token is required.');
       return;
     }
     setState(() {
@@ -270,16 +262,19 @@ class _AppShellState extends State<_AppShell> {
       _status = 'Registering device';
     });
     try {
+      final deviceName = await _getDeviceName();
+      const simProvider = 'Default';
+
       final deviceId = await BackendService.registerDevice(
         registrationToken: _tokenController.text.trim(),
-        deviceName: _nameController.text.trim(),
-        simProvider: _simProviderController.text.trim(),
+        deviceName: deviceName,
+        simProvider: simProvider,
       );
       if (!mounted) return;
       _config = AgentConfig(
         deviceId: deviceId,
-        name: _nameController.text.trim(),
-        simProvider: _simProviderController.text.trim(),
+        name: deviceName,
+        simProvider: simProvider,
       );
       setState(() {
         _tokenController.clear();
@@ -596,8 +591,6 @@ class _AppShellState extends State<_AppShell> {
       return SetupScreen(
         backendUrlController: _backendUrlController,
         tokenController: _tokenController,
-        nameController: _nameController,
-        simProviderController: _simProviderController,
         saving: _savingBackendUrl,
         registering: _registering,
         phoneGranted: _phonePermissionGranted,
@@ -632,8 +625,6 @@ class _AppShellState extends State<_AppShell> {
             builder: (_) => SettingsPage(
               backendUrlController: _backendUrlController,
               tokenController: _tokenController,
-              nameController: _nameController,
-              simProviderController: _simProviderController,
               config: _config,
               backendConfigured: _backendConfigured,
               saving: _savingBackendUrl,
@@ -669,8 +660,6 @@ class SetupScreen extends StatefulWidget {
     super.key,
     required this.backendUrlController,
     required this.tokenController,
-    required this.nameController,
-    required this.simProviderController,
     required this.saving,
     required this.registering,
     required this.phoneGranted,
@@ -692,8 +681,6 @@ class SetupScreen extends StatefulWidget {
 
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
-  final TextEditingController nameController;
-  final TextEditingController simProviderController;
   final bool saving;
   final bool registering;
   final bool phoneGranted;
@@ -835,8 +822,6 @@ class _SetupScreenState extends State<SetupScreen> {
                   // Step 3: Register
                   _SetupRegisterStep(
                     tokenController: widget.tokenController,
-                    nameController: widget.nameController,
-                    simProviderController: widget.simProviderController,
                     registering: widget.registering,
                     lastError: widget.lastError,
                     onRegister: widget.onRegister,
@@ -1057,8 +1042,6 @@ class _SetupBackendStep extends StatelessWidget {
 class _SetupRegisterStep extends StatelessWidget {
   const _SetupRegisterStep({
     required this.tokenController,
-    required this.nameController,
-    required this.simProviderController,
     required this.registering,
     required this.lastError,
     required this.onRegister,
@@ -1066,8 +1049,6 @@ class _SetupRegisterStep extends StatelessWidget {
   });
 
   final TextEditingController tokenController;
-  final TextEditingController nameController;
-  final TextEditingController simProviderController;
   final bool registering;
   final String? lastError;
   final Future<void> Function() onRegister;
@@ -1106,26 +1087,6 @@ class _SetupRegisterStep extends StatelessWidget {
             ),
             const Expanded(child: Divider()),
           ]),
-          const SizedBox(height: 16),
-          TextField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Device Name',
-              hintText: 'e.g. Agent Phone 1',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.phone_android),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: simProviderController,
-            decoration: const InputDecoration(
-              labelText: 'SIM Label',
-              hintText: 'e.g. SIM 1',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.sim_card),
-            ),
-          ),
           const SizedBox(height: 16),
           TextField(
             controller: tokenController,
@@ -1398,8 +1359,6 @@ class _DeviceInfoCard extends StatelessWidget {
             const SizedBox(height: 12),
             _InfoRow(icon: Icons.phone_android, label: 'Name', value: config.name),
             const SizedBox(height: 8),
-            _InfoRow(icon: Icons.sim_card, label: 'SIM', value: config.simProvider),
-            const SizedBox(height: 8),
             _InfoRow(
               icon: Icons.fingerprint,
               label: 'Device ID',
@@ -1538,8 +1497,6 @@ class SettingsPage extends StatelessWidget {
     super.key,
     required this.backendUrlController,
     required this.tokenController,
-    required this.nameController,
-    required this.simProviderController,
     required this.config,
     required this.backendConfigured,
     required this.saving,
@@ -1559,8 +1516,6 @@ class SettingsPage extends StatelessWidget {
 
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
-  final TextEditingController nameController;
-  final TextEditingController simProviderController;
   final AgentConfig? config;
   final bool backendConfigured;
   final bool saving;
@@ -1771,8 +1726,6 @@ class SettingsPage extends StatelessWidget {
                   children: [
                     _InfoRow(icon: Icons.phone_android, label: 'Name', value: config!.name),
                     const SizedBox(height: 8),
-                    _InfoRow(icon: Icons.sim_card, label: 'SIM', value: config!.simProvider),
-                    const SizedBox(height: 8),
                     _InfoRow(
                       icon: Icons.fingerprint,
                       label: 'ID',
@@ -1825,24 +1778,6 @@ class SettingsPage extends StatelessWidget {
                       const Expanded(child: Divider()),
                     ]),
                     const SizedBox(height: 16),
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Device Name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.phone_android),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: simProviderController,
-                      decoration: const InputDecoration(
-                        labelText: 'SIM Label',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.sim_card),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     TextField(
                       controller: tokenController,
                       minLines: 2,
