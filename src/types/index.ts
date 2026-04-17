@@ -18,7 +18,7 @@ export interface AppUser {
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
 export type TxType = "send" | "topup" | "deduct" | "refund";
-export type TxStatus = "pending" | "processing" | "complete" | "failed";
+export type TxStatus = "pending" | "processing" | "complete" | "failed" | "cancelled";
 
 export interface Transaction {
   id: string;
@@ -52,7 +52,7 @@ export interface BalanceRequest {
 }
 
 // ─── Execution Queue ──────────────────────────────────────────────────────────
-export type JobStatus = "queued" | "processing" | "done" | "failed";
+export type JobStatus = "queued" | "processing" | "done" | "failed" | "cancelled";
 
 export interface ExecutionJob {
   jobId: string;

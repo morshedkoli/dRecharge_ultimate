@@ -1,8 +1,8 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { useAdminStats } from "@/lib/hooks/admin/useAdminStats";
-import { Bell, Menu, ChevronRight } from "lucide-react";
+import { Menu, ChevronRight } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
 
 /* ── Route metadata ─────────────────────────────────────────────────────── */
 const ROUTE_META: Record<string, { title: string; crumb?: string }> = {
@@ -38,10 +38,7 @@ interface AdminTopbarProps {
 export function AdminTopbar({ onMenuClick, collapsed }: AdminTopbarProps) {
   const pathname = usePathname();
   const { user } = useAuth();
-  const { stats } = useAdminStats();
-
   const route = resolveRoute(pathname);
-  const notifCount = (stats.pendingRequests ?? 0) + (stats.jobsInQueue ?? 0);
   const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? "AD";
   const userName = user?.email?.split("@")[0] ?? "Admin";
 
@@ -78,14 +75,7 @@ export function AdminTopbar({ onMenuClick, collapsed }: AdminTopbarProps) {
       <div className="flex items-center gap-2 shrink-0">
 
         {/* Notification bell */}
-        <button className="relative w-9 h-9 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-[#F4F6F5] transition-colors">
-          <Bell className="w-4.5 h-4.5" />
-          {notifCount > 0 && (
-            <span className="absolute top-1.5 right-1.5 min-w-[16px] h-[16px] px-1 bg-red-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums">
-              {notifCount > 99 ? "99+" : notifCount}
-            </span>
-          )}
-        </button>
+        <NotificationBell variant="admin" />
 
         {/* Divider */}
         <div className="h-6 w-px bg-black/[0.06] mx-1" />

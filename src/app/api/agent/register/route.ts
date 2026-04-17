@@ -4,6 +4,7 @@ import AgentDevice from "@/lib/db/models/AgentDevice";
 import AgentRegistrationToken from "@/lib/db/models/AgentRegistrationToken";
 import { signAgentToken } from "@/lib/auth/jwt";
 import { writeLog } from "@/lib/db/audit";
+import { notifyDeviceRegistered } from "@/lib/notifications";
 import { createHash, randomBytes } from "crypto";
 import { nanoid } from "nanoid";
 
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest) {
       entityId: deviceId,
       meta: { deviceId, authUid, authEmail, simProvider, appVersion },
     });
+    await notifyDeviceRegistered(name);
 
     return NextResponse.json({ success: true, deviceId, jwtToken, authUid });
   } catch (err) {

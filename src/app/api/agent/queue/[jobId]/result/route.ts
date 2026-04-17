@@ -6,6 +6,7 @@ import User from "@/lib/db/models/User";
 import Service from "@/lib/db/models/Service";
 import AgentDevice from "@/lib/db/models/AgentDevice";
 import { writeLog } from "@/lib/db/audit";
+import { notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
 import mongoose from "mongoose";
 
@@ -110,6 +111,18 @@ export async function POST(request: NextRequest, { params }: Params) {
       severity: isSuccess ? "info" : "warn",
       meta: { jobId, parsedResult: finalParsedResult },
     });
+
+    // Notify the user — fetch minimal fields outside the transaction
+    try {
+      const tx = await (await import("@/lib/db/models/Transaction")).default.findById(txId).lean();
+      if (tx) {
+        if (isSuccess) {
+          await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");
+        } else {
+          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "");
+        }
+      }
+    } catch { /* non-critical */ }
 
     return NextResponse.json({ success: true });
   } catch (err) {

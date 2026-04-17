@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db/mongoose";
 import AgentDevice from "@/lib/db/models/AgentDevice";
 import { writeLog } from "@/lib/db/audit";
+import { notifyDeviceRevoked } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
 
 type Params = { params: Promise<{ deviceId: string }> };
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       severity: "warn",
       meta: { deviceId, authUid: device.authUid },
     });
+    await notifyDeviceRevoked(device.name);
 
     return NextResponse.json({ success: true });
   });

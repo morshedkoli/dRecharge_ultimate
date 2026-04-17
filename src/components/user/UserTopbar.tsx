@@ -1,6 +1,7 @@
 "use client";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { Menu, Wallet, Bell, Settings } from "lucide-react";
+import { Menu, Wallet, Settings } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
 import { useProfile } from "@/lib/hooks/user/useProfile";
 import { useState } from "react";
 
@@ -37,9 +38,7 @@ export function UserTopbar({ onMenuClick }: { onMenuClick: () => void }) {
         )}
 
         <div className="flex items-center gap-1">
-          <button className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:text-[#134235] hover:bg-white/60 transition-all">
-            <Bell className="w-5 h-5" />
-          </button>
+          <NotificationBell variant="user" />
           <button className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:text-[#134235] hover:bg-white/60 transition-all">
             <Settings className="w-5 h-5" />
           </button>

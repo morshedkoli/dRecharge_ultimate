@@ -15,7 +15,10 @@
       "Bash(git clone *)",
       "Read(//tmp/**)",
       "Bash(flutter devices *)",
-      "Bash(flutter clean *)"
+      "Bash(flutter clean *)",
+      "Bash(flutter --version)",
+      "Bash(flutter pub *)",
+      "Bash(flutter build *)"
     ]
   }
 }

@@ -184,7 +184,9 @@ class _AppShellState extends State<_AppShell> {
 
       if (!mounted) return;
 
-      _tokenController.clear();
+      // Only clear token when re-configuring an already-registered device
+      // (token from old backend is invalid). For fresh setup keep it.
+      if (wasRegistered) _tokenController.clear();
 
       setState(() {
         _backendConfigured = true;
@@ -652,7 +654,7 @@ class _AppShellState extends State<_AppShell> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SetupScreen — first-run wizard (3 steps)
+// SetupScreen — first-run wizard (2 steps)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SetupScreen extends StatefulWidget {
@@ -674,10 +676,9 @@ class SetupScreen extends StatefulWidget {
     required this.backendConfigured,
   });
 
-  // NOTE: When the QR code from the admin panel is scanned, it contains both
-  // the server URL and a registration token. The app will automatically save
-  // the URL and register the device without any manual steps — the user just
-  // needs to scan once and is done.
+  // NOTE: The QR code from the admin panel contains both the server URL and a
+  // registration token. Scanning it once auto-saves the URL and registers the
+  // device — no separate backend step needed.
 
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
@@ -704,12 +705,11 @@ class _SetupScreenState extends State<SetupScreen> {
 
   final List<String> _pageTitles = [
     'Permissions',
-    'Backend Server',
     'Register Device',
   ];
 
   void _goNext() {
-    if (_currentPage < 2) {
+    if (_currentPage < 1) {
       _pageController.nextPage(
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeInOut,
@@ -762,14 +762,14 @@ class _SetupScreenState extends State<SetupScreen> {
                     ],
                   ),
                   const SizedBox(height: 28),
-                  // Step indicator
+                  // Step indicator — 2 steps
                   Row(
-                    children: List.generate(3, (i) {
+                    children: List.generate(2, (i) {
                       final active = i == _currentPage;
                       final done = i < _currentPage;
                       return Expanded(
                         child: Padding(
-                          padding: EdgeInsets.only(right: i < 2 ? 6 : 0),
+                          padding: EdgeInsets.only(right: i < 1 ? 6 : 0),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 250),
                             height: 5,
@@ -784,7 +784,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Step ${_currentPage + 1} of 3 — ${_pageTitles[_currentPage]}',
+                    'Step ${_currentPage + 1} of 2 — ${_pageTitles[_currentPage]}',
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -809,21 +809,15 @@ class _SetupScreenState extends State<SetupScreen> {
                     onOpenAccessibility: widget.onOpenAccessibility,
                     onNext: _goNext,
                   ),
-                  // Step 2: Backend
-                  _SetupBackendStep(
-                    controller: widget.backendUrlController,
-                    saving: widget.saving,
-                    configured: widget.backendConfigured,
-                    lastError: widget.lastError,
-                    onSave: widget.onSaveUrl,
-                    onScanQr: widget.onScanQr,
-                    onNext: _goNext,
-                  ),
-                  // Step 3: Register
+                  // Step 2: Register (one-scan QR does URL + registration)
                   _SetupRegisterStep(
+                    backendUrlController: widget.backendUrlController,
                     tokenController: widget.tokenController,
+                    saving: widget.saving,
                     registering: widget.registering,
+                    backendConfigured: widget.backendConfigured,
                     lastError: widget.lastError,
+                    onSaveUrl: widget.onSaveUrl,
                     onRegister: widget.onRegister,
                     onScanQr: widget.onScanQr,
                   ),
@@ -930,35 +924,44 @@ class _SetupPermissionsStep extends StatelessWidget {
   }
 }
 
-class _SetupBackendStep extends StatelessWidget {
-  const _SetupBackendStep({
-    required this.controller,
+// Merged step: server URL + device registration.
+// Primary path: scan admin QR (contains both URL and token) → one-shot register.
+// Manual fallback: enter server URL then token separately.
+class _SetupRegisterStep extends StatelessWidget {
+  const _SetupRegisterStep({
+    required this.backendUrlController,
+    required this.tokenController,
     required this.saving,
-    required this.configured,
+    required this.registering,
+    required this.backendConfigured,
     required this.lastError,
-    required this.onSave,
+    required this.onSaveUrl,
+    required this.onRegister,
     required this.onScanQr,
-    required this.onNext,
   });
 
-  final TextEditingController controller;
+  final TextEditingController backendUrlController;
+  final TextEditingController tokenController;
   final bool saving;
-  final bool configured;
+  final bool registering;
+  final bool backendConfigured;
   final String? lastError;
-  final Future<void> Function() onSave;
+  final Future<void> Function() onSaveUrl;
+  final Future<void> Function() onRegister;
   final Future<void> Function() onScanQr;
-  final VoidCallback onNext;
+
+  bool get _busy => saving || registering;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 12),
-          Text('Connect to Server',
+          Text('Register Device',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(
@@ -979,7 +982,7 @@ class _SetupBackendStep extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Scanning the admin QR code sets the server URL and registers this device automatically — no manual token entry needed.',
+                    'One scan registers this device automatically — no manual URL or token entry needed.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onPrimaryContainer),
                   ),
                 ),
@@ -987,98 +990,16 @@ class _SetupBackendStep extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          // QR button — primary action
+          // Primary CTA: scan QR → full registration
           FilledButton.icon(
-            onPressed: saving ? null : onScanQr,
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Scan Admin QR Code'),
+            onPressed: _busy ? null : onScanQr,
+            icon: _busy
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.qr_code_scanner),
+            label: Text(_busy ? 'Registering…' : 'Scan QR to Register'),
             style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
-          ),
-          const SizedBox(height: 16),
-          Row(children: [
-            const Expanded(child: Divider()),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text('or enter URL manually', style: TextStyle(color: cs.outline, fontSize: 12)),
-            ),
-            const Expanded(child: Divider()),
-          ]),
-          const SizedBox(height: 16),
-          TextField(
-            controller: controller,
-            keyboardType: TextInputType.url,
-            decoration: InputDecoration(
-              labelText: 'Server URL',
-              hintText: 'https://admin.example.com',
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.link),
-              suffixIcon: configured
-                  ? Icon(Icons.check_circle, color: cs.primary)
-                  : null,
-            ),
-          ),
-          if (lastError != null && !configured) ...[
-            const SizedBox(height: 8),
-            Text(lastError!, style: TextStyle(color: cs.error, fontSize: 12)),
-          ],
-          const Spacer(),
-          OutlinedButton(
-            onPressed: saving
-                ? null
-                : configured
-                    ? onNext
-                    : onSave,
-            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
-            child: saving
-                ? const _LoadingIndicator()
-                : Text(configured ? 'Continue →' : 'Verify & Connect'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SetupRegisterStep extends StatelessWidget {
-  const _SetupRegisterStep({
-    required this.tokenController,
-    required this.registering,
-    required this.lastError,
-    required this.onRegister,
-    required this.onScanQr,
-  });
-
-  final TextEditingController tokenController;
-  final bool registering;
-  final String? lastError;
-  final Future<void> Function() onRegister;
-  final Future<void> Function() onScanQr;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 12),
-          Text('Register Device',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text(
-            'Scan the admin QR code to register instantly, or enter the token manually.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 20),
-          // Primary: scan QR (one-shot registration)
-          FilledButton.icon(
-            onPressed: registering ? null : onScanQr,
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Scan QR to Register'),
-            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
-          ),
-          const SizedBox(height: 16),
           Row(children: [
             const Expanded(child: Divider()),
             Padding(
@@ -1088,6 +1009,22 @@ class _SetupRegisterStep extends StatelessWidget {
             const Expanded(child: Divider()),
           ]),
           const SizedBox(height: 16),
+          // Manual: server URL
+          TextField(
+            controller: backendUrlController,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: 'Server URL',
+              hintText: 'https://admin.example.com',
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.link),
+              suffixIcon: backendConfigured
+                  ? Icon(Icons.check_circle, color: cs.primary)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Manual: registration token
           TextField(
             controller: tokenController,
             minLines: 2,
@@ -1104,13 +1041,18 @@ class _SetupRegisterStep extends StatelessWidget {
             const SizedBox(height: 8),
             Text(lastError!, style: TextStyle(color: cs.error, fontSize: 12)),
           ],
-          const Spacer(),
-          FilledButton(
-            onPressed: registering ? null : onRegister,
-            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
-            child: registering
+          const SizedBox(height: 20),
+          // Manual submit: verify URL then register
+          OutlinedButton(
+            onPressed: _busy
+                ? null
+                : backendConfigured
+                    ? onRegister
+                    : onSaveUrl,
+            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+            child: _busy
                 ? const _LoadingIndicator()
-                : const Text('Register & Start'),
+                : Text(backendConfigured ? 'Register & Start' : 'Verify & Connect'),
           ),
         ],
       ),

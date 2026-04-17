@@ -3,6 +3,7 @@ import connectDB from "@/lib/db/mongoose";
 import BalanceRequest from "@/lib/db/models/BalanceRequest";
 import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
+import { notifyBalanceRequestApproved, notifyBalanceRequestRejected } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
 import mongoose from "mongoose";
 
@@ -46,6 +47,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         await dbSession.endSession();
       }
       await writeLog({ uid: session.sub, action: "BALANCE_REQUEST_APPROVED", entityId: id });
+      // Fetch req for notification (outside transaction — already committed)
+      const approved = await BalanceRequest.findById(id).lean();
+      if (approved) await notifyBalanceRequestApproved(approved.userId, approved.amount);
     } else {
       const req = await BalanceRequest.findById(id);
       if (!req) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -56,6 +60,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       req.processedAt = new Date();
       await req.save();
       await writeLog({ uid: session.sub, action: "BALANCE_REQUEST_REJECTED", entityId: id, meta: { adminNote } });
+      await notifyBalanceRequestRejected(req.userId, req.amount, adminNote);
     }
 
     return NextResponse.json({ success: true });

@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-type Status = "queued" | "processing" | "done" | "failed" | "pending" | "active" | "suspended" | "approved" | "rejected" | "complete";
+type Status = "queued" | "processing" | "done" | "failed" | "cancelled" | "pending" | "active" | "suspended" | "approved" | "rejected" | "complete";
 
 const MAP: Record<Status, { label: string; classes: string; dot?: boolean }> = {
   queued:     { label: "Queued",     classes: "bg-surface-container text-on-surface-variant" },
@@ -8,6 +8,7 @@ const MAP: Record<Status, { label: string; classes: string; dot?: boolean }> = {
   done:       { label: "Done",       classes: "bg-[#E8F1EE] text-primary" },
   complete:   { label: "Complete",   classes: "bg-[#E8F1EE] text-primary" },
   failed:     { label: "Failed",     classes: "bg-red-50 text-red-700" },
+  cancelled:  { label: "Cancelled",  classes: "bg-orange-50 text-orange-700" },
   pending:    { label: "Pending",    classes: "bg-amber-50 text-amber-700" },
   active:     { label: "Active",     classes: "bg-[#E8F1EE] text-primary" },
   suspended:  { label: "Suspended",  classes: "bg-red-50 text-red-700" },

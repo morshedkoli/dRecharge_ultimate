@@ -3,6 +3,12 @@ import connectDB from "@/lib/db/mongoose";
 import User from "@/lib/db/models/User";
 import Transaction from "@/lib/db/models/Transaction";
 import { writeLog } from "@/lib/db/audit";
+import {
+  notifyAccountSuspended,
+  notifyAccountActivated,
+  notifyRoleChanged,
+  notifyWalletCredited,
+} from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
@@ -57,6 +63,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       user.status = "suspended";
       await user.save();
       await writeLog({ uid: session.sub, action: "USER_SUSPENDED", entityId: uid, severity: "warn", meta: { targetUid: uid } });
+      await notifyAccountSuspended(uid);
       return NextResponse.json({ success: true });
     }
 
@@ -64,6 +71,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       user.status = "active";
       await user.save();
       await writeLog({ uid: session.sub, action: "USER_ACTIVATED", entityId: uid, meta: { targetUid: uid } });
+      await notifyAccountActivated(uid);
       return NextResponse.json({ success: true });
     }
 
@@ -75,6 +83,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       user.role = role;
       await user.save();
       await writeLog({ uid: session.sub, action: "ROLE_CHANGED", entityId: uid, severity: "warn", meta: { targetUid: uid, newRole: role } });
+      await notifyRoleChanged(uid, role);
       return NextResponse.json({ success: true });
     }
 
@@ -103,6 +112,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         await dbSession.endSession();
       }
       await writeLog({ uid: session.sub, action: "ADMIN_TOPUP", entityId: uid, meta: { targetUid: uid, amount, note } });
+      await notifyWalletCredited(uid, amount, note);
       return NextResponse.json({ success: true });
     }
 

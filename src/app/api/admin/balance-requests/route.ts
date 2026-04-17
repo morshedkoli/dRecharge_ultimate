@@ -3,6 +3,7 @@ import connectDB from "@/lib/db/mongoose";
 import BalanceRequest from "@/lib/db/models/BalanceRequest";
 import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
+import { notifyBalanceRequestSubmitted } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session";
 import { nanoid } from "nanoid";
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
     });
 
     await writeLog({ uid: session.sub, action: "BALANCE_REQUEST_CREATED", entityId: reqId, meta: { amount, medium, note } });
+    await notifyBalanceRequestSubmitted(session.sub, reqId, amount);
     return NextResponse.json({ success: true, requestId: reqId });
   } catch (err) {
     console.error(err);

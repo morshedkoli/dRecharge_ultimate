@@ -82,6 +82,12 @@ export const simulateJobResult = (jobId: string, txId: string, isSuccess: boolea
     body: JSON.stringify({ txId, isSuccess }),
   });
 
+export const cancelJob = (jobId: string, reason?: string) =>
+  apiFetch(`/api/admin/queue/${jobId}`, {
+    method: "DELETE",
+    body: JSON.stringify({ reason: reason || "Admin cancelled" }),
+  });
+
 // ─── Services ─────────────────────────────────────────────────────────────────
 export const createService = (data: {
   name: string;

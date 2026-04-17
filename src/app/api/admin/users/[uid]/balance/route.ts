@@ -3,6 +3,7 @@ import connectDB from "@/lib/db/mongoose";
 import User from "@/lib/db/models/User";
 import Transaction from "@/lib/db/models/Transaction";
 import { writeLog } from "@/lib/db/audit";
+import { notifyWalletCredited, notifyWalletDebited } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
@@ -62,6 +63,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       severity: isDeduct ? "warn" : "info",
       meta: { targetUid: uid, amount: parsedAmount, note: note || "", type },
     });
+
+    if (isDeduct) {
+      await notifyWalletDebited(uid, parsedAmount, note);
+    } else {
+      await notifyWalletCredited(uid, parsedAmount, note);
+    }
 
     return NextResponse.json({ success: true });
   });
