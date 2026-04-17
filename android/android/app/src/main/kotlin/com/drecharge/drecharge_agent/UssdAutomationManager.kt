@@ -88,6 +88,10 @@ object UssdAutomationManager {
         val activeSession = session ?: return
         if (event == null) return
 
+        // Skip all events while we're mid-step (delay is pending or filling the field).
+        // This prevents duplicate events or a closing dialog from triggering the next step early.
+        if (activeSession.isProcessingStep) return
+
         val root = service.rootInActiveWindow ?: event.source ?: return
 
         // ── SIM picker auto-dismiss (fallback) ───────────────────────────────────────
@@ -128,10 +132,34 @@ object UssdAutomationManager {
             return
         }
 
+        // Valid USSD prompt detected — cancel the running timeout and lock step processing.
+        activeSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        activeSession.isProcessingStep = true
+
         mainHandler.postDelayed(
             {
-                setNodeText(input, nextValue)
-                button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                val s = session
+                if (s == null || s !== activeSession) return@postDelayed
+
+                // Re-fetch nodes: refs captured at event time may be stale after the delay.
+                val freshRoot = service.rootInActiveWindow
+                val freshInput = freshRoot?.let { findFirstNodeByClass(it, "android.widget.EditText") }
+                val freshButton = freshRoot?.let { findActionButton(it) }
+
+                if (freshInput == null || freshButton == null) {
+                    // Prompt disappeared during delay (e.g. USSD self-advanced or network timeout).
+                    activeSession.isProcessingStep = false
+                    activeSession.lastSignature = ""
+                    scheduleTimeout(
+                        "USSD prompt disappeared before input could be filled.",
+                        activeSession.stepTimeoutMs.toLong(),
+                    )
+                    return@postDelayed
+                }
+
+                setNodeText(freshInput, nextValue)
+                freshButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
                 val type = if (nextValue.matches(Regex("^\\d+$")) && nextValue.length <= 2) "select" else "input"
                 recordStep(
                     activeSession,
@@ -140,6 +168,11 @@ object UssdAutomationManager {
                     value = nextValue,
                 )
                 activeSession.nextStepIndex += 1
+                activeSession.isProcessingStep = false
+                // Clear lastSignature so the next prompt is processed even if its text
+                // matches the previous one (e.g. two consecutive "Enter amount" screens).
+                activeSession.lastSignature = ""
+
                 if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
                     mainHandler.postDelayed(
                         { completeSession(success = true, errorMessage = null) },
@@ -229,6 +262,7 @@ object UssdAutomationManager {
     private fun completeSession(success: Boolean, errorMessage: String?) {
         val activeSession = session ?: return
         activeSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        activeSession.isProcessingStep = false
         session = null
 
         if (success) {
@@ -384,4 +418,5 @@ private data class UssdSession(
     var nextStepIndex: Int = 1,
     var lastSignature: String = "",
     var timeoutRunnable: Runnable? = null,
+    var isProcessingStep: Boolean = false,
 )
