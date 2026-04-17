@@ -42,11 +42,13 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   return withAdminSession(request, async () => {
     await connectDB();
-    const devices = await AgentDevice.find().sort({ registeredAt: -1 }).lean();
+    const devices = await AgentDevice.find({ status: { $ne: "revoked" } })
+      .sort({ registeredAt: -1 })
+      .lean();
     const mapped = devices.map(d => ({
       deviceId: d._id,
       name: d.name,
-      status: d.status,
+      status: d.status,          // include DB status so client can preserve "revoked"
       simProvider: d.simProvider,
       authUid: d.authUid,
       authEmail: d.authEmail,

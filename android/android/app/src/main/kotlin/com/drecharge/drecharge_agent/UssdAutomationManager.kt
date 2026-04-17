@@ -266,25 +266,64 @@ object UssdAutomationManager {
         return null
     }
 
+    /**
+     * Finds the "Send" / "OK" action button in a USSD dialog.
+     *
+     * USSD dialogs typically show two buttons: Cancel (left) and Send (right).
+     * Strategy:
+     *  1. Collect every clickable button-like node in the tree.
+     *  2. Prefer one whose text matches positive labels (send, ok, reply, yes).
+     *  3. Explicitly skip negative labels (cancel, dismiss, no, close, back).
+     *  4. Fallback: pick the LAST button — on most Android UIs the positive
+     *     action sits on the right, which is the last child in the layout.
+     */
     private fun findActionButton(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (node == null) {
-            return null
+        if (node == null) return null
+
+        val buttons = mutableListOf<AccessibilityNodeInfo>()
+        collectAllButtons(node, buttons)
+        if (buttons.isEmpty()) return null
+
+        val positiveLabels = setOf("send", "ok", "reply", "yes", "submit", "continue", "next")
+        val negativeLabels = setOf("cancel", "dismiss", "no", "close", "back", "exit")
+
+        // First pass: look for a button with a positive label.
+        for (btn in buttons) {
+            val text = (btn.text?.toString() ?: btn.contentDescription?.toString() ?: "")
+                .trim().lowercase()
+            if (text in positiveLabels) return btn
         }
 
-        val text = node.text?.toString()?.lowercase() ?: ""
-        val clickable = node.isClickable
-        val isButton = node.className?.toString()?.contains("Button") == true
-        if (clickable && (isButton || text in setOf("send", "ok", "reply", "yes"))) {
-            return node
+        // Second pass: filter out negative-labeled buttons, take the last remaining one.
+        val nonNegative = buttons.filter { btn ->
+            val text = (btn.text?.toString() ?: btn.contentDescription?.toString() ?: "")
+                .trim().lowercase()
+            text !in negativeLabels
         }
+        if (nonNegative.isNotEmpty()) return nonNegative.last()
 
-        for (index in 0 until node.childCount) {
-            val match = findActionButton(node.getChild(index))
-            if (match != null) {
-                return match
-            }
+        // Absolute fallback: return the rightmost (last) button.
+        return buttons.last()
+    }
+
+    /**
+     * Collects all clickable Button/TextView nodes from the accessibility tree.
+     * Used by both [findActionButton] and [findSimButton].
+     */
+    private fun collectAllButtons(
+        node: AccessibilityNodeInfo?,
+        result: MutableList<AccessibilityNodeInfo>,
+    ) {
+        if (node == null) return
+        if (node.isClickable &&
+            (node.className?.toString()?.contains("Button") == true ||
+                node.className?.toString()?.contains("TextView") == true)
+        ) {
+            result.add(node)
         }
-        return null
+        for (i in 0 until node.childCount) {
+            collectAllButtons(node.getChild(i), result)
+        }
     }
 
     /**
@@ -299,7 +338,7 @@ object UssdAutomationManager {
     private fun findSimButton(root: AccessibilityNodeInfo, simSlot: Int): AccessibilityNodeInfo? {
         val simIndex = simSlot - 1 // 0-based
         val clickableButtons = mutableListOf<AccessibilityNodeInfo>()
-        collectClickableButtons(root, clickableButtons)
+        collectAllButtons(root, clickableButtons)
 
         if (clickableButtons.isEmpty()) return null
 
@@ -321,22 +360,6 @@ object UssdAutomationManager {
             return clickableButtons[simIndex]
         }
         return null
-    }
-
-    private fun collectClickableButtons(
-        node: AccessibilityNodeInfo?,
-        result: MutableList<AccessibilityNodeInfo>,
-    ) {
-        if (node == null) return
-        if (node.isClickable &&
-            (node.className?.toString()?.contains("Button") == true ||
-                node.className?.toString()?.contains("TextView") == true)
-        ) {
-            result.add(node)
-        }
-        for (i in 0 until node.childCount) {
-            collectClickableButtons(node.getChild(i), result)
-        }
     }
 
     private fun setNodeText(node: AccessibilityNodeInfo, value: String) {

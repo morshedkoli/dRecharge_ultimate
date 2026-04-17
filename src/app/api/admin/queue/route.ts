@@ -11,10 +11,12 @@ import mongoose from "mongoose";
 export async function GET(request: NextRequest) {
   return withAdminSession(request, async () => {
     await connectDB();
-    const jobs = await ExecutionJob.find()
+    const raw = await ExecutionJob.find()
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();
+    // Map _id → jobId so the frontend type matches
+    const jobs = raw.map((j) => ({ ...j, jobId: j._id }));
     return NextResponse.json({ jobs });
   });
 }
