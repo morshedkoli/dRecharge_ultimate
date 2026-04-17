@@ -46,7 +46,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         job.completedAt = new Date();
         await job.save({ session: dbSession });
 
-        tx.status = "cancelled";
+        tx.status = "failed";
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 
