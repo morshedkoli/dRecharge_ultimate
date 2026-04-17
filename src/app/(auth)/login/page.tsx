@@ -242,6 +242,7 @@ function LoginPageContent() {
                   disabled={isAnyLoading}
                   placeholder="you@example.com"
                   className="w-full pl-10 pr-4 py-3 bg-white border border-black/[0.08] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]/30 placeholder:text-on-surface-variant/30 transition-all disabled:opacity-60"
+                  suppressHydrationWarning
                 />
               </div>
             </div>

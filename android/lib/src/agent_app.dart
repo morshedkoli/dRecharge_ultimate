@@ -302,6 +302,11 @@ class _AppShellState extends State<_AppShell> {
 
   // ── QR Scanner ───────────────────────────────────────────────────────────
 
+  /// Scans a QR code produced by the admin panel.
+  ///
+  /// If the QR payload contains both a server URL **and** a registration token
+  /// (i.e. `{"url": "...", "token": "DRA-..."}`) the device is automatically
+  /// registered in one step — no manual token entry required.
   Future<void> _scanQrCode() async {
     final scanned = await Navigator.push<String>(
       context,
@@ -329,8 +334,33 @@ class _AppShellState extends State<_AppShell> {
     if (resolvedToken != null && resolvedToken.isNotEmpty) {
       _tokenController.text = resolvedToken;
     }
+
+    // Save / validate the backend URL first.
     if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
       await _saveBackendUrl();
+    }
+
+    // ── One-scan registration ────────────────────────────────────────────
+    // If the QR also carried a token and the backend URL was accepted,
+    // automatically register the device without any further user input.
+    if (!mounted) return;
+    if (resolvedToken != null &&
+        resolvedToken.isNotEmpty &&
+        _backendConfigured &&
+        _config == null) {
+      // Ensure token controller is populated (may have been cleared by
+      // _saveBackendUrl if backend changed).
+      if (_tokenController.text.trim().isEmpty) {
+        _tokenController.text = resolvedToken;
+      }
+      // Show a brief notice so the user knows registration is happening.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('QR scanned — registering device automatically…'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      await _registerDevice();
     }
   }
 
@@ -655,6 +685,11 @@ class SetupScreen extends StatefulWidget {
     required this.backendConfigured,
   });
 
+  // NOTE: When the QR code from the admin panel is scanned, it contains both
+  // the server URL and a registration token. The app will automatically save
+  // the URL and register the device without any manual steps — the user just
+  // needs to scan once and is done.
+
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
   final TextEditingController nameController;
@@ -805,6 +840,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     registering: widget.registering,
                     lastError: widget.lastError,
                     onRegister: widget.onRegister,
+                    onScanQr: widget.onScanQr,
                   ),
                 ],
               ),
@@ -941,23 +977,44 @@ class _SetupBackendStep extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(
-            'Scan the QR code from the admin panel, or enter the server URL manually.',
+            'Scan the QR code from the admin panel to connect and register in one step.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
-          const SizedBox(height: 28),
-          // QR button
-          OutlinedButton.icon(
+          const SizedBox(height: 16),
+          // One-scan tip
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded, color: cs.primary, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Scanning the admin QR code sets the server URL and registers this device automatically — no manual token entry needed.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onPrimaryContainer),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          // QR button — primary action
+          FilledButton.icon(
             onPressed: saving ? null : onScanQr,
             icon: const Icon(Icons.qr_code_scanner),
             label: const Text('Scan Admin QR Code'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
           ),
           const SizedBox(height: 16),
           Row(children: [
             const Expanded(child: Divider()),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text('or', style: TextStyle(color: cs.outline)),
+              child: Text('or enter URL manually', style: TextStyle(color: cs.outline, fontSize: 12)),
             ),
             const Expanded(child: Divider()),
           ]),
@@ -980,13 +1037,13 @@ class _SetupBackendStep extends StatelessWidget {
             Text(lastError!, style: TextStyle(color: cs.error, fontSize: 12)),
           ],
           const Spacer(),
-          FilledButton(
+          OutlinedButton(
             onPressed: saving
                 ? null
                 : configured
                     ? onNext
                     : onSave,
-            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
             child: saving
                 ? const _LoadingIndicator()
                 : Text(configured ? 'Continue →' : 'Verify & Connect'),
@@ -1005,6 +1062,7 @@ class _SetupRegisterStep extends StatelessWidget {
     required this.registering,
     required this.lastError,
     required this.onRegister,
+    required this.onScanQr,
   });
 
   final TextEditingController tokenController;
@@ -1013,6 +1071,7 @@ class _SetupRegisterStep extends StatelessWidget {
   final bool registering;
   final String? lastError;
   final Future<void> Function() onRegister;
+  final Future<void> Function() onScanQr;
 
   @override
   Widget build(BuildContext context) {
@@ -1027,10 +1086,27 @@ class _SetupRegisterStep extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(
-            'Enter the registration token from the admin panel to link this device.',
+            'Scan the admin QR code to register instantly, or enter the token manually.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
+          // Primary: scan QR (one-shot registration)
+          FilledButton.icon(
+            onPressed: registering ? null : onScanQr,
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('Scan QR to Register'),
+            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+          ),
+          const SizedBox(height: 16),
+          Row(children: [
+            const Expanded(child: Divider()),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text('or enter manually', style: TextStyle(color: cs.outline, fontSize: 12)),
+            ),
+            const Expanded(child: Divider()),
+          ]),
+          const SizedBox(height: 16),
           TextField(
             controller: nameController,
             decoration: const InputDecoration(
@@ -1730,6 +1806,25 @@ class SettingsPage extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
+                    // Primary: scan QR for one-shot registration
+                    FilledButton.icon(
+                      onPressed: registering ? null : onScanQr,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan QR to Register'),
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 48)),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('or enter manually',
+                            style: TextStyle(color: cs.outline, fontSize: 12)),
+                      ),
+                      const Expanded(child: Divider()),
+                    ]),
+                    const SizedBox(height: 16),
                     TextField(
                       controller: nameController,
                       decoration: const InputDecoration(

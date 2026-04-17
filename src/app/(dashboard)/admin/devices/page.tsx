@@ -276,7 +276,8 @@ export default function DevicesPage() {
       <div className="bg-white border border-black/5 rounded-2xl p-8 premium-shadow">
         <h2 className="font-headline text-2xl font-bold text-[#134235] mb-2">Register New Device</h2>
         <p className="text-on-surface-variant mb-6">
-          Install the dRecharge Agent APK on an Android device, then enter the token on first launch.
+          Install the dRecharge Agent APK on an Android device, then scan the QR code below to
+          register instantly — no manual token entry needed.
         </p>
 
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 mb-6 text-sm text-amber-800 font-manrope">
@@ -285,10 +286,10 @@ export default function DevicesPage() {
 
         <ol className="space-y-2.5 text-sm text-on-surface-variant mb-6 list-decimal list-inside">
           <li>Install the dRecharge Agent APK on your Android device</li>
-          <li>Open the app and enter the <span className="font-bold text-on-surface">Base URL</span> shown above</li>
+          <li>Open the app and tap <span className="font-bold text-on-surface">Scan QR Code</span></li>
           <li>Generate a token using the button below</li>
-          <li>Enter the token in the app within 10 minutes</li>
-          <li>The device will appear in the list above once registered to this server</li>
+          <li>Point the camera at the QR code — the app registers automatically</li>
+          <li>The device appears in the list above once registered</li>
         </ol>
 
         {!token ? (
@@ -338,9 +339,9 @@ export default function DevicesPage() {
                   <p className="font-bold font-manrope">How to connect:</p>
                   <ol className="list-decimal list-inside space-y-1 text-[#134235]/80">
                     <li>Open the dRecharge Agent app</li>
-                    <li>Tap <span className="font-bold">Scan QR</span> — camera opens</li>
+                    <li>Tap <span className="font-bold">Scan QR Code</span> (on any setup step)</li>
                     <li>Point at the QR code above</li>
-                    <li>App auto-fills endpoint + token and connects</li>
+                    <li>App auto-fills server URL + token and <strong>registers immediately</strong></li>
                   </ol>
                   <p className="text-xs text-[#134235]/60 pt-1">Or enter the Base URL + token manually if camera unavailable.</p>
                 </div>
