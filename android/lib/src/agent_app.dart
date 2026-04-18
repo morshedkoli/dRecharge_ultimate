@@ -136,10 +136,7 @@ class _AppShellState extends State<_AppShell> {
   }
 
   Future<void> _requestPermissions() async {
-    await <Permission>[
-      Permission.phone,
-      Permission.sms,
-    ].request();
+    await <Permission>[Permission.phone, Permission.sms].request();
     await _refreshCapabilities();
   }
 
@@ -151,7 +148,8 @@ class _AppShellState extends State<_AppShell> {
   Future<void> _saveBackendUrl() async {
     final rawUrl = _backendUrlController.text.trim();
     final parsed = Uri.tryParse(rawUrl);
-    final isValid = parsed != null &&
+    final isValid =
+        parsed != null &&
         parsed.hasScheme &&
         (parsed.scheme == 'http' || parsed.scheme == 'https') &&
         parsed.host.isNotEmpty;
@@ -169,11 +167,14 @@ class _AppShellState extends State<_AppShell> {
 
     try {
       final bootstrap = await BackendService.testBaseUrl(rawUrl);
-      if (bootstrap['success'] != true) throw Exception('Endpoint validation failed.');
+      if (bootstrap['success'] != true)
+        throw Exception('Endpoint validation failed.');
 
       final resolvedBaseUrl = (bootstrap['baseUrl'] as String?)?.trim();
       await BackendService.saveBaseUrl(
-        resolvedBaseUrl != null && resolvedBaseUrl.isNotEmpty ? resolvedBaseUrl : rawUrl,
+        resolvedBaseUrl != null && resolvedBaseUrl.isNotEmpty
+            ? resolvedBaseUrl
+            : rawUrl,
       );
 
       if (wasRegistered) {
@@ -192,9 +193,12 @@ class _AppShellState extends State<_AppShell> {
         _backendConfigured = true;
         _config = null;
         _currentJobId = null;
-        _status = wasRegistered ? 'Backend updated — register again' : 'Endpoint verified';
+        _status = wasRegistered
+            ? 'Backend updated — register again'
+            : 'Endpoint verified';
         if (wasRegistered) {
-          _lastError = 'Backend changed. Re-register this device on the new server.';
+          _lastError =
+              'Backend changed. Re-register this device on the new server.';
         }
       });
       _appendLog('Backend URL set to ${BackendService.currentBaseUrl}.');
@@ -404,8 +408,11 @@ class _AppShellState extends State<_AppShell> {
   Future<void> _runQueueTick() async {
     final config = _config;
     if (config == null || _processing) return;
-    if (!_phonePermissionGranted || !_smsPermissionGranted || !_accessibilityEnabled) {
-      if (mounted) setState(() => _status = 'Waiting for permissions/accessibility');
+    if (!_phonePermissionGranted ||
+        !_smsPermissionGranted ||
+        !_accessibilityEnabled) {
+      if (mounted)
+        setState(() => _status = 'Waiting for permissions/accessibility');
       return;
     }
 
@@ -431,12 +438,25 @@ class _AppShellState extends State<_AppShell> {
         _status = 'Processing ${liveJob.jobId}';
         _lastError = null;
       });
-      _appendLog('Acquired job ${liveJob.jobId} for ${liveJob.recipientNumber}.');
+      _appendLog(
+        'Acquired job ${liveJob.jobId} for ${liveJob.recipientNumber}.',
+      );
       await _sendHeartbeat();
 
       // ── Resolve execution steps ─────────────────────────────────────────────
       // All jobs carry ussdSteps — placeholders already resolved by the server.
-      final steps = BackendService.resolveUssdSteps(job: liveJob);
+      var steps = BackendService.resolveUssdSteps(job: liveJob);
+      if (steps.isEmpty) {
+        final serviceConfig = await BackendService.fetchService(
+          liveJob.serviceId,
+        );
+        if (serviceConfig != null && serviceConfig.ussdSteps.isNotEmpty) {
+          steps = serviceConfig.ussdSteps;
+          _appendLog(
+            'Job ${liveJob.jobId} had no embedded USSD steps; recovered ${steps.length} steps from service ${liveJob.serviceId}.',
+          );
+        }
+      }
       if (steps.isEmpty) {
         await _reportFailure(
           job: liveJob,
@@ -448,9 +468,14 @@ class _AppShellState extends State<_AppShell> {
       }
 
       final stepSummary = steps
-          .map((s) => '${s.order}:${s.type}(${s.value.length > 20 ? '${s.value.substring(0, 20)}…' : s.value})')
+          .map(
+            (s) =>
+                '${s.order}:${s.type}(${s.value.length > 20 ? '${s.value.substring(0, 20)}…' : s.value})',
+          )
           .join(' → ');
-      _appendLog('Executing ${steps.length} steps on SIM ${liveJob.simSlot}: $stepSummary');
+      _appendLog(
+        'Executing ${steps.length} steps on SIM ${liveJob.simSlot}: $stepSummary',
+      );
 
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       List<Map<String, dynamic>> stepsExecuted;
@@ -480,11 +505,13 @@ class _AppShellState extends State<_AppShell> {
       final parsedResult = matchResult.hasMatch
           ? <String, dynamic>{
               'success': matchResult.isSuccess,
-              if (matchResult.failureReason != null) 'reason': matchResult.failureReason,
+              if (matchResult.failureReason != null)
+                'reason': matchResult.failureReason,
             }
           : <String, dynamic>{
               'success': false,
-              'reason': 'No confirmation SMS received within ${liveJob.smsTimeout}s',
+              'reason':
+                  'No confirmation SMS received within ${liveJob.smsTimeout}s',
             };
 
       await BackendService.reportJobResult(
@@ -521,15 +548,17 @@ class _AppShellState extends State<_AppShell> {
         }
         return;
       }
-      if (mounted) setState(() {
-        _lastError = error.toString();
-        _status = 'Error';
-      });
+      if (mounted)
+        setState(() {
+          _lastError = error.toString();
+          _status = 'Error';
+        });
     } finally {
       _processing = false;
       _currentJobId = null;
       await _sendHeartbeat();
-      if (mounted && _status.startsWith('Processing')) setState(() => _status = 'Idle');
+      if (mounted && _status.startsWith('Processing'))
+        setState(() => _status = 'Idle');
     }
   }
 
@@ -541,7 +570,10 @@ class _AppShellState extends State<_AppShell> {
     final timeoutSeconds = job.smsTimeout;
     final deadline = DateTime.now().add(Duration(seconds: timeoutSeconds));
     while (DateTime.now().isBefore(deadline)) {
-      final messages = await _nativeBridge.readRecentSms(sinceMs: sinceMs, maxMessages: 12);
+      final messages = await _nativeBridge.readRecentSms(
+        sinceMs: sinceMs,
+        maxMessages: 12,
+      );
       final matchResult = BackendService.matchIncomingSms(
         messages: messages,
         job: job,
@@ -549,7 +581,11 @@ class _AppShellState extends State<_AppShell> {
       if (matchResult.hasMatch) return matchResult;
       await Future<void>.delayed(const Duration(seconds: 4));
     }
-    return const SmsMatchResult(sms: null, isSuccess: false, failureReason: null);
+    return const SmsMatchResult(
+      sms: null,
+      isSuccess: false,
+      failureReason: null,
+    );
   }
 
   Future<void> _reportFailure({
@@ -595,9 +631,7 @@ class _AppShellState extends State<_AppShell> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     // First-time setup: no backend configured → show setup wizard
@@ -716,10 +750,7 @@ class _SetupScreenState extends State<SetupScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
 
-  final List<String> _pageTitles = [
-    'Permissions',
-    'Register Device',
-  ];
+  final List<String> _pageTitles = ['Permissions', 'Register Device'];
 
   void _goNext() {
     if (_currentPage < 1) {
@@ -754,22 +785,27 @@ class _SetupScreenState extends State<SetupScreen> {
                           color: cs.primaryContainer,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(Icons.bolt_rounded, color: cs.primary, size: 26),
+                        child: Icon(
+                          Icons.bolt_rounded,
+                          color: cs.primary,
+                          size: 26,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('dRecharge Agent',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.bold)),
-                          Text('Device Setup',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: cs.outline)),
+                          Text(
+                            'dRecharge Agent',
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Device Setup',
+                            style: Theme.of(
+                              context,
+                            ).textTheme.bodySmall?.copyWith(color: cs.outline),
+                          ),
                         ],
                       ),
                     ],
@@ -788,7 +824,9 @@ class _SetupScreenState extends State<SetupScreen> {
                             height: 5,
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(4),
-                              color: done || active ? cs.primary : cs.surfaceContainerHighest,
+                              color: done || active
+                                  ? cs.primary
+                                  : cs.surfaceContainerHighest,
                             ),
                           ),
                         ),
@@ -798,10 +836,9 @@ class _SetupScreenState extends State<SetupScreen> {
                   const SizedBox(height: 10),
                   Text(
                     'Step ${_currentPage + 1} of 2 — ${_pageTitles[_currentPage]}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: cs.outline),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: cs.outline),
                   ),
                 ],
               ),
@@ -872,12 +909,18 @@ class _SetupPermissionsStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 12),
-          Text('Required Permissions',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+          Text(
+            'Required Permissions',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           Text(
             'The agent needs these permissions to automatically execute USSD requests.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 28),
           _PermissionTile(
@@ -974,12 +1017,18 @@ class _SetupRegisterStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 12),
-          Text('Register Device',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+          Text(
+            'Register Device',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           Text(
             'Scan the QR code from the admin panel to connect and register in one step.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
           // One-scan tip
@@ -996,7 +1045,9 @@ class _SetupRegisterStep extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'One scan registers this device automatically — no manual URL or token entry needed.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onPrimaryContainer),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onPrimaryContainer,
+                    ),
                   ),
                 ),
               ],
@@ -1007,20 +1058,31 @@ class _SetupRegisterStep extends StatelessWidget {
           FilledButton.icon(
             onPressed: _busy ? null : onScanQr,
             icon: _busy
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.qr_code_scanner),
             label: Text(_busy ? 'Registering…' : 'Scan QR to Register'),
-            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, 52),
+            ),
           ),
           const SizedBox(height: 20),
-          Row(children: [
-            const Expanded(child: Divider()),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text('or enter manually', style: TextStyle(color: cs.outline, fontSize: 12)),
-            ),
-            const Expanded(child: Divider()),
-          ]),
+          Row(
+            children: [
+              const Expanded(child: Divider()),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'or enter manually',
+                  style: TextStyle(color: cs.outline, fontSize: 12),
+                ),
+              ),
+              const Expanded(child: Divider()),
+            ],
+          ),
           const SizedBox(height: 16),
           // Manual: server URL
           TextField(
@@ -1060,12 +1122,16 @@ class _SetupRegisterStep extends StatelessWidget {
             onPressed: _busy
                 ? null
                 : backendConfigured
-                    ? onRegister
-                    : onSaveUrl,
-            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
+                ? onRegister
+                : onSaveUrl,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 52),
+            ),
             child: _busy
                 ? const _LoadingIndicator()
-                : Text(backendConfigured ? 'Register & Start' : 'Verify & Connect'),
+                : Text(
+                    backendConfigured ? 'Register & Start' : 'Verify & Connect',
+                  ),
           ),
         ],
       ),
@@ -1175,7 +1241,10 @@ class HomeScreen extends StatelessWidget {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.play_arrow_rounded),
               label: Text(processing ? 'Processing...' : 'Run Queue Check'),
@@ -1248,7 +1317,9 @@ class _StatusHeroCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   'Status',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(color: cs.outline),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: cs.outline),
                 ),
               ],
             ),
@@ -1256,18 +1327,18 @@ class _StatusHeroCard extends StatelessWidget {
             Text(
               status,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
             ),
             if (currentJobId != null) ...[
               const SizedBox(height: 4),
               Text(
                 'Job: $currentJobId',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      fontFamily: 'monospace',
-                    ),
+                  color: cs.onSurfaceVariant,
+                  fontFamily: 'monospace',
+                ),
               ),
             ],
             if (lastError != null) ...[
@@ -1310,9 +1381,18 @@ class _DeviceInfoCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Device', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: cs.outline)),
+            Text(
+              'Device',
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: cs.outline),
+            ),
             const SizedBox(height: 12),
-            _InfoRow(icon: Icons.phone_android, label: 'Name', value: config.name),
+            _InfoRow(
+              icon: Icons.phone_android,
+              label: 'Name',
+              value: config.name,
+            ),
             const SizedBox(height: 8),
             _InfoRow(
               icon: Icons.fingerprint,
@@ -1349,13 +1429,18 @@ class _InfoRow extends StatelessWidget {
       children: [
         Icon(icon, size: 16, color: cs.outline),
         const SizedBox(width: 8),
-        Text('$label  ', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.outline)),
+        Text(
+          '$label  ',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: cs.outline),
+        ),
         Expanded(
           child: Text(
             value,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontFamily: mono ? 'monospace' : null,
-                ),
+              fontFamily: mono ? 'monospace' : null,
+            ),
             overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -1382,7 +1467,11 @@ class _WarningBanner extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: cs.onErrorContainer, size: 18),
+            Icon(
+              Icons.warning_amber_rounded,
+              color: cs.onErrorContainer,
+              size: 18,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1390,7 +1479,11 @@ class _WarningBanner extends StatelessWidget {
                 style: TextStyle(color: cs.onErrorContainer, fontSize: 13),
               ),
             ),
-            Icon(Icons.arrow_forward_ios_rounded, color: cs.onErrorContainer, size: 14),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: cs.onErrorContainer,
+              size: 14,
+            ),
           ],
         ),
       ),
@@ -1417,22 +1510,32 @@ class _LogCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Activity Log',
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(color: cs.outline)),
+            Text(
+              'Activity Log',
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: cs.outline),
+            ),
             const SizedBox(height: 12),
             if (logs.isEmpty)
-              Text('No events yet.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.outline))
+              Text(
+                'No events yet.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: cs.outline),
+              )
             else
-              ...logs.take(20).map(
+              ...logs
+                  .take(20)
+                  .map(
                     (entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Text(
                         entry,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(fontFamily: 'monospace', fontSize: 11),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
                       ),
                     ),
                   ),
@@ -1493,10 +1596,7 @@ class SettingsPage extends StatelessWidget {
     final registered = config != null;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        elevation: 0,
-      ),
+      appBar: AppBar(title: const Text('Settings'), elevation: 0),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1541,7 +1641,8 @@ class SettingsPage extends StatelessWidget {
                       icon: const Icon(Icons.security),
                       label: const Text('Grant Permissions'),
                       style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 48)),
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
                     ),
                   if (!accessibilityEnabled) ...[
                     const SizedBox(height: 8),
@@ -1550,7 +1651,8 @@ class SettingsPage extends StatelessWidget {
                       icon: const Icon(Icons.accessibility_new),
                       label: const Text('Open Accessibility Settings'),
                       style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 48)),
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
                     ),
                   ],
                 ],
@@ -1581,7 +1683,8 @@ class SettingsPage extends StatelessWidget {
                         Expanded(
                           child: Text(
                             BackendService.currentBaseUrl,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
                                   color: cs.onSurfaceVariant,
                                   fontFamily: 'monospace',
                                 ),
@@ -1601,12 +1704,19 @@ class SettingsPage extends StatelessWidget {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.info_outline, color: cs.onTertiaryContainer, size: 14),
+                          Icon(
+                            Icons.info_outline,
+                            color: cs.onTertiaryContainer,
+                            size: 14,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Changing the backend will unlink this device.',
-                              style: TextStyle(color: cs.onTertiaryContainer, fontSize: 12),
+                              style: TextStyle(
+                                color: cs.onTertiaryContainer,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
                         ],
@@ -1618,7 +1728,8 @@ class SettingsPage extends StatelessWidget {
                     icon: const Icon(Icons.qr_code_scanner),
                     label: const Text('Scan QR from Admin Panel'),
                     style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48)),
+                      minimumSize: const Size(double.infinity, 48),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -1633,8 +1744,10 @@ class SettingsPage extends StatelessWidget {
                   ),
                   if (lastError != null) ...[
                     const SizedBox(height: 8),
-                    Text(lastError!,
-                        style: TextStyle(color: cs.error, fontSize: 12)),
+                    Text(
+                      lastError!,
+                      style: TextStyle(color: cs.error, fontSize: 12),
+                    ),
                   ],
                   const SizedBox(height: 12),
                   Row(
@@ -1645,7 +1758,11 @@ class SettingsPage extends StatelessWidget {
                           onPressed: saving ? null : onSaveUrl,
                           child: saving
                               ? const _LoadingIndicator()
-                              : Text(backendConfigured ? 'Update URL' : 'Verify & Save'),
+                              : Text(
+                                  backendConfigured
+                                      ? 'Update URL'
+                                      : 'Verify & Save',
+                                ),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -1679,7 +1796,11 @@ class SettingsPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _InfoRow(icon: Icons.phone_android, label: 'Name', value: config!.name),
+                    _InfoRow(
+                      icon: Icons.phone_android,
+                      label: 'Name',
+                      value: config!.name,
+                    ),
                     const SizedBox(height: 8),
                     _InfoRow(
                       icon: Icons.fingerprint,
@@ -1720,18 +1841,23 @@ class SettingsPage extends StatelessWidget {
                       icon: const Icon(Icons.qr_code_scanner),
                       label: const Text('Scan QR to Register'),
                       style: FilledButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 48)),
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
                     ),
                     const SizedBox(height: 16),
-                    Row(children: [
-                      const Expanded(child: Divider()),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('or enter manually',
-                            style: TextStyle(color: cs.outline, fontSize: 12)),
-                      ),
-                      const Expanded(child: Divider()),
-                    ]),
+                    Row(
+                      children: [
+                        const Expanded(child: Divider()),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text(
+                            'or enter manually',
+                            style: TextStyle(color: cs.outline, fontSize: 12),
+                          ),
+                        ),
+                        const Expanded(child: Divider()),
+                      ],
+                    ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: tokenController,
@@ -1746,14 +1872,17 @@ class SettingsPage extends StatelessWidget {
                     ),
                     if (lastError != null) ...[
                       const SizedBox(height: 8),
-                      Text(lastError!,
-                          style: TextStyle(color: cs.error, fontSize: 12)),
+                      Text(
+                        lastError!,
+                        style: TextStyle(color: cs.error, fontSize: 12),
+                      ),
                     ],
                     const SizedBox(height: 12),
                     FilledButton(
                       onPressed: registering ? null : onRegister,
                       style: FilledButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 48)),
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
                       child: registering
                           ? const _LoadingIndicator()
                           : const Text('Register Device'),
@@ -1800,9 +1929,9 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              letterSpacing: 1.2,
-              color: Theme.of(context).colorScheme.outline,
-            ),
+          letterSpacing: 1.2,
+          color: Theme.of(context).colorScheme.outline,
+        ),
       ),
     );
   }
@@ -1833,24 +1962,29 @@ class _PermissionTile extends StatelessWidget {
             color: granted ? cs.primaryContainer : cs.errorContainer,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(icon,
-              size: 20, color: granted ? cs.primary : cs.onErrorContainer),
+          child: Icon(
+            icon,
+            size: 20,
+            color: granted ? cs.primary : cs.onErrorContainer,
+          ),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-              Text(subtitle,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant)),
+              Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              Text(
+                subtitle,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
             ],
           ),
         ),
@@ -1940,9 +2074,11 @@ class _QrScanPageState extends State<QrScanPage> {
             child: Text(
               'Point at the QR code on your admin panel',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 14, shadows: [
-                Shadow(color: Colors.black54, blurRadius: 4),
-              ]),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+              ),
             ),
           ),
         ],

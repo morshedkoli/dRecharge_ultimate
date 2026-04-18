@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db/mongoose";
 import ExecutionJob from "@/lib/db/models/ExecutionJob";
+import Service from "@/lib/db/models/Service";
 import { extractAgentSession } from "../_auth";
+import { resolveJobUssdSteps } from "@/lib/ussd";
 
 // GET /api/agent/queue — fetch next queued job
 export async function GET(request: NextRequest) {
@@ -13,10 +15,18 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
     const job = await ExecutionJob.findOne({ status: "queued" })
-      .sort({ createdAt: 1 })
+      .sort({ queuedAt: 1, createdAt: 1 })
       .lean();
 
     if (!job) return NextResponse.json({ job: null });
+
+    const service = await Service.findById(job.serviceId).lean();
+    const ussdSteps = resolveJobUssdSteps({
+      ...(service as { ussdSteps?: unknown; ussdFlow?: unknown; pin?: unknown } | null ?? {}),
+      ussdSteps: job.ussdSteps,
+      recipientNumber: job.recipientNumber,
+      amount: job.amount,
+    });
 
     return NextResponse.json({
       job: {
@@ -26,7 +36,7 @@ export async function GET(request: NextRequest) {
         serviceId: job.serviceId,
         recipientNumber: job.recipientNumber,
         amount: job.amount,
-        ussdSteps: job.ussdSteps,
+        ussdSteps,
         simSlot: job.simSlot ?? 1,
         smsTimeout: job.smsTimeout ?? 30,
         successSmsFormat: job.successSmsFormat,
@@ -34,7 +44,7 @@ export async function GET(request: NextRequest) {
         status: job.status,
         locked: job.locked,
         attempt: job.attempt,
-        createdAt: job.createdAt,
+        createdAt: job.queuedAt ?? job.createdAt,
       },
     });
   } catch (err) {

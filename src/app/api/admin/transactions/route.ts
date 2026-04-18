@@ -7,6 +7,7 @@ import Service from "@/lib/db/models/Service";
 import { writeLog } from "@/lib/db/audit";
 import { getSession } from "@/lib/auth/session";
 import { withAdminSession } from "@/lib/auth/session";
+import { resolveJobUssdSteps } from "@/lib/ussd";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 
@@ -54,19 +55,11 @@ export async function POST(request: NextRequest) {
         txId = "TX_" + nanoid(20);
         jobId = "JOB_" + nanoid(20);
 
-        const pin = service.pin || "";
-
-        // Resolve placeholders in each step's value at transaction time.
-        // "wait" steps carry a millisecond duration — leave their value as-is.
-        const resolvedSteps = (service.ussdSteps || []).map((step) => ({
-          ...step,
-          value: step.type === "wait"
-            ? step.value
-            : step.value
-                .replace(/{recipientNumber}/gi, recipientNumber)
-                .replace(/{amount}/gi, amount.toString())
-                .replace(/{pin}/gi, pin),
-        }));
+        const resolvedSteps = resolveJobUssdSteps({
+          ...(service as { ussdSteps?: unknown; ussdFlow?: unknown; pin?: unknown }),
+          recipientNumber,
+          amount,
+        });
 
         await Transaction.create([{
           _id: txId,

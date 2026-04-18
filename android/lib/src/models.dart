@@ -53,9 +53,9 @@ class UssdStep {
   });
 
   final int order;
-  final String type;   // "dial" | "select" | "input" | "wait"
+  final String type; // "dial" | "select" | "input" | "wait"
   final String label;
-  final String value;  // for "wait" steps this is the ms as a string
+  final String value; // for "wait" steps this is the ms as a string
   final int? waitMs;
 
   factory UssdStep.fromMap(Map<String, dynamic> data) {
@@ -63,7 +63,7 @@ class UssdStep {
       order: data['order'] is int
           ? data['order'] as int
           : int.tryParse('${data['order']}') ?? 0,
-      type:  (data['type']  ?? 'input').toString(),
+      type: (data['type'] ?? 'input').toString(),
       label: (data['label'] ?? '').toString(),
       value: (data['value'] ?? '').toString(),
       waitMs: data['waitMs'] is int
@@ -73,19 +73,90 @@ class UssdStep {
   }
 
   Map<String, dynamic> toMap() => {
-        'order':  order,
-        'type':   type,
-        'label':  label,
-        'value':  value,
-        if (waitMs != null) 'waitMs': waitMs,
-      };
+    'order': order,
+    'type': type,
+    'label': label,
+    'value': value,
+    if (waitMs != null) 'waitMs': waitMs,
+  };
 
-  bool get isDial   => type == 'dial';
+  bool get isDial => type == 'dial';
   bool get isSelect => type == 'select';
-  bool get isInput  => type == 'input';
-  bool get isWait   => type == 'wait';
+  bool get isInput => type == 'input';
+  bool get isWait => type == 'wait';
 
-  int get effectiveWaitMs => isWait ? (waitMs ?? int.tryParse(value) ?? 1000) : 0;
+  int get effectiveWaitMs =>
+      isWait ? (waitMs ?? int.tryParse(value) ?? 1000) : 0;
+}
+
+Map<String, dynamic>? _asStringKeyedMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map((key, entry) => MapEntry(key.toString(), entry));
+  }
+  return null;
+}
+
+List<UssdStep> _parseStructuredSteps(Object? rawSteps) {
+  if (rawSteps is! List || rawSteps.isEmpty) return <UssdStep>[];
+
+  final steps =
+      rawSteps
+          .map(_asStringKeyedMap)
+          .whereType<Map<String, dynamic>>()
+          .map(UssdStep.fromMap)
+          .toList()
+        ..sort((a, b) => a.order.compareTo(b.order));
+
+  return steps;
+}
+
+List<UssdStep> _parseLegacyFlow(Object? rawFlow) {
+  if (rawFlow is! String || rawFlow.trim().isEmpty) return <UssdStep>[];
+
+  final segments = rawFlow
+      .split('-')
+      .map((segment) => segment.trim())
+      .where((segment) => segment.isNotEmpty)
+      .toList();
+
+  if (segments.isEmpty) return <UssdStep>[];
+
+  return List<UssdStep>.generate(segments.length, (index) {
+    final value = segments[index];
+    final isWait =
+        index > 0 &&
+        RegExp(r'^wait[:=]\d+$', caseSensitive: false).hasMatch(value);
+    final type = index == 0
+        ? 'dial'
+        : isWait
+        ? 'wait'
+        : RegExp(r'^\d+$').hasMatch(value)
+        ? 'select'
+        : 'input';
+
+    return UssdStep(
+      order: index + 1,
+      type: type,
+      label: switch (type) {
+        'dial' => 'Dial',
+        'select' => 'Select $index',
+        'wait' => 'Wait $index',
+        _ => 'Input $index',
+      },
+      value: isWait
+          ? value.replaceFirst(RegExp(r'^wait[:=]', caseSensitive: false), '')
+          : value,
+      waitMs: isWait
+          ? int.tryParse(
+              value.replaceFirst(
+                RegExp(r'^wait[:=]', caseSensitive: false),
+                '',
+              ),
+            )
+          : null,
+    );
+  });
 }
 
 // ─── ExecutionJob ─────────────────────────────────────────────────────────────
@@ -130,26 +201,25 @@ class ExecutionJob {
   final DateTime? createdAt;
 
   /// Returns true when this job carries structured step data.
-  bool get hasStructuredSteps =>
-      ussdSteps != null && ussdSteps!.isNotEmpty;
+  bool get hasStructuredSteps => ussdSteps != null && ussdSteps!.isNotEmpty;
 
   factory ExecutionJob.fromMap(Map<String, dynamic> data) {
-    // Parse ussdSteps array
-    List<UssdStep>? steps;
-    final rawSteps = data['ussdSteps'];
-    if (rawSteps is List && rawSteps.isNotEmpty) {
-      steps = rawSteps
-          .whereType<Map<String, dynamic>>()
-          .map(UssdStep.fromMap)
-          .toList()
-        ..sort((a, b) => a.order.compareTo(b.order));
-    }
+    final structuredSteps = _parseStructuredSteps(data['ussdSteps']);
+    final legacySteps = structuredSteps.isEmpty
+        ? _parseLegacyFlow(data['ussdFlow'])
+        : <UssdStep>[];
+    final steps = structuredSteps.isNotEmpty
+        ? structuredSteps
+        : legacySteps.isNotEmpty
+        ? legacySteps
+        : null;
 
     // Parse failureSmsTemplates array
     List<SmsFailureTemplate> failureTemplates = [];
     final rawFailure = data['failureSmsTemplates'];
     if (rawFailure is List && rawFailure.isNotEmpty) {
       failureTemplates = rawFailure
+          .map(_asStringKeyedMap)
           .whereType<Map<String, dynamic>>()
           .map(SmsFailureTemplate.fromMap)
           .toList();
@@ -210,20 +280,16 @@ class ServiceConfig {
   final bool isActive;
 
   factory ServiceConfig.fromMap(Map<String, dynamic> data) {
-    List<UssdStep> steps = [];
-    final rawSteps = data['ussdSteps'];
-    if (rawSteps is List && rawSteps.isNotEmpty) {
-      steps = rawSteps
-          .whereType<Map<String, dynamic>>()
-          .map(UssdStep.fromMap)
-          .toList()
-        ..sort((a, b) => a.order.compareTo(b.order));
-    }
+    final structuredSteps = _parseStructuredSteps(data['ussdSteps']);
+    final steps = structuredSteps.isNotEmpty
+        ? structuredSteps
+        : _parseLegacyFlow(data['ussdFlow']);
 
     List<SmsFailureTemplate> failureTemplates = [];
     final rawFailure = data['failureSmsTemplates'];
     if (rawFailure is List && rawFailure.isNotEmpty) {
       failureTemplates = rawFailure
+          .map(_asStringKeyedMap)
           .whereType<Map<String, dynamic>>()
           .map(SmsFailureTemplate.fromMap)
           .toList();

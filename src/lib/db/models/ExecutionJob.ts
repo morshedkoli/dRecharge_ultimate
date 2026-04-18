@@ -33,6 +33,7 @@ export interface IExecutionJob extends Document<string> {
     reason?: string;
   };
   ussdStepsExecuted?: object[];
+  queuedAt?: Date;
   createdAt: Date;
   completedAt?: Date;
 }

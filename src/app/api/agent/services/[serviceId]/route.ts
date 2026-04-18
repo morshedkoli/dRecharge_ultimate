@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db/mongoose";
 import Service from "@/lib/db/models/Service";
 import { extractAgentSession } from "../../_auth";
+import { getServiceTemplateUssdSteps } from "@/lib/ussd";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       service: {
         id: service._id,
         name: service.name,
-        ussdSteps: service.ussdSteps ?? [],
+        ussdSteps: getServiceTemplateUssdSteps(service as { ussdSteps?: unknown; ussdFlow?: unknown }),
         pin: service.pin,
         simSlot: service.simSlot,
         smsTimeout: service.smsTimeout,

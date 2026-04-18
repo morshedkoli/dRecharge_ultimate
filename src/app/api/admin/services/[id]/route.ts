@@ -3,6 +3,7 @@ import connectDB from "@/lib/db/mongoose";
 import Service from "@/lib/db/models/Service";
 import { writeLog } from "@/lib/db/audit";
 import { withAdminSession } from "@/lib/auth/session";
+import { getServiceTemplateUssdSteps, normalizeStructuredUssdSteps } from "@/lib/ussd";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -13,7 +14,13 @@ export async function GET(request: NextRequest, { params }: Params) {
     await connectDB();
     const service = await Service.findById(id).lean();
     if (!service) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json({ service: { ...service, id: service._id } });
+    return NextResponse.json({
+      service: {
+        ...service,
+        id: service._id,
+        ussdSteps: getServiceTemplateUssdSteps(service as { ussdSteps?: unknown; ussdFlow?: unknown }),
+      },
+    });
   });
 }
 
@@ -37,9 +44,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         description: description || "",
         isActive: isActive !== false,
         categoryId: categoryId || null,
-        ussdSteps: Array.isArray(ussdSteps)
-          ? ussdSteps.map((s, i) => ({ ...s, order: i + 1 }))
-          : [],
+        ussdSteps: normalizeStructuredUssdSteps(ussdSteps),
         pin,
         simSlot,
         successSmsFormat,

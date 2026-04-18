@@ -3,6 +3,7 @@ import connectDB from "@/lib/db/mongoose";
 import Service from "@/lib/db/models/Service";
 import { writeLog } from "@/lib/db/audit";
 import { withAdminSession } from "@/lib/auth/session";
+import { getServiceTemplateUssdSteps, normalizeStructuredUssdSteps } from "@/lib/ussd";
 import { nanoid } from "nanoid";
 
 // GET /api/admin/services
@@ -10,7 +11,11 @@ export async function GET(request: NextRequest) {
   return withAdminSession(request, async () => {
     await connectDB();
     const services = await Service.find().sort({ name: 1 }).lean();
-    const mapped = services.map(s => ({ ...s, id: s._id }));
+    const mapped = services.map((s) => ({
+      ...s,
+      id: s._id,
+      ussdSteps: getServiceTemplateUssdSteps(s as { ussdSteps?: unknown; ussdFlow?: unknown }),
+    }));
     return NextResponse.json({ services: mapped });
   });
 }
@@ -36,7 +41,7 @@ export async function POST(request: NextRequest) {
       description: description || "",
       isActive: isActive !== false,
       categoryId: categoryId || null,
-      ussdSteps: Array.isArray(ussdSteps) ? ussdSteps.map((s: object, i: number) => ({ ...s, order: i + 1 })) : [],
+      ussdSteps: normalizeStructuredUssdSteps(ussdSteps),
       pin: pin || "",
       simSlot: simSlot || 1,
       successSmsFormat: successSmsFormat || "",
