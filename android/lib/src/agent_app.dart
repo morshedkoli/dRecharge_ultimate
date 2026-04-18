@@ -424,29 +424,45 @@ class _AppShellState extends State<_AppShell> {
       _appendLog('Acquired job ${liveJob.jobId} for ${liveJob.recipientNumber}.');
       await _sendHeartbeat();
 
-      // Validate that the job has a ussdFlow to execute.
-      final resolvedFlow = liveJob.ussdFlow?.trim() ?? '';
-      if (resolvedFlow.isEmpty) {
+      // ── Resolve execution steps ─────────────────────────────────────────────
+      // Prefer structured ussdSteps from the job (server already resolved all
+      // placeholders). Fall back to parsing the legacy hyphen-delimited ussdFlow.
+      final steps = BackendService.resolveUssdSteps(job: liveJob);
+      if (steps.isEmpty) {
         await _reportFailure(
           job: liveJob,
-          reason: 'Job has no resolved USSD flow.',
+          reason: 'Job has no USSD steps or flow to execute.',
           stepsExecuted: const <Map<String, dynamic>>[],
           rawSms: '',
         );
         return;
       }
 
-      // Split the pre-resolved flow into dialer steps.
-      final flowSegments = resolvedFlow.split('-');
-      _appendLog('Executing flow: ${flowSegments.join(' -> ')} on SIM ${liveJob.simSlot}');
+      final stepSummary = steps
+          .map((s) => '${s.order}:${s.type}(${s.value.length > 20 ? '${s.value.substring(0, 20)}…' : s.value})')
+          .join(' → ');
+      _appendLog('Executing ${steps.length} steps on SIM ${liveJob.simSlot}: $stepSummary');
 
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       List<Map<String, dynamic>> stepsExecuted;
       try {
-        stepsExecuted = await _nativeBridge.executeUssdFlow(
-          flowSegments: flowSegments,
-          simSlot: liveJob.simSlot,     // from job (snapshotted from service)
-        );
+        if (liveJob.hasStructuredSteps) {
+          // New path: pass typed steps — native layer handles wait/dial/select/input
+          stepsExecuted = await _nativeBridge.executeUssdSteps(
+            steps: steps,
+            simSlot: liveJob.simSlot,
+          );
+        } else {
+          // Legacy fallback: derive string segments from parsed steps
+          final flowSegments = steps
+              .where((s) => !s.isWait)
+              .map((s) => s.value)
+              .toList();
+          stepsExecuted = await _nativeBridge.executeUssdFlow(
+            flowSegments: flowSegments,
+            simSlot: liveJob.simSlot,
+          );
+        }
       } catch (error) {
         await _reportFailure(
           job: liveJob,
@@ -457,35 +473,35 @@ class _AppShellState extends State<_AppShell> {
         return;
       }
 
-      // Wait for SMS confirmation using the job's embedded SMS format & timeout.
-      final matchedSms = await _waitForConfirmationSms(
+      // Wait for SMS confirmation using the job's embedded SMS formats & timeout.
+      final matchResult = await _waitForConfirmationSms(
         sinceMs: startedAtMs,
         job: liveJob,
       );
 
-      final rawSms = matchedSms?.body ?? '';
-      final parsedResult = matchedSms == null
+      final rawSms = matchResult.sms?.body ?? '';
+      final parsedResult = matchResult.hasMatch
           ? <String, dynamic>{
-              'success': false,
-              'reason': 'No confirmation SMS received within ${liveJob.smsTimeout}s',
+              'success': matchResult.isSuccess,
+              if (matchResult.failureReason != null) 'reason': matchResult.failureReason,
             }
           : <String, dynamic>{
               'success': false,
-              'reason': 'SMS captured, awaiting server-side template validation',
+              'reason': 'No confirmation SMS received within ${liveJob.smsTimeout}s',
             };
 
       await BackendService.reportJobResult(
         jobId: liveJob.jobId,
         txId: liveJob.txId,
         rawSms: rawSms,
-        isSuccess: false,
+        isSuccess: matchResult.isSuccess,
         parsedResult: parsedResult,
         ussdStepsExecuted: stepsExecuted,
       );
       _appendLog(
-        matchedSms == null
+        !matchResult.hasMatch
             ? 'Job ${liveJob.jobId} reported without SMS.'
-            : 'Job ${liveJob.jobId} reported with SMS from ${matchedSms.address}.',
+            : 'Job ${liveJob.jobId} reported with SMS: ${matchResult.isSuccess ? 'Success' : 'Failed - ${matchResult.failureReason}'}.',
       );
       if (mounted) setState(() => _status = 'Last job reported');
     } catch (error) {
@@ -520,8 +536,8 @@ class _AppShellState extends State<_AppShell> {
     }
   }
 
-  /// Waits for an SMS confirmation using the job's embedded SMS format and timeout.
-  Future<SmsEntry?> _waitForConfirmationSms({
+  /// Waits for an SMS confirmation using the job's embedded SMS templates and timeout.
+  Future<SmsMatchResult> _waitForConfirmationSms({
     required int sinceMs,
     required ExecutionJob job,
   }) async {
@@ -529,14 +545,14 @@ class _AppShellState extends State<_AppShell> {
     final deadline = DateTime.now().add(Duration(seconds: timeoutSeconds));
     while (DateTime.now().isBefore(deadline)) {
       final messages = await _nativeBridge.readRecentSms(sinceMs: sinceMs, maxMessages: 12);
-      final picked = BackendService.pickConfirmationSmsFromJob(
+      final matchResult = BackendService.matchIncomingSms(
         messages: messages,
         job: job,
       );
-      if (picked != null) return picked;
+      if (matchResult.hasMatch) return matchResult;
       await Future<void>.delayed(const Duration(seconds: 4));
     }
-    return null;
+    return const SmsMatchResult(sms: null, isSuccess: false, failureReason: null);
   }
 
   Future<void> _reportFailure({

@@ -28,8 +28,7 @@ const BalanceRequestSchema = new Schema<IBalanceRequest>(
     processedAt: { type: Date },
   },
   {
-    timestamps: { createdAt: "createdAt", updatedAt: false },
-    _id: false,
+    timestamps: { createdAt: "requestedAt", updatedAt: "updatedAt" },
   }
 );
 

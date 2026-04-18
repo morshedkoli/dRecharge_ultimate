@@ -8,10 +8,21 @@ export interface IService extends Document<string> {
   isActive: boolean;
   categoryId?: string;
   ussdFlow: string;
+  ussdSteps: {
+    order: number;
+    type: "dial" | "select" | "input" | "wait";
+    label: string;
+    value: string;
+    waitMs?: number;
+  }[];
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat: string;
+  failureSmsFormat: string;           // legacy single format (kept for compat)
+  failureSmsTemplates: {              // multi-failure templates (source of truth)
+    template: string;                 // SMS pattern to match
+    message: string;                  // user-facing failure reason
+  }[];
   smsTimeout: number;
   updatedAt: Date;
   updatedBy: string;
@@ -26,16 +37,36 @@ const ServiceSchema = new Schema<IService>(
     isActive: { type: Boolean, default: true },
     categoryId: { type: String, default: null },
     ussdFlow: { type: String, default: "" },
+    ussdSteps: {
+      type: [
+        {
+          order:  { type: Number, required: true },
+          type:   { type: String, enum: ["dial", "select", "input", "wait"], required: true },
+          label:  { type: String, default: "" },
+          value:  { type: String, default: "" },
+          waitMs: { type: Number },
+        },
+      ],
+      default: [],
+    },
     pin: { type: String, default: "" },
     simSlot: { type: Number, default: 1 },
     successSmsFormat: { type: String, default: "" },
     failureSmsFormat: { type: String, default: "" },
+    failureSmsTemplates: {
+      type: [
+        {
+          template: { type: String, default: "" },
+          message:  { type: String, default: "" },
+        },
+      ],
+      default: [],
+    },
     smsTimeout: { type: Number, default: 30 },
     updatedBy: { type: String, required: true },
   },
   {
     timestamps: { createdAt: false, updatedAt: "updatedAt" },
-    _id: false,
   }
 );
 

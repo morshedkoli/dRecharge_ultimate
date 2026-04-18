@@ -30,6 +30,7 @@ export interface Transaction {
   fee: number;
   status: TxStatus;
   note?: string;
+  failureReason?: string;   // user-facing failure reason from matched SMS template
   adminId?: string;
   createdAt: Date | string;
   completedAt?: Date | string;
@@ -61,6 +62,11 @@ export interface ExecutionJob {
   serviceId: string;
   recipientNumber: string;
   amount: number;
+  ussdFlow?: string;           // legacy resolved USSD string
+  ussdSteps?: UssdStep[];      // structured steps with placeholders resolved
+  successSmsFormat?: string;
+  failureSmsFormat?: string;
+  failureSmsTemplates?: SmsFailureTemplate[];
   status: JobStatus;
   locked: boolean;
   lockedAt?: Date | string;
@@ -78,9 +84,26 @@ export interface ExecutionJob {
   completedAt?: Date | string;
 }
 
+// ─── USSD Step (structured flow) ─────────────────────────────────────────────
+export type UssdStepType = "dial" | "select" | "input" | "wait";
+
+export interface UssdStep {
+  order: number;       // 1-indexed execution order
+  type: UssdStepType;
+  label: string;       // human-friendly label shown in admin
+  value: string;       // value/text; may include {recipientNumber}, {amount}, {pin}
+  waitMs?: number;     // only for "wait" steps — milliseconds to pause
+}
+
+// ─── SMS Failure Template ──────────────────────────────────────────────────────
+export interface SmsFailureTemplate {
+  template: string;    // SMS pattern to match (same placeholder syntax as success)
+  message: string;     // user-facing failure reason shown in notification + history
+}
+
 export interface UssdStepResult {
   order: number;
-  type: "dial" | "select" | "input";
+  type: "dial" | "select" | "input" | "wait";
   value: string;
   executedAt: Date | string;
   success: boolean;
@@ -103,11 +126,13 @@ export interface Service {
   description?: string;
   isActive: boolean;
   categoryId?: string;
-  ussdFlow: string;
+  ussdFlow: string;                    // legacy hyphen-delimited string (auto-derived)
+  ussdSteps: UssdStep[];               // structured step array (source of truth)
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat: string;
+  failureSmsFormat: string;            // legacy single pattern (kept for compat)
+  failureSmsTemplates: SmsFailureTemplate[]; // multi-failure templates (source of truth)
   smsTimeout: number;
   updatedAt: Date | string;
   updatedBy: string;

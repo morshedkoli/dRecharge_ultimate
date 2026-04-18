@@ -12,16 +12,38 @@ import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
 
+/** Build a regex from an SMS format template. */
 function buildRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
-  if (!format) return null;
+  if (!format?.trim()) return null;
   let escaped = format.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   escaped = escaped.replace(/ /g, "\\s+");
   escaped = escaped
-    .replace(/\\\{recipientNumber\\\}/g, recipientNumber)
+    .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .replace(/\\\{amount\\\}/g, `(?:${amount}\\.?0*|${amount})`)
     .replace(/\\\{trxId\\\}/g, "(?<trxId>\\w+)")
     .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)");
   try { return new RegExp(escaped, "i"); } catch { return null; }
+}
+
+interface FailureMatch {
+  matched: boolean;
+  message: string;
+}
+
+/** Try to match rawSms against each failure template. Returns first match. */
+function matchFailureTemplates(
+  templates: { template: string; message: string }[],
+  rawSms: string,
+  recipientNumber: string,
+  amount: number,
+): FailureMatch | null {
+  for (const ft of templates) {
+    const regex = buildRegex(ft.template, recipientNumber, amount);
+    if (regex && regex.test(rawSms)) {
+      return { matched: true, message: ft.message };
+    }
+  }
+  return null;
 }
 
 // POST /api/agent/queue/[jobId]/result
@@ -37,8 +59,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     await connectDB();
 
     const dbSession = await mongoose.startSession();
+
+    // The agent now reports the definitive success/failure based on its own SMS matching.
+    // We honour agent's decision but always re-validate server-side for safety.
     let isSuccess = clientResult?.success === true;
-    let finalParsedResult = clientResult || { success: isSuccess };
+    let failureReason: string | undefined = clientResult?.reason;
+    let finalParsedResult = { ...(clientResult || { success: isSuccess }) };
 
     try {
       await dbSession.withTransaction(async () => {
@@ -47,31 +73,65 @@ export async function POST(request: NextRequest, { params }: Params) {
 
         if (!job || !tx) throw new Error("Job or transaction not found");
 
-        // Server-side SMS validation
-        if (rawSms && job.serviceId) {
-          const svc = await Service.findById(job.serviceId).lean();
-          if (svc) {
-            const sRegex = buildRegex(svc.successSmsFormat, job.recipientNumber, job.amount);
-            const fRegex = buildRegex(svc.failureSmsFormat, job.recipientNumber, job.amount);
-            if (sRegex) {
-              const m = rawSms.match(sRegex);
-              if (m) {
-                isSuccess = true;
-                finalParsedResult.success = true;
-                if (m.groups?.trxId) finalParsedResult.txRef = m.groups.trxId;
-              } else if (fRegex && fRegex.test(rawSms)) {
-                isSuccess = false;
-                finalParsedResult.success = false;
-                finalParsedResult.reason = "Matched failure format";
-              } else {
-                isSuccess = false;
-                finalParsedResult.success = false;
-                finalParsedResult.reason = "Unrecognized SMS format";
+        // ── Server-side SMS validation (authoritative) ───────────────────────────
+        if (rawSms?.trim()) {
+          // Get failure templates — prefer job-embedded snapshot, fall back to service
+          let failureTemplates: { template: string; message: string }[] =
+            (job.failureSmsTemplates as { template: string; message: string }[] | undefined) ?? [];
+
+          // If not embedded, fetch from service
+          if (failureTemplates.length === 0) {
+            const svc = await Service.findById(job.serviceId).lean();
+            if (svc?.failureSmsTemplates?.length) {
+              failureTemplates = svc.failureSmsTemplates as { template: string; message: string }[];
+            }
+          }
+
+          const successFormat = (job.successSmsFormat as string | undefined) ?? "";
+
+          // 1. Try success template
+          const sRegex = buildRegex(successFormat, job.recipientNumber, job.amount);
+          const successMatch = sRegex ? rawSms.match(sRegex) : null;
+          if (successMatch) {
+            isSuccess = true;
+            failureReason = undefined;
+            finalParsedResult.success = true;
+            if (successMatch.groups?.trxId) finalParsedResult.txRef = successMatch.groups.trxId;
+            if (successMatch.groups?.balance) finalParsedResult.balance = successMatch.groups.balance;
+          } else {
+            // 2. Try each failure template
+            const failureMatch = matchFailureTemplates(
+              failureTemplates, rawSms, job.recipientNumber, job.amount
+            );
+            if (failureMatch) {
+              isSuccess = false;
+              failureReason = failureMatch.message;
+              finalParsedResult.success = false;
+              finalParsedResult.reason = failureMatch.message;
+            } else if (failureTemplates.length > 0 || successFormat) {
+              // SMS received but didn't match any pattern
+              isSuccess = false;
+              failureReason = "Transaction could not be confirmed — unrecognized SMS received.";
+              finalParsedResult.success = false;
+              finalParsedResult.reason = failureReason;
+            } else {
+              // No templates configured — trust the agent's reported result
+              isSuccess = clientResult?.success === true;
+              if (!isSuccess) {
+                failureReason = clientResult?.reason || "Transaction failed.";
+                finalParsedResult.reason = failureReason;
               }
             }
           }
+        } else if (!rawSms?.trim()) {
+          // No SMS received at all
+          isSuccess = false;
+          failureReason = clientResult?.reason || `No confirmation SMS received within ${job.smsTimeout}s.`;
+          finalParsedResult.success = false;
+          finalParsedResult.reason = failureReason;
         }
 
+        // ── Persist updates ─────────────────────────────────────────────────────
         job.status = isSuccess ? "done" : "failed";
         job.locked = false;
         job.rawSms = rawSms;
@@ -81,10 +141,10 @@ export async function POST(request: NextRequest, { params }: Params) {
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";
+        if (!isSuccess && failureReason) (tx as any).failureReason = failureReason;
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 
-        const userUpdate: Record<string, unknown> = { walletLocked: false };
         if (!isSuccess) {
           await User.findByIdAndUpdate(
             tx.userId,
@@ -109,17 +169,17 @@ export async function POST(request: NextRequest, { params }: Params) {
       action: isSuccess ? "TX_COMPLETED" : "TX_FAILED",
       entityId: txId,
       severity: isSuccess ? "info" : "warn",
-      meta: { jobId, parsedResult: finalParsedResult },
+      meta: { jobId, parsedResult: finalParsedResult, failureReason },
     });
 
-    // Notify the user — fetch minimal fields outside the transaction
+    // Notify the user with the specific failure reason
     try {
-      const tx = await (await import("@/lib/db/models/Transaction")).default.findById(txId).lean();
+      const tx = await Transaction.findById(txId).lean();
       if (tx) {
         if (isSuccess) {
           await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");
         } else {
-          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "");
+          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         }
       }
     } catch { /* non-critical */ }

@@ -17,7 +17,6 @@ const ServiceCategorySchema = new Schema<IServiceCategory>(
   },
   {
     timestamps: { createdAt: "createdAt", updatedAt: false },
-    _id: false,
   }
 );
 

@@ -61,6 +61,17 @@ export async function POST(request: NextRequest) {
           .replace(/{amount}/gi, amount.toString())
           .replace(/{pin}/gi, pin);
 
+        // Resolve placeholders in each step's value
+        const resolvedSteps = (service.ussdSteps || []).map((step) => ({
+          ...step,
+          value: step.type === "wait"
+            ? step.value
+            : step.value
+                .replace(/{recipientNumber}/gi, recipientNumber)
+                .replace(/{amount}/gi, amount.toString())
+                .replace(/{pin}/gi, pin),
+        }));
+
         await Transaction.create([{
           _id: txId,
           userId: uid,
@@ -82,10 +93,12 @@ export async function POST(request: NextRequest) {
           amount,
           ussdFlow: parsedUssdFlow,
           rawUssdFlow: ussdFlowTemplate,
+          ussdSteps: resolvedSteps,
           simSlot: service.simSlot ?? 1,
           smsTimeout: service.smsTimeout ?? 30,
           successSmsFormat: service.successSmsFormat || "",
           failureSmsFormat: service.failureSmsFormat || "",
+          failureSmsTemplates: service.failureSmsTemplates || [],
           status: "queued",
           locked: false,
           attempt: 0,

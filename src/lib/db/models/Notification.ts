@@ -26,7 +26,6 @@ const NotificationSchema = new Schema<INotification>(
   },
   {
     timestamps: { createdAt: "createdAt", updatedAt: false },
-    _id: false,
   }
 );
 

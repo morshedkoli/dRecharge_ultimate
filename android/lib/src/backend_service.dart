@@ -310,27 +310,71 @@ class BackendService {
 
   // ─── Utilities ──────────────────────────────────────────────────────────────
 
-  /// Resolves USSD flow into dial segments.
-  ///
-  /// Prefers [job.ussdFlow] which is already server-side resolved
-  /// (all placeholders substituted with real values by the backend).
-  /// Falls back to re-resolving the raw [service.ussdFlow] template
-  /// only when the job field is absent.
-  static List<String> resolveUssdFlow({
-    required ExecutionJob job,
-    required ServiceConfig service,
-  }) {
-    // Use the pre-resolved flow from the job when available.
-    // The server already substituted {recipientNumber}, {amount}, {pin}.
-    final resolvedFlow = (job.ussdFlow != null && job.ussdFlow!.trim().isNotEmpty)
-        ? job.ussdFlow!
-        : _resolveTemplate(service.ussdFlow, job, service);
+  // ─── USSD Step Resolution ───────────────────────────────────────────────────
 
-    return resolvedFlow.split('-');
+  /// Returns the [UssdStep] list to execute for a job.
+  ///
+  /// Priority:
+  ///   1. [job.ussdSteps] – structured steps set by the server with placeholders
+  ///      already resolved. Always prefer this path.
+  ///   2. [job.ussdFlow]  – legacy hyphen-delimited string already resolved by
+  ///      the server. Parsed into synthetic UssdStep objects.
+  ///   3. [service.ussdFlow] template – last-resort fallback; placeholders are
+  ///      substituted manually before parsing.
+  ///
+  /// Returns an empty list when no USSD data is available.
+  static List<UssdStep> resolveUssdSteps({
+    required ExecutionJob job,
+    ServiceConfig? service,
+  }) {
+    // ── Path 1: structured steps from server ────────────────────────────────
+    if (job.hasStructuredSteps) {
+      return job.ussdSteps!;
+    }
+
+    // ── Path 2: legacy resolved hyphen string from job ───────────────────────
+    final resolvedFlow =
+        (job.ussdFlow != null && job.ussdFlow!.trim().isNotEmpty)
+            ? job.ussdFlow!
+            : null;
+
+    // ── Path 3: fallback to raw service template ─────────────────────────────
+    final flowString = resolvedFlow ??
+        (service != null
+            ? _resolveTemplate(service.ussdFlow, job, service)
+            : null);
+
+    if (flowString == null || flowString.trim().isEmpty) return [];
+
+    return _parseFlowStringToSteps(flowString);
+  }
+
+  /// Parses a legacy hyphen-delimited USSD flow string into [UssdStep] objects.
+  ///
+  /// The first segment that starts with '*' is always tagged as `dial`.
+  /// Segments that are purely numeric (1–2 digits) are tagged as `select`.
+  /// Everything else is `input`.
+  static List<UssdStep> _parseFlowStringToSteps(String flow) {
+    final parts = flow.split('-');
+    return List.generate(parts.length, (i) {
+      final v = parts[i];
+      String type;
+      String label;
+      if (i == 0 && v.startsWith('*')) {
+        type = 'dial';
+        label = 'Dial USSD code';
+      } else if (RegExp(r'^\d{1,2}$').hasMatch(v)) {
+        type = 'select';
+        label = 'Select option';
+      } else {
+        type = 'input';
+        label = 'Enter value';
+      }
+      return UssdStep(order: i + 1, type: type, label: label, value: v);
+    });
   }
 
   /// Fallback: manually substitute placeholders in the raw service template.
-  /// Supports both {recipientNumber} and the legacy {target} alias.
   static String _resolveTemplate(
     String template,
     ExecutionJob job,
@@ -340,7 +384,7 @@ class BackendService {
     final pin = service.pin;
     return template
         .replaceAll('{recipientNumber}', job.recipientNumber)
-        .replaceAll('{target}', job.recipientNumber) // legacy alias
+        .replaceAll('{target}', job.recipientNumber)
         .replaceAll('{amount}', amountStr)
         .replaceAll('{pin}', pin);
   }
@@ -400,4 +444,87 @@ class BackendService {
     }
     return null;
   }
+
+  // ─── Failure SMS Matching ─────────────────────────────────────────────────────
+
+  /// Tries each [SmsFailureTemplate] in order and returns the first match.
+  ///
+  /// Returns null if no failure template matches any message.
+  static ({SmsEntry sms, SmsFailureTemplate template})? matchFailureSms({
+    required List<SmsEntry> messages,
+    required List<SmsFailureTemplate> templates,
+    required String recipientNumber,
+  }) {
+    for (final ft in templates) {
+      if (ft.template.trim().isEmpty) continue;
+      final matched = _matchSms(
+        messages: messages,
+        template: ft.template,
+        recipientNumber: recipientNumber,
+      );
+      if (matched != null) return (sms: matched, template: ft);
+    }
+    return null;
+  }
+
+  /// Convenience: checks success SMS first, then failure templates.
+  ///
+  /// Returns a [SmsMatchResult] with full details about what was found.
+  static SmsMatchResult matchIncomingSms({
+    required List<SmsEntry> messages,
+    required ExecutionJob job,
+  }) {
+    // 1. Check success template
+    final successSms = _matchSms(
+      messages: messages,
+      template: job.successSmsFormat ?? '',
+      recipientNumber: job.recipientNumber,
+    );
+    if (successSms != null) {
+      return SmsMatchResult(
+        sms: successSms,
+        isSuccess: true,
+        failureReason: null,
+      );
+    }
+
+    // 2. Check each failure template
+    final failureMatch = matchFailureSms(
+      messages: messages,
+      templates: job.failureSmsTemplates,
+      recipientNumber: job.recipientNumber,
+    );
+    if (failureMatch != null) {
+      return SmsMatchResult(
+        sms: failureMatch.sms,
+        isSuccess: false,
+        failureReason: failureMatch.template.message,
+      );
+    }
+
+    return SmsMatchResult(sms: null, isSuccess: false, failureReason: null);
+  }
 }
+
+/// Result of matching an incoming SMS against success and failure templates.
+class SmsMatchResult {
+  const SmsMatchResult({
+    required this.sms,
+    required this.isSuccess,
+    required this.failureReason,
+  });
+
+  /// The matched SMS, or null if no template matched.
+  final SmsEntry? sms;
+
+  /// True when the SMS matched the success template.
+  final bool isSuccess;
+
+  /// Admin-configured failure reason when a failure template matched.
+  /// Null when no failure template matched or when [isSuccess] is true.
+  final String? failureReason;
+
+  /// Returns true if any template matched (success or failure).
+  bool get hasMatch => sms != null;
+}
+

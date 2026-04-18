@@ -6,6 +6,14 @@ import { withAdminSession } from "@/lib/auth/session";
 
 type Params = { params: Promise<{ id: string }> };
 
+/** Derive the legacy hyphen-delimited USSD flow string from structured steps */
+function deriveUssdFlow(steps: { type: string; value: string }[]): string {
+  return steps
+    .filter((s) => s.type !== "wait") // wait steps have no dial value
+    .map((s) => s.value)
+    .join("-");
+}
+
 // GET /api/admin/services/[id]
 export async function GET(request: NextRequest, { params }: Params) {
   return withAdminSession(request, async () => {
@@ -22,16 +30,40 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   return withAdminSession(request, async (session) => {
     const { id } = await params;
     const body = await request.json();
-    const { name, icon, description, isActive, categoryId, ussdFlow, pin, simSlot, successSmsFormat, failureSmsFormat, smsTimeout } = body;
+    const {
+      name, icon, description, isActive, categoryId,
+      ussdSteps, pin, simSlot, successSmsFormat,
+      failureSmsFormat, failureSmsTemplates, smsTimeout,
+    } = body;
+
+    // Auto-derive legacy ussdFlow string from structured steps
+    const derivedUssdFlow =
+      Array.isArray(ussdSteps) && ussdSteps.length > 0
+        ? deriveUssdFlow(ussdSteps)
+        : (body.ussdFlow ?? "");
 
     await connectDB();
     const service = await Service.findByIdAndUpdate(
       id,
       {
-        name, icon: icon || "", description: description || "",
+        name,
+        icon: icon || "",
+        description: description || "",
         isActive: isActive !== false,
         categoryId: categoryId || null,
-        ussdFlow, pin, simSlot, successSmsFormat, failureSmsFormat, smsTimeout,
+        ussdFlow: derivedUssdFlow,
+        ussdSteps: Array.isArray(ussdSteps)
+          ? ussdSteps.map((s, i) => ({ ...s, order: i + 1 }))
+          : [],
+        pin,
+        simSlot,
+        successSmsFormat,
+        // Keep legacy single format for old agent fallback (first template's pattern)
+        failureSmsFormat: Array.isArray(failureSmsTemplates) && failureSmsTemplates.length > 0
+          ? failureSmsTemplates[0].template
+          : (failureSmsFormat ?? ""),
+        failureSmsTemplates: Array.isArray(failureSmsTemplates) ? failureSmsTemplates : [],
+        smsTimeout,
         updatedBy: session.sub,
         updatedAt: new Date(),
       },

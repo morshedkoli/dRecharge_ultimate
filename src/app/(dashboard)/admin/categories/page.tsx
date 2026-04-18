@@ -81,8 +81,12 @@ export default function CategoriesPage() {
     let mounted = true;
     fetch("/api/admin/categories")
       .then(r => r.json())
-      .then(d => { if (mounted && d.categories) setCategories(d.categories); })
-      .catch(console.error);
+      .then(d => {
+        if (!mounted) return;
+        if (d.categories) setCategories(d.categories);
+        setLoading(false);
+      })
+      .catch(err => { console.error(err); if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, []);
 

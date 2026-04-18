@@ -13,6 +13,7 @@ export interface ITransaction extends Document<string> {
   fee: number;
   status: TxStatus;
   note?: string;
+  failureReason?: string;   // user-facing failure reason from matched SMS template
   adminId?: string;
   createdAt: Date;
   completedAt?: Date;
@@ -33,12 +34,12 @@ const TransactionSchema = new Schema<ITransaction>(
       default: "pending",
     },
     note: { type: String },
+    failureReason: { type: String },
     adminId: { type: String },
     completedAt: { type: Date },
   },
   {
-    timestamps: { createdAt: "createdAt", updatedAt: false },
-    _id: false,
+    timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" },
   }
 );
 

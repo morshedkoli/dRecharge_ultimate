@@ -1,4 +1,4 @@
-import { UserRole } from "@/types";
+import { UserRole, UssdStep, SmsFailureTemplate } from "@/types";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 async function apiFetch<T = unknown>(
@@ -95,11 +95,13 @@ export const createService = (data: {
   description?: string;
   isActive?: boolean;
   categoryId?: string;
-  ussdFlow: string;
+  ussdFlow?: string;
+  ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat: string;
+  failureSmsFormat?: string;
+  failureSmsTemplates?: SmsFailureTemplate[];
   smsTimeout: number;
 }) =>
   apiFetch<{ success: boolean; serviceId: string }>("/api/admin/services", {
@@ -114,11 +116,13 @@ export const saveService = (data: {
   description?: string;
   isActive?: boolean;
   categoryId?: string;
-  ussdFlow: string;
+  ussdFlow?: string;
+  ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat: string;
+  failureSmsFormat?: string;
+  failureSmsTemplates?: SmsFailureTemplate[];
   smsTimeout: number;
 }) =>
   apiFetch(`/api/admin/services/${data.serviceId}`, {

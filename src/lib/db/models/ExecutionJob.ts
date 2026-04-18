@@ -9,12 +9,20 @@ export interface IExecutionJob extends Document<string> {
   serviceId: string;
   recipientNumber: string;
   amount: number;
-  ussdFlow?: string;
+  ussdFlow?: string;          // legacy hyphen string (backward compat)
+  ussdSteps?: {               // structured steps (source of truth for agent)
+    order: number;
+    type: "dial" | "select" | "input" | "wait";
+    label: string;
+    value: string;
+    waitMs?: number;
+  }[];
   rawUssdFlow?: string;
   simSlot?: number;
   smsTimeout?: number;
   successSmsFormat?: string;
   failureSmsFormat?: string;
+  failureSmsTemplates?: { template: string; message: string }[];
   status: JobStatus;
   locked: boolean;
   lockedAt?: Date;
@@ -41,11 +49,27 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     recipientNumber: { type: String, required: true },
     amount: { type: Number, required: true },
     ussdFlow: { type: String },
+    ussdSteps: {
+      type: [
+        {
+          order:  { type: Number },
+          type:   { type: String },
+          label:  { type: String },
+          value:  { type: String },
+          waitMs: { type: Number },
+        },
+      ],
+      default: undefined,
+    },
     rawUssdFlow: { type: String },
     simSlot: { type: Number },
     smsTimeout: { type: Number },
     successSmsFormat: { type: String },
     failureSmsFormat: { type: String },
+    failureSmsTemplates: {
+      type: [{ template: { type: String }, message: { type: String } }],
+      default: undefined,
+    },
     status: {
       type: String,
       enum: ["queued", "processing", "done", "failed", "cancelled"],
@@ -61,8 +85,7 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     completedAt: { type: Date },
   },
   {
-    timestamps: { createdAt: "createdAt", updatedAt: false },
-    _id: false,
+    timestamps: { createdAt: "queuedAt", updatedAt: "updatedAt" },
   }
 );
 

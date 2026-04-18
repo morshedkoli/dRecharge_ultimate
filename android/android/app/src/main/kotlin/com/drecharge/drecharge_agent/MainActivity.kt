@@ -21,11 +21,49 @@ class MainActivity : FlutterActivity() {
                         UssdAutomationManager.openAccessibilitySettings(this)
                         result.success(null)
                     }
-                    "executeUssdFlow" -> handleExecuteUssdFlow(call, result)
-                    "readRecentSms" -> handleReadRecentSms(call, result)
+                    "executeUssdSteps" -> handleExecuteUssdSteps(call, result)
+                    "executeUssdFlow"  -> handleExecuteUssdFlow(call, result)
+                    "readRecentSms"    -> handleReadRecentSms(call, result)
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun handleExecuteUssdSteps(call: MethodCall, result: MethodChannel.Result) {
+        val rawSteps = call.argument<List<*>>("steps")
+        val simSlot       = call.argument<Int>("simSlot")       ?: 1
+        val perStepDelayMs = call.argument<Int>("perStepDelayMs") ?: 1200
+        val stepTimeoutMs  = call.argument<Int>("stepTimeoutMs")  ?: 15000
+
+        if (rawSteps.isNullOrEmpty()) {
+            result.error("invalid_args", "steps is required and must not be empty", null)
+            return
+        }
+
+        val steps = try {
+            rawSteps.filterIsInstance<Map<*, *>>().map { m ->
+                UssdStep(
+                    order  = (m["order"]  as? Int)   ?: 0,
+                    type   = (m["type"]   as? String) ?: "input",
+                    label  = (m["label"]  as? String) ?: "",
+                    value  = (m["value"]  as? String) ?: "",
+                    waitMs = (m["waitMs"] as? Int),
+                )
+            }
+        } catch (e: Exception) {
+            result.error("invalid_args", "Failed to parse steps: ${e.message}", null)
+            return
+        }
+
+        UssdAutomationManager.executeSteps(
+            activity       = this,
+            steps          = steps,
+            simSlot        = simSlot,
+            perStepDelayMs = perStepDelayMs,
+            stepTimeoutMs  = stepTimeoutMs,
+            result         = result,
+        )
     }
 
     private fun handleExecuteUssdFlow(call: MethodCall, result: MethodChannel.Result) {

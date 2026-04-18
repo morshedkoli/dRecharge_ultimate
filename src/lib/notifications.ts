@@ -107,12 +107,14 @@ export async function notifyTransactionCompleted(userId: string, amount: number,
   });
 }
 
-export async function notifyTransactionFailed(userId: string, amount: number, recipientNumber: string) {
+export async function notifyTransactionFailed(userId: string, amount: number, recipientNumber: string, reason?: string) {
+  const base = `${fmt(amount)} recharge to ${mask(recipientNumber)} failed. Amount has been refunded.`;
+  const body = reason ? `${base} Reason: ${reason}` : base;
   await createNotification({
     recipientUid: userId,
     type: "tx_failed",
     title: "Recharge failed",
-    body: `${fmt(amount)} recharge to ${mask(recipientNumber)} failed. Amount has been refunded.`,
+    body,
     link: "/user/history",
   });
 }

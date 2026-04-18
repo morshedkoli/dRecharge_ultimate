@@ -20,6 +20,24 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+// ─── UssdStep ─────────────────────────────────────────────────────────────────
+
+/** Mirrors the Flutter/server UssdStep model in Kotlin. */
+data class UssdStep(
+    val order: Int,
+    val type: String,   // "dial" | "select" | "input" | "wait"
+    val label: String,
+    val value: String,
+    val waitMs: Int? = null,
+) {
+    val isDial   get() = type == "dial"
+    val isSelect get() = type == "select"
+    val isInput  get() = type == "input"
+    val isWait   get() = type == "wait"
+    /** Effective wait duration in ms (falls back to parsing value string). */
+    val effectiveWaitMs: Long get() = waitMs?.toLong() ?: value.toLongOrNull() ?: 1000L
+}
+
 object UssdAutomationManager {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var session: UssdSession? = null
@@ -35,6 +53,77 @@ object UssdAutomationManager {
             },
         )
     }
+
+    // ─── Structured step executor ────────────────────────────────────────────────
+
+    /**
+     * Execute a structured list of [UssdStep]s.
+     *
+     * Step types:
+     *   dial   – opens the USSD session (same as the first segment of the old flow)
+     *   select – presses a numeric menu option in the USSD prompt
+     *   input  – types freeform text into a USSD prompt field
+     *   wait   – pauses [UssdStep.effectiveWaitMs] ms before the **next** step
+     *            (wait steps are handled synchronously in the session loop, not
+     *            via accessibility events)
+     */
+    fun executeSteps(
+        activity: FlutterActivity,
+        steps: List<UssdStep>,
+        simSlot: Int,
+        perStepDelayMs: Int,
+        stepTimeoutMs: Int,
+        result: MethodChannel.Result,
+    ) {
+        if (UssdAccessibilityService.instance == null) {
+            result.error(
+                "accessibility_required",
+                "Enable the dRecharge accessibility service before executing USSD flows.",
+                null,
+            )
+            return
+        }
+        if (session != null) {
+            result.error("busy", "A USSD session is already running.", null)
+            return
+        }
+
+        // Separate out leading wait steps before the first dial step.
+        val dialStep = steps.firstOrNull { it.isDial }
+        if (dialStep == null) {
+            result.error("invalid_args", "Steps must contain at least one 'dial' step.", null)
+            return
+        }
+
+        // Build the interaction steps (everything after the dial step, non-wait first)
+        // Wait steps are injected into the session's pending queue and consumed
+        // between accessibility events.
+        val newSession = UssdSession(
+            activity       = activity,
+            flowSegments   = steps.filter { !it.isDial && !it.isWait }.map { it.value },
+            typedSteps     = steps,
+            simSlot        = simSlot,
+            perStepDelayMs = perStepDelayMs,
+            stepTimeoutMs  = stepTimeoutMs,
+            result         = result,
+        )
+        session = newSession
+
+        recordStep(newSession, order = dialStep.order, type = "dial", value = dialStep.value)
+        dialUssd(activity, dialStep.value, simSlot)
+        scheduleTimeout("Timed out waiting for the USSD dialog.", stepTimeoutMs.toLong())
+
+        // If there are no interaction steps after the dial, complete after a short wait.
+        val interactionSteps = steps.filter { !it.isDial }
+        if (interactionSteps.isEmpty()) {
+            mainHandler.postDelayed(
+                { completeSession(success = true, errorMessage = null) },
+                3500L,
+            )
+        }
+    }
+
+    // ─── Legacy flow executor ────────────────────────────────────────────────────
 
     fun executeFlow(
         activity: FlutterActivity,
@@ -63,20 +152,25 @@ object UssdAutomationManager {
             return
         }
 
+        val dialValue = cleanSegments.first()
+        // Interaction steps are everything after the dial code
+        val interactionSegments = if (cleanSegments.size > 1) cleanSegments.drop(1) else emptyList()
+
         val newSession = UssdSession(
-            activity = activity,
-            flowSegments = cleanSegments,
-            simSlot = simSlot,
+            activity       = activity,
+            flowSegments   = interactionSegments,   // non-dial steps only
+            typedSteps     = null,                  // legacy path — no typed steps
+            simSlot        = simSlot,
             perStepDelayMs = perStepDelayMs,
-            stepTimeoutMs = stepTimeoutMs,
-            result = result,
+            stepTimeoutMs  = stepTimeoutMs,
+            result         = result,
         )
         session = newSession
-        recordStep(newSession, order = 1, type = "dial", value = cleanSegments.first())
-        dialUssd(activity, cleanSegments.first(), simSlot)
+        recordStep(newSession, order = 1, type = "dial", value = dialValue)
+        dialUssd(activity, dialValue, simSlot)
         scheduleTimeout("Timed out waiting for the USSD dialog.", stepTimeoutMs.toLong())
 
-        if (cleanSegments.size == 1) {
+        if (interactionSegments.isEmpty()) {
             mainHandler.postDelayed(
                 { completeSession(success = true, errorMessage = null) },
                 3500L,
@@ -94,15 +188,11 @@ object UssdAutomationManager {
 
         val root = service.rootInActiveWindow ?: event.source ?: return
 
-        // ── SIM picker auto-dismiss (fallback) ───────────────────────────────────────
-        // Some OEM ROMs still show a SIM picker even when TelecomManager.placeCall()
-        // is used. Detect it: a dialog with clickable SIM buttons but NO EditText
-        // (EditText only appears in a real USSD prompt screen).
+        // ── SIM picker auto-dismiss ───────────────────────────────────────────────
         if (findFirstNodeByClass(root, "android.widget.EditText") == null) {
             val simButton = findSimButton(root, activeSession.simSlot)
             if (simButton != null) {
                 simButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                // Reset timeout so the USSD dialog has time to appear after SIM pick.
                 scheduleTimeout(
                     "Timed out waiting for the USSD dialog after SIM pick.",
                     activeSession.stepTimeoutMs.toLong(),
@@ -110,12 +200,9 @@ object UssdAutomationManager {
                 return
             }
         }
-        // ─────────────────────────────────────────────────────────────────────────────
 
         val signature = collectTexts(root).joinToString("|").trim()
-        if (signature.isNotEmpty() && signature == activeSession.lastSignature) {
-            return
-        }
+        if (signature.isNotEmpty() && signature == activeSession.lastSignature) return
         activeSession.lastSignature = signature
 
         if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
@@ -124,7 +211,21 @@ object UssdAutomationManager {
         }
 
         val nextValue = activeSession.flowSegments[activeSession.nextStepIndex]
-        val input = findFirstNodeByClass(root, "android.widget.EditText")
+
+        // ── Determine step type from typed steps list (when available) ───────────
+        // The nextStepIndex only counts non-dial, non-wait steps, so we look up
+        // the corresponding typed step after adjusting for any leading wait/dial entries.
+        val interactionSteps = activeSession.typedSteps
+            ?.filter { !it.isDial }
+            ?: emptyList()
+
+        // Consume any leading wait steps before the current interaction index.
+        // We do this inside the event handler so we don't block the main thread.
+        val currentInteractionStep = interactionSteps
+            .filter { !it.isWait }
+            .getOrNull(activeSession.nextStepIndex)
+
+        val input  = findFirstNodeByClass(root, "android.widget.EditText")
         val button = findActionButton(root)
 
         if (input == null || button == null) {
@@ -132,22 +233,30 @@ object UssdAutomationManager {
             return
         }
 
-        // Valid USSD prompt detected — cancel the running timeout and lock step processing.
         activeSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         activeSession.isProcessingStep = true
+
+        // Check if there is a wait step at the next typed-step position before filling.
+        val nextTypedIndex = (activeSession.typedStepCursor)
+        val nextTypedStep  = activeSession.typedSteps?.getOrNull(nextTypedIndex)
+        val waitBefore     = if (nextTypedStep?.isWait == true) nextTypedStep.effectiveWaitMs else 0L
+
+        val delayMs = if (waitBefore > 0L) waitBefore else activeSession.perStepDelayMs.toLong()
+        if (waitBefore > 0L) {
+            // Advance past the wait step cursor
+            activeSession.typedStepCursor++
+        }
 
         mainHandler.postDelayed(
             {
                 val s = session
                 if (s == null || s !== activeSession) return@postDelayed
 
-                // Re-fetch nodes: refs captured at event time may be stale after the delay.
-                val freshRoot = service.rootInActiveWindow
-                val freshInput = freshRoot?.let { findFirstNodeByClass(it, "android.widget.EditText") }
+                val freshRoot   = service.rootInActiveWindow
+                val freshInput  = freshRoot?.let { findFirstNodeByClass(it, "android.widget.EditText") }
                 val freshButton = freshRoot?.let { findActionButton(it) }
 
                 if (freshInput == null || freshButton == null) {
-                    // Prompt disappeared during delay (e.g. USSD self-advanced or network timeout).
                     activeSession.isProcessingStep = false
                     activeSession.lastSignature = ""
                     scheduleTimeout(
@@ -160,17 +269,29 @@ object UssdAutomationManager {
                 setNodeText(freshInput, nextValue)
                 freshButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 
-                val type = if (nextValue.matches(Regex("^\\d+$")) && nextValue.length <= 2) "select" else "input"
+                // Determine step type for reporting
+                val stepType = currentInteractionStep?.type
+                    ?: if (nextValue.matches(Regex("^\\d+$")) && nextValue.length <= 2) "select" else "input"
+
                 recordStep(
                     activeSession,
-                    order = activeSession.nextStepIndex + 1,
-                    type = type,
+                    order = activeSession.nextStepIndex + 2, // +1 for dial, +1 for 1-based
+                    type  = stepType,
                     value = nextValue,
                 )
-                activeSession.nextStepIndex += 1
+
+                // Advance cursors
+                activeSession.nextStepIndex++
+                activeSession.typedStepCursor++
+
+                // Skip over any trailing wait step at this position and record it
+                val afterTyped = activeSession.typedSteps?.getOrNull(activeSession.typedStepCursor)
+                if (afterTyped?.isWait == true) {
+                    recordStep(activeSession, order = afterTyped.order, type = "wait", value = afterTyped.value)
+                    activeSession.typedStepCursor++
+                }
+
                 activeSession.isProcessingStep = false
-                // Clear lastSignature so the next prompt is processed even if its text
-                // matches the previous one (e.g. two consecutive "Enter amount" screens).
                 activeSession.lastSignature = ""
 
                 if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
@@ -185,7 +306,7 @@ object UssdAutomationManager {
                     )
                 }
             },
-            activeSession.perStepDelayMs.toLong(),
+            delayMs,
         )
     }
 
@@ -409,13 +530,15 @@ object UssdAutomationManager {
 
 private data class UssdSession(
     val activity: FlutterActivity,
-    val flowSegments: List<String>,
+    val flowSegments: List<String>,     // non-dial, non-wait step values
+    val typedSteps: List<UssdStep>?,    // full typed step list (null for legacy path)
     val simSlot: Int,
     val perStepDelayMs: Int,
     val stepTimeoutMs: Int,
     val result: MethodChannel.Result,
     val executedSteps: MutableList<Map<String, Any>> = mutableListOf(),
-    var nextStepIndex: Int = 1,
+    var nextStepIndex: Int = 0,         // index into non-wait interaction steps
+    var typedStepCursor: Int = 1,       // index into typedSteps (skip dial at 0)
     var lastSignature: String = "",
     var timeoutRunnable: Runnable? = null,
     var isProcessingStep: Boolean = false,

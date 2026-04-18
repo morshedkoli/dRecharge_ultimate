@@ -25,7 +25,6 @@ const AgentRegistrationTokenSchema = new Schema<IAgentRegistrationToken>(
   },
   {
     timestamps: { createdAt: "createdAt", updatedAt: false },
-    _id: false,
   }
 );
 

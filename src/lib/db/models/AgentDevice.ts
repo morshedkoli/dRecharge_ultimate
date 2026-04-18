@@ -40,7 +40,7 @@ const AgentDeviceSchema = new Schema<IAgentDevice>(
     revokedAt: { type: Date },
     revokedBy: { type: String },
   },
-  { _id: false }
+  {}
 );
 
 AgentDeviceSchema.index({ status: 1 });
