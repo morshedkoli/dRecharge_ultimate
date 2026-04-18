@@ -100,13 +100,10 @@ class ExecutionJob {
     required this.status,
     required this.locked,
     required this.attempt,
-    this.ussdFlow,
     this.ussdSteps,
-    this.rawUssdFlow,
     this.simSlot = 1,
     this.smsTimeout = 30,
     this.successSmsFormat,
-    this.failureSmsFormat,
     this.failureSmsTemplates = const [],
     this.createdAt,
   });
@@ -120,21 +117,14 @@ class ExecutionJob {
   final bool locked;
   final int attempt;
 
-  /// Legacy resolved USSD string — still populated for backward compat.
-  final String? ussdFlow;
-
   /// Structured steps with placeholders already resolved by the server.
-  /// This is the preferred execution path.
   final List<UssdStep>? ussdSteps;
 
-  final String? rawUssdFlow;
   final int simSlot;
   final int smsTimeout;
   final String? successSmsFormat;
-  final String? failureSmsFormat;
 
   /// Multi-failure templates: each has a pattern and a user-facing reason.
-  /// Preferred over the single [failureSmsFormat] for failure detection.
   final List<SmsFailureTemplate> failureSmsTemplates;
 
   final DateTime? createdAt;
@@ -144,7 +134,7 @@ class ExecutionJob {
       ussdSteps != null && ussdSteps!.isNotEmpty;
 
   factory ExecutionJob.fromMap(Map<String, dynamic> data) {
-    // Parse ussdSteps array if present
+    // Parse ussdSteps array
     List<UssdStep>? steps;
     final rawSteps = data['ussdSteps'];
     if (rawSteps is List && rawSteps.isNotEmpty) {
@@ -155,7 +145,7 @@ class ExecutionJob {
         ..sort((a, b) => a.order.compareTo(b.order));
     }
 
-    // Parse failureSmsTemplates array if present
+    // Parse failureSmsTemplates array
     List<SmsFailureTemplate> failureTemplates = [];
     final rawFailure = data['failureSmsTemplates'];
     if (rawFailure is List && rawFailure.isNotEmpty) {
@@ -178,9 +168,7 @@ class ExecutionJob {
       attempt: data['attempt'] is int
           ? data['attempt'] as int
           : int.tryParse('${data['attempt']}') ?? 0,
-      ussdFlow: data['ussdFlow']?.toString(),
       ussdSteps: steps,
-      rawUssdFlow: data['rawUssdFlow']?.toString(),
       simSlot: data['simSlot'] is int
           ? data['simSlot'] as int
           : int.tryParse('${data['simSlot']}') ?? 1,
@@ -188,7 +176,6 @@ class ExecutionJob {
           ? data['smsTimeout'] as int
           : int.tryParse('${data['smsTimeout']}') ?? 30,
       successSmsFormat: data['successSmsFormat']?.toString(),
-      failureSmsFormat: data['failureSmsFormat']?.toString(),
       failureSmsTemplates: failureTemplates,
       createdAt: data['createdAt'] != null
           ? DateTime.tryParse(data['createdAt'].toString())
@@ -203,29 +190,27 @@ class ServiceConfig {
   ServiceConfig({
     required this.serviceId,
     required this.name,
-    required this.ussdFlow,
+    required this.ussdSteps,
     required this.pin,
     required this.simSlot,
     required this.smsTimeout,
     required this.successSmsFormat,
-    required this.failureSmsFormat,
+    required this.failureSmsTemplates,
     required this.isActive,
-    this.ussdSteps,
   });
 
   final String serviceId;
   final String name;
-  final String ussdFlow;
-  final List<UssdStep>? ussdSteps;
+  final List<UssdStep> ussdSteps;
   final String pin;
   final int simSlot;
   final int smsTimeout;
   final String successSmsFormat;
-  final String failureSmsFormat;
+  final List<SmsFailureTemplate> failureSmsTemplates;
   final bool isActive;
 
   factory ServiceConfig.fromMap(Map<String, dynamic> data) {
-    List<UssdStep>? steps;
+    List<UssdStep> steps = [];
     final rawSteps = data['ussdSteps'];
     if (rawSteps is List && rawSteps.isNotEmpty) {
       steps = rawSteps
@@ -235,10 +220,18 @@ class ServiceConfig {
         ..sort((a, b) => a.order.compareTo(b.order));
     }
 
+    List<SmsFailureTemplate> failureTemplates = [];
+    final rawFailure = data['failureSmsTemplates'];
+    if (rawFailure is List && rawFailure.isNotEmpty) {
+      failureTemplates = rawFailure
+          .whereType<Map<String, dynamic>>()
+          .map(SmsFailureTemplate.fromMap)
+          .toList();
+    }
+
     return ServiceConfig(
       serviceId: (data['id'] ?? '').toString(),
       name: (data['name'] ?? '').toString(),
-      ussdFlow: (data['ussdFlow'] ?? '').toString(),
       ussdSteps: steps,
       pin: (data['pin'] ?? '').toString(),
       simSlot: data['simSlot'] is int
@@ -248,7 +241,7 @@ class ServiceConfig {
           ? data['smsTimeout'] as int
           : int.tryParse('${data['smsTimeout']}') ?? 30,
       successSmsFormat: (data['successSmsFormat'] ?? '').toString(),
-      failureSmsFormat: (data['failureSmsFormat'] ?? '').toString(),
+      failureSmsTemplates: failureTemplates,
       isActive: data['isActive'] != false,
     );
   }

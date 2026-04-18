@@ -19,7 +19,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withAdminSession(request, async (session) => {
     const body = await request.json();
-    const { name, icon, description, isActive, categoryId, ussdFlow, pin, simSlot, successSmsFormat, failureSmsFormat, smsTimeout } = body;
+    const {
+      name, icon, description, isActive, categoryId,
+      ussdSteps, pin, simSlot, successSmsFormat,
+      failureSmsTemplates, smsTimeout,
+    } = body;
 
     if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
 
@@ -32,11 +36,11 @@ export async function POST(request: NextRequest) {
       description: description || "",
       isActive: isActive !== false,
       categoryId: categoryId || null,
-      ussdFlow: ussdFlow || "",
+      ussdSteps: Array.isArray(ussdSteps) ? ussdSteps.map((s: object, i: number) => ({ ...s, order: i + 1 })) : [],
       pin: pin || "",
       simSlot: simSlot || 1,
       successSmsFormat: successSmsFormat || "",
-      failureSmsFormat: failureSmsFormat || "",
+      failureSmsTemplates: Array.isArray(failureSmsTemplates) ? failureSmsTemplates : [],
       smsTimeout: smsTimeout || 30,
       updatedBy: session.sub,
     });

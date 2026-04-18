@@ -54,14 +54,10 @@ export async function POST(request: NextRequest) {
         txId = "TX_" + nanoid(20);
         jobId = "JOB_" + nanoid(20);
 
-        const ussdFlowTemplate = service.ussdFlow || "";
         const pin = service.pin || "";
-        const parsedUssdFlow = ussdFlowTemplate
-          .replace(/{recipientNumber}/gi, recipientNumber)
-          .replace(/{amount}/gi, amount.toString())
-          .replace(/{pin}/gi, pin);
 
-        // Resolve placeholders in each step's value
+        // Resolve placeholders in each step's value at transaction time.
+        // "wait" steps carry a millisecond duration — leave their value as-is.
         const resolvedSteps = (service.ussdSteps || []).map((step) => ({
           ...step,
           value: step.type === "wait"
@@ -91,13 +87,10 @@ export async function POST(request: NextRequest) {
           serviceId,
           recipientNumber,
           amount,
-          ussdFlow: parsedUssdFlow,
-          rawUssdFlow: ussdFlowTemplate,
           ussdSteps: resolvedSteps,
           simSlot: service.simSlot ?? 1,
           smsTimeout: service.smsTimeout ?? 30,
           successSmsFormat: service.successSmsFormat || "",
-          failureSmsFormat: service.failureSmsFormat || "",
           failureSmsTemplates: service.failureSmsTemplates || [],
           status: "queued",
           locked: false,

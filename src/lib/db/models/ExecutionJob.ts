@@ -9,7 +9,6 @@ export interface IExecutionJob extends Document<string> {
   serviceId: string;
   recipientNumber: string;
   amount: number;
-  ussdFlow?: string;          // legacy hyphen string (backward compat)
   ussdSteps?: {               // structured steps (source of truth for agent)
     order: number;
     type: "dial" | "select" | "input" | "wait";
@@ -17,11 +16,9 @@ export interface IExecutionJob extends Document<string> {
     value: string;
     waitMs?: number;
   }[];
-  rawUssdFlow?: string;
   simSlot?: number;
   smsTimeout?: number;
   successSmsFormat?: string;
-  failureSmsFormat?: string;
   failureSmsTemplates?: { template: string; message: string }[];
   status: JobStatus;
   locked: boolean;
@@ -48,7 +45,6 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     serviceId: { type: String, required: true },
     recipientNumber: { type: String, required: true },
     amount: { type: Number, required: true },
-    ussdFlow: { type: String },
     ussdSteps: {
       type: [
         {
@@ -61,11 +57,9 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
       ],
       default: undefined,
     },
-    rawUssdFlow: { type: String },
     simSlot: { type: Number },
     smsTimeout: { type: Number },
     successSmsFormat: { type: String },
-    failureSmsFormat: { type: String },
     failureSmsTemplates: {
       type: [{ template: { type: String }, message: { type: String } }],
       default: undefined,

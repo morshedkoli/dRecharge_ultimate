@@ -95,12 +95,10 @@ export const createService = (data: {
   description?: string;
   isActive?: boolean;
   categoryId?: string;
-  ussdFlow?: string;
   ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat?: string;
   failureSmsTemplates?: SmsFailureTemplate[];
   smsTimeout: number;
 }) =>
@@ -116,12 +114,10 @@ export const saveService = (data: {
   description?: string;
   isActive?: boolean;
   categoryId?: string;
-  ussdFlow?: string;
   ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat?: string;
   failureSmsTemplates?: SmsFailureTemplate[];
   smsTimeout: number;
 }) =>

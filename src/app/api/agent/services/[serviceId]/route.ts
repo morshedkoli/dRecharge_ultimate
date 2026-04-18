@@ -21,12 +21,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       service: {
         id: service._id,
         name: service.name,
-        ussdFlow: service.ussdFlow,
+        ussdSteps: service.ussdSteps ?? [],
         pin: service.pin,
         simSlot: service.simSlot,
         smsTimeout: service.smsTimeout,
         successSmsFormat: service.successSmsFormat,
-        failureSmsFormat: service.failureSmsFormat,
+        failureSmsTemplates: service.failureSmsTemplates ?? [],
         isActive: service.isActive,
       },
     });

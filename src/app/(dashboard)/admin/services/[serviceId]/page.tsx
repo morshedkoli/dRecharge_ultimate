@@ -341,22 +341,6 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  /** Parse a legacy hyphen-delimited ussdFlow string into UssdStep array */
-  function parseFlowToSteps(flow: string): UssdStep[] {
-    if (!flow) return [];
-    const parts = flow.split("-");
-    return parts.map((value, i) => {
-      let type: UssdStepType = "input";
-      let label = `Step ${i + 1}`;
-      if (i === 0 && value.startsWith("*")) { type = "dial"; label = "Dial USSD code"; }
-      else if (/^\d+$/.test(value) && !value.includes("{")) { type = "select"; label = `Select option`; }
-      else if (value.includes("{pin}")) { type = "input"; label = "Enter PIN"; }
-      else if (value.includes("{amount}")) { type = "input"; label = "Enter amount"; }
-      else if (value.includes("{recipientNumber}")) { type = "input"; label = "Enter recipient"; }
-      return { order: i + 1, type, label, value };
-    });
-  }
-
   useEffect(() => {
     let mounted = true;
     Promise.all([
@@ -373,23 +357,16 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
         setDescription(s.description || "");
         setIsActive(s.isActive ?? true);
         setCategoryId(s.categoryId || "");
-        // Use structured steps if present, otherwise auto-parse legacy flow
-        const steps = s.ussdSteps && s.ussdSteps.length > 0
-          ? s.ussdSteps
-          : parseFlowToSteps(s.ussdFlow || "");
+        // Load structured steps directly
+        const steps = s.ussdSteps && s.ussdSteps.length > 0 ? s.ussdSteps : [];
         setUssdSteps(steps);
         setPin(s.pin || "");
         setSimSlot(s.simSlot || 1);
         setSmsTimeout(s.smsTimeout || 30);
         setSuccessSmsFormat(s.successSmsFormat || "");
-        // Migrate: if failureSmsTemplates exists use it; else wrap legacy string
-        if (s.failureSmsTemplates && s.failureSmsTemplates.length > 0) {
-          setFailureSmsTemplates(s.failureSmsTemplates);
-        } else if (s.failureSmsFormat) {
-          setFailureSmsTemplates([{ template: s.failureSmsFormat, message: "Transaction failed. Your amount has been refunded." }]);
-        } else {
-          setFailureSmsTemplates([]);
-        }
+        setFailureSmsTemplates(s.failureSmsTemplates && s.failureSmsTemplates.length > 0
+          ? s.failureSmsTemplates
+          : []);
       } else {
         setNotFound(true);
       }
@@ -426,7 +403,6 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
       await saveService({
         serviceId, name: name.trim(), icon: icon.trim(), description: description.trim(),
         isActive, categoryId: categoryId || undefined,
-        ussdFlow: "",            // will be derived server-side
         ussdSteps,
         pin: pin.trim(), simSlot,
         successSmsFormat: successSmsFormat.trim(),

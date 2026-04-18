@@ -286,6 +286,16 @@ class _AppShellState extends State<_AppShell> {
       _startLoops();
       await _refreshCapabilities();
       await _sendHeartbeat();
+      if (!mounted) return;
+
+      // SettingsPage is pushed as a separate route with a snapshot of the
+      // current config. After registration succeeds, close that stale route so
+      // the user returns to the refreshed registered state instead of seeing
+      // the old "Register Device" prompt again.
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -412,7 +422,7 @@ class _AppShellState extends State<_AppShell> {
       if (!acquired) return;
 
       // Re-fetch the job after locking to get the freshest state.
-      // All execution parameters (ussdFlow, simSlot, smsTimeout, SMS formats)
+      // All execution parameters (ussdSteps, simSlot, smsTimeout, SMS formats)
       // are embedded in the job — no separate service API call needed.
       final liveJob = await BackendService.fetchJob(job.jobId) ?? job;
       if (!mounted) return;
@@ -425,8 +435,7 @@ class _AppShellState extends State<_AppShell> {
       await _sendHeartbeat();
 
       // ── Resolve execution steps ─────────────────────────────────────────────
-      // Prefer structured ussdSteps from the job (server already resolved all
-      // placeholders). Fall back to parsing the legacy hyphen-delimited ussdFlow.
+      // All jobs carry ussdSteps — placeholders already resolved by the server.
       final steps = BackendService.resolveUssdSteps(job: liveJob);
       if (steps.isEmpty) {
         await _reportFailure(
@@ -446,23 +455,11 @@ class _AppShellState extends State<_AppShell> {
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       List<Map<String, dynamic>> stepsExecuted;
       try {
-        if (liveJob.hasStructuredSteps) {
-          // New path: pass typed steps — native layer handles wait/dial/select/input
-          stepsExecuted = await _nativeBridge.executeUssdSteps(
-            steps: steps,
-            simSlot: liveJob.simSlot,
-          );
-        } else {
-          // Legacy fallback: derive string segments from parsed steps
-          final flowSegments = steps
-              .where((s) => !s.isWait)
-              .map((s) => s.value)
-              .toList();
-          stepsExecuted = await _nativeBridge.executeUssdFlow(
-            flowSegments: flowSegments,
-            simSlot: liveJob.simSlot,
-          );
-        }
+        // All jobs use structured steps — execute via typed step list.
+        stepsExecuted = await _nativeBridge.executeUssdSteps(
+          steps: steps,
+          simSlot: liveJob.simSlot,
+        );
       } catch (error) {
         await _reportFailure(
           job: liveJob,

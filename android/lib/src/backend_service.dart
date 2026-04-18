@@ -308,114 +308,19 @@ class BackendService {
     throw Exception(error.toString());
   }
 
-  // ─── Utilities ──────────────────────────────────────────────────────────────
-
   // ─── USSD Step Resolution ───────────────────────────────────────────────────
 
   /// Returns the [UssdStep] list to execute for a job.
   ///
-  /// Priority:
-  ///   1. [job.ussdSteps] – structured steps set by the server with placeholders
-  ///      already resolved. Always prefer this path.
-  ///   2. [job.ussdFlow]  – legacy hyphen-delimited string already resolved by
-  ///      the server. Parsed into synthetic UssdStep objects.
-  ///   3. [service.ussdFlow] template – last-resort fallback; placeholders are
-  ///      substituted manually before parsing.
+  /// The job's [ussdSteps] list — set by the server with all placeholders
+  /// already resolved — is the only supported execution path.
   ///
-  /// Returns an empty list when no USSD data is available.
-  static List<UssdStep> resolveUssdSteps({
-    required ExecutionJob job,
-    ServiceConfig? service,
-  }) {
-    // ── Path 1: structured steps from server ────────────────────────────────
-    if (job.hasStructuredSteps) {
-      return job.ussdSteps!;
-    }
-
-    // ── Path 2: legacy resolved hyphen string from job ───────────────────────
-    final resolvedFlow =
-        (job.ussdFlow != null && job.ussdFlow!.trim().isNotEmpty)
-            ? job.ussdFlow!
-            : null;
-
-    // ── Path 3: fallback to raw service template ─────────────────────────────
-    final flowString = resolvedFlow ??
-        (service != null
-            ? _resolveTemplate(service.ussdFlow, job, service)
-            : null);
-
-    if (flowString == null || flowString.trim().isEmpty) return [];
-
-    return _parseFlowStringToSteps(flowString);
+  /// Returns an empty list when the job has no steps.
+  static List<UssdStep> resolveUssdSteps({required ExecutionJob job}) {
+    return job.ussdSteps ?? [];
   }
 
-  /// Parses a legacy hyphen-delimited USSD flow string into [UssdStep] objects.
-  ///
-  /// The first segment that starts with '*' is always tagged as `dial`.
-  /// Segments that are purely numeric (1–2 digits) are tagged as `select`.
-  /// Everything else is `input`.
-  static List<UssdStep> _parseFlowStringToSteps(String flow) {
-    final parts = flow.split('-');
-    return List.generate(parts.length, (i) {
-      final v = parts[i];
-      String type;
-      String label;
-      if (i == 0 && v.startsWith('*')) {
-        type = 'dial';
-        label = 'Dial USSD code';
-      } else if (RegExp(r'^\d{1,2}$').hasMatch(v)) {
-        type = 'select';
-        label = 'Select option';
-      } else {
-        type = 'input';
-        label = 'Enter value';
-      }
-      return UssdStep(order: i + 1, type: type, label: label, value: v);
-    });
-  }
-
-  /// Fallback: manually substitute placeholders in the raw service template.
-  static String _resolveTemplate(
-    String template,
-    ExecutionJob job,
-    ServiceConfig service,
-  ) {
-    final amountStr = job.amount.toString();
-    final pin = service.pin;
-    return template
-        .replaceAll('{recipientNumber}', job.recipientNumber)
-        .replaceAll('{target}', job.recipientNumber)
-        .replaceAll('{amount}', amountStr)
-        .replaceAll('{pin}', pin);
-  }
-
-  /// Finds a confirmation SMS using the [successSmsFormat] embedded in the job.
-  /// This is the primary method — all data comes from the job object returned
-  /// by the queue API, which was snapshotted from the service at transaction time.
-  static SmsEntry? pickConfirmationSmsFromJob({
-    required List<SmsEntry> messages,
-    required ExecutionJob job,
-  }) {
-    return _matchSms(
-      messages: messages,
-      template: job.successSmsFormat ?? '',
-      recipientNumber: job.recipientNumber,
-    );
-  }
-
-  /// Legacy: Finds an SMS matching the service's confirmation template.
-  /// Prefer [pickConfirmationSmsFromJob] when the job object is available.
-  static SmsEntry? pickConfirmationSms({
-    required List<SmsEntry> messages,
-    required ExecutionJob job,
-    required ServiceConfig service,
-  }) {
-    return _matchSms(
-      messages: messages,
-      template: service.successSmsFormat,
-      recipientNumber: job.recipientNumber,
-    );
-  }
+  // ─── SMS Matching ─────────────────────────────────────────────────────────
 
   /// Shared SMS matching logic. Converts a format template with
   /// {placeholders} into a regex and scans the message list.
@@ -445,7 +350,7 @@ class BackendService {
     return null;
   }
 
-  // ─── Failure SMS Matching ─────────────────────────────────────────────────────
+  // ─── Failure SMS Matching ─────────────────────────────────────────────────
 
   /// Tries each [SmsFailureTemplate] in order and returns the first match.
   ///
@@ -527,4 +432,3 @@ class SmsMatchResult {
   /// Returns true if any template matched (success or failure).
   bool get hasMatch => sms != null;
 }
-

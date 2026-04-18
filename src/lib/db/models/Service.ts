@@ -7,7 +7,6 @@ export interface IService extends Document<string> {
   description?: string;
   isActive: boolean;
   categoryId?: string;
-  ussdFlow: string;
   ussdSteps: {
     order: number;
     type: "dial" | "select" | "input" | "wait";
@@ -18,7 +17,6 @@ export interface IService extends Document<string> {
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat: string;           // legacy single format (kept for compat)
   failureSmsTemplates: {              // multi-failure templates (source of truth)
     template: string;                 // SMS pattern to match
     message: string;                  // user-facing failure reason
@@ -36,7 +34,6 @@ const ServiceSchema = new Schema<IService>(
     description: { type: String, default: "" },
     isActive: { type: Boolean, default: true },
     categoryId: { type: String, default: null },
-    ussdFlow: { type: String, default: "" },
     ussdSteps: {
       type: [
         {
@@ -52,7 +49,6 @@ const ServiceSchema = new Schema<IService>(
     pin: { type: String, default: "" },
     simSlot: { type: Number, default: 1 },
     successSmsFormat: { type: String, default: "" },
-    failureSmsFormat: { type: String, default: "" },
     failureSmsTemplates: {
       type: [
         {

@@ -45,8 +45,8 @@ function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose
       const result = await createService({
         name: name.trim(), description: description.trim(),
         categoryId: categoryId || undefined, isActive: false,
-        ussdFlow: "", pin: "", simSlot: 1,
-        successSmsFormat: "", failureSmsFormat: "", smsTimeout: 30, icon: icon.trim(),
+        pin: "", simSlot: 1,
+        successSmsFormat: "", smsTimeout: 30, icon: icon.trim(),
       });
       toast.success("Service created — now configure its USSD template");
       onClose();
@@ -159,8 +159,10 @@ export default function ServicesPage() {
     setTogglingId(svc.id);
     try {
       await saveService({ serviceId: svc.id, name: svc.name, icon: svc.icon, description: svc.description,
-        isActive: !svc.isActive, categoryId: svc.categoryId, ussdFlow: svc.ussdFlow, pin: svc.pin,
-        simSlot: svc.simSlot, successSmsFormat: svc.successSmsFormat, failureSmsFormat: svc.failureSmsFormat, smsTimeout: svc.smsTimeout });
+        isActive: !svc.isActive, categoryId: svc.categoryId,
+        ussdSteps: svc.ussdSteps, pin: svc.pin,
+        simSlot: svc.simSlot, successSmsFormat: svc.successSmsFormat,
+        failureSmsTemplates: svc.failureSmsTemplates, smsTimeout: svc.smsTimeout });
       setServices((prev) => prev.map((item) => item.id === svc.id ? { ...item, isActive: !svc.isActive } : item));
       toast.success(svc.isActive ? "Service deactivated" : "Service activated");
     } catch (e: unknown) {
@@ -286,8 +288,8 @@ export default function ServicesPage() {
                             </div>
                           </td>
                           <td className="px-8 py-5">
-                            {svc.ussdFlow
-                              ? <code className="text-xs bg-surface-container px-2.5 py-1 rounded-lg font-mono text-on-surface font-bold">{svc.ussdFlow}</code>
+                            {svc.ussdSteps && svc.ussdSteps.length > 0
+                              ? <span className="text-xs font-bold bg-surface-container px-2.5 py-1 rounded-lg font-manrope text-on-surface">{svc.ussdSteps.length} step{svc.ussdSteps.length !== 1 ? 's' : ''}</span>
                               : <span className="text-xs text-amber-600 italic font-manrope">Not configured</span>}
                           </td>
                           <td className="px-8 py-5 text-on-surface-variant">

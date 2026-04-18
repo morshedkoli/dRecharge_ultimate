@@ -14,12 +14,12 @@ class NativeBridge {
     return _channel.invokeMethod<void>('openAccessibilitySettings');
   }
 
-  // ── New structured step executor ─────────────────────────────────────────
+  // ── Structured step executor ─────────────────────────────────────────────
 
   /// Execute a list of structured [UssdStep]s.
   ///
   /// The native side receives a typed list so it knows exactly what each step
-  /// means — no more guessing from string values.
+  /// means — dial, select, input, or wait — with no guessing from string values.
   ///
   /// Returns a list of step-result maps to report back to the server.
   Future<List<Map<String, dynamic>>> executeUssdSteps({
@@ -39,31 +39,6 @@ class NativeBridge {
     return (result ?? <dynamic>[])
         .whereType<Map<Object?, Object?>>()
         .map((entry) => entry.map((key, value) => MapEntry(key.toString(), value)))
-        .toList();
-  }
-
-  // ── Legacy flow executor (kept for backward compat) ──────────────────────
-
-  /// Execute a pre-parsed list of USSD segments (old hyphen-split format).
-  /// Prefer [executeUssdSteps] when structured steps are available.
-  Future<List<Map<String, dynamic>>> executeUssdFlow({
-    required List<String> flowSegments,
-    required int simSlot,
-    int perStepDelayMs = 1200,
-    int stepTimeoutMs = 15000,
-  }) async {
-    final result = await _channel
-        .invokeListMethod<dynamic>('executeUssdFlow', <String, dynamic>{
-          'flowSegments': flowSegments,
-          'simSlot': simSlot,
-          'perStepDelayMs': perStepDelayMs,
-          'stepTimeoutMs': stepTimeoutMs,
-        });
-    return (result ?? <dynamic>[])
-        .whereType<Map<Object?, Object?>>()
-        .map(
-          (entry) => entry.map((key, value) => MapEntry(key.toString(), value)),
-        )
         .toList();
   }
 

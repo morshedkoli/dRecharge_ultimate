@@ -62,10 +62,8 @@ export interface ExecutionJob {
   serviceId: string;
   recipientNumber: string;
   amount: number;
-  ussdFlow?: string;           // legacy resolved USSD string
   ussdSteps?: UssdStep[];      // structured steps with placeholders resolved
   successSmsFormat?: string;
-  failureSmsFormat?: string;
   failureSmsTemplates?: SmsFailureTemplate[];
   status: JobStatus;
   locked: boolean;
@@ -126,12 +124,10 @@ export interface Service {
   description?: string;
   isActive: boolean;
   categoryId?: string;
-  ussdFlow: string;                    // legacy hyphen-delimited string (auto-derived)
   ussdSteps: UssdStep[];               // structured step array (source of truth)
   pin: string;
   simSlot: number;
   successSmsFormat: string;
-  failureSmsFormat: string;            // legacy single pattern (kept for compat)
   failureSmsTemplates: SmsFailureTemplate[]; // multi-failure templates (source of truth)
   smsTimeout: number;
   updatedAt: Date | string;
