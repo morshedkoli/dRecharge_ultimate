@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       {
         _id: agentSession.deviceId,
         deviceName: String(body?.deviceName || "").trim(),
-        model: String(body?.model || "").trim(),
+        phoneModel: String(body?.model || "").trim(),
         brand: String(body?.brand || "").trim(),
         manufacturer: String(body?.manufacturer || "").trim(),
         androidVersion: String(body?.androidVersion || "").trim(),

@@ -3,7 +3,7 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 export interface IDeviceInfo extends Document<string> {
   _id: string; // deviceId
   deviceName: string;
-  model: string;
+  phoneModel: string;
   brand: string;
   manufacturer: string;
   androidVersion: string;
@@ -24,7 +24,7 @@ const DeviceInfoSchema = new Schema<IDeviceInfo>(
   {
     _id: { type: String, required: true },
     deviceName: { type: String, default: "" },
-    model: { type: String, default: "" },
+    phoneModel: { type: String, default: "" },
     brand: { type: String, default: "" },
     manufacturer: { type: String, default: "" },
     androidVersion: { type: String, default: "" },

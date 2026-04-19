@@ -21,7 +21,7 @@ export async function GET(
       info: {
         deviceId: info._id,
         deviceName: info.deviceName,
-        model: info.model,
+        model: info.phoneModel,
         brand: info.brand,
         manufacturer: info.manufacturer,
         androidVersion: info.androidVersion,
