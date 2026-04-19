@@ -1,4 +1,4 @@
-import { UserRole, UssdStep, SmsFailureTemplate } from "@/types";
+import { UserRole, UssdStep, SmsFailureTemplate, DeviceInfoData } from "@/types";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 async function apiFetch<T = unknown>(
@@ -155,3 +155,22 @@ export const generateDeviceToken = () =>
 export async function revokeDevice(deviceId: string): Promise<{ success: boolean }> {
   return apiFetch(`/api/admin/devices/${deviceId}/revoke`, { method: "POST" });
 }
+
+export async function toggleDevicePower(
+  deviceId: string,
+  isPoweredOn: boolean
+): Promise<{ success: boolean; isPoweredOn: boolean }> {
+  return apiFetch(`/api/admin/devices/${deviceId}/power`, {
+    method: "POST",
+    body: JSON.stringify({ isPoweredOn }),
+  });
+}
+
+export const getDeviceInfo = (deviceId: string) =>
+  apiFetch<{ info: DeviceInfoData | null }>(`/api/admin/devices/${deviceId}/info`);
+
+export const updateDeviceServices = (deviceId: string, serviceIds: string[]) =>
+  apiFetch<{ success: boolean; assignedServices: string[] }>(
+    `/api/admin/devices/${deviceId}/services`,
+    { method: "PATCH", body: JSON.stringify({ serviceIds }) }
+  );

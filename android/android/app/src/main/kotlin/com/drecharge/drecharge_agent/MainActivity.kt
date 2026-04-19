@@ -1,5 +1,7 @@
 package com.drecharge.drecharge_agent
 
+import android.os.Environment
+import android.os.StatFs
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -24,6 +26,7 @@ class MainActivity : FlutterActivity() {
                     "executeUssdSteps" -> handleExecuteUssdSteps(call, result)
                     "executeUssdFlow"  -> handleExecuteUssdFlow(call, result)
                     "readRecentSms"    -> handleReadRecentSms(call, result)
+                    "getStorageInfo"   -> handleGetStorageInfo(result)
                     else -> result.notImplemented()
                 }
             }
@@ -91,5 +94,18 @@ class MainActivity : FlutterActivity() {
         val sinceMs = call.argument<Number>("sinceMs")?.toLong() ?: 0L
         val maxMessages = call.argument<Int>("maxMessages") ?: 12
         result.success(SmsReader.readRecentSms(this, sinceMs, maxMessages))
+    }
+
+    private fun handleGetStorageInfo(result: MethodChannel.Result) {
+        try {
+            val path = Environment.getDataDirectory()
+            val stat = StatFs(path.path)
+            val blockSize = stat.blockSizeLong
+            val totalMb = (stat.blockCountLong * blockSize) / (1024L * 1024L)
+            val freeMb  = (stat.availableBlocksLong * blockSize) / (1024L * 1024L)
+            result.success(mapOf("totalMb" to totalMb, "freeMb" to freeMb))
+        } catch (e: Exception) {
+            result.success(mapOf("totalMb" to 0L, "freeMb" to 0L))
+        }
     }
 }

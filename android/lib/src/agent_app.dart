@@ -59,6 +59,7 @@ class _AppShellState extends State<_AppShell> {
   final _nativeBridge = NativeBridge();
   final _backendUrlController = TextEditingController();
   final _tokenController = TextEditingController();
+  final _deviceNameController = TextEditingController();
 
   AgentConfig? _config;
   bool _backendConfigured = false;
@@ -69,12 +70,14 @@ class _AppShellState extends State<_AppShell> {
   bool _phonePermissionGranted = false;
   bool _smsPermissionGranted = false;
   bool _accessibilityEnabled = false;
+  bool _isPoweredOn = true;   // master power switch
   String _status = 'Idle';
   String? _currentJobId;
   String? _lastError;
   final List<String> _logs = <String>[];
   Timer? _pollTimer;
   Timer? _heartbeatTimer;
+  Timer? _deviceInfoTimer;
 
   @override
   void initState() {
@@ -86,8 +89,10 @@ class _AppShellState extends State<_AppShell> {
   void dispose() {
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
+    _deviceInfoTimer?.cancel();
     _backendUrlController.dispose();
     _tokenController.dispose();
+    _deviceNameController.dispose();
     super.dispose();
   }
 
@@ -99,6 +104,11 @@ class _AppShellState extends State<_AppShell> {
       final storedBaseUrl = await BackendService.hasStoredBaseUrl();
       final savedConfig = await BackendService.loadConfig();
       final authenticated = await BackendService.isAuthenticated;
+      _isPoweredOn = await BackendService.loadPowerState();
+      // Pre-populate device name field with auto-detected name
+      if (_deviceNameController.text.isEmpty) {
+        _deviceNameController.text = await _getDeviceName();
+      }
 
       _backendConfigured = storedBaseUrl;
 
@@ -250,7 +260,14 @@ class _AppShellState extends State<_AppShell> {
     try {
       final deviceInfo = DeviceInfoPlugin();
       final androidInfo = await deviceInfo.androidInfo;
-      return '${androidInfo.brand} ${androidInfo.model}'.trim();
+      final brand = androidInfo.brand.trim();
+      final model = androidInfo.model.trim();
+      // Many phones include the brand in the model (e.g. brand="Infinix", model="Infinix X6528B")
+      // Avoid double: "Infinix Infinix X6528B" → just use model
+      if (model.toLowerCase().startsWith(brand.toLowerCase())) {
+        return model;
+      }
+      return '$brand $model'.trim();
     } catch (_) {
       return 'Android Device';
     }
@@ -268,7 +285,8 @@ class _AppShellState extends State<_AppShell> {
       _status = 'Registering device';
     });
     try {
-      final deviceName = await _getDeviceName();
+      final typed = _deviceNameController.text.trim();
+      final deviceName = typed.isNotEmpty ? typed : await _getDeviceName();
       const simProvider = 'Default';
 
       final deviceId = await BackendService.registerDevice(
@@ -380,6 +398,8 @@ class _AppShellState extends State<_AppShell> {
   void _startLoops() {
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
+    _deviceInfoTimer?.cancel();
+
     _pollTimer = Timer.periodic(
       const Duration(seconds: 15),
       (_) => unawaited(_runQueueTick()),
@@ -388,18 +408,37 @@ class _AppShellState extends State<_AppShell> {
       const Duration(seconds: 20),
       (_) => unawaited(_sendHeartbeat()),
     );
+    _deviceInfoTimer = Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => unawaited(BackendService.sendDeviceInfo()),
+    );
+
     unawaited(_runQueueTick());
     unawaited(_sendHeartbeat());
+    // Send device info immediately on startup
+    unawaited(BackendService.sendDeviceInfo());
   }
 
-  Future<void> _sendHeartbeat() async {
+  Future<void> _sendHeartbeat({bool isPowerToggle = false}) async {
     if (_config == null) return;
     try {
-      await BackendService.sendHeartbeat(
+      final serverPowerState = await BackendService.sendHeartbeat(
         currentJob: _currentJobId,
         simProvider: _config?.simProvider,
         name: _config?.name,
+        isPoweredOn: _isPoweredOn,
+        powerToggle: isPowerToggle,
       );
+      
+      if (serverPowerState != null && serverPowerState != _isPoweredOn) {
+        if (!mounted) return;
+        setState(() {
+          _isPoweredOn = serverPowerState;
+          _status = serverPowerState ? 'Idle' : 'Paused';
+        });
+        await BackendService.savePowerState(serverPowerState);
+        _appendLog(serverPowerState ? 'Agent powered ON remotely.' : 'Agent powered OFF remotely.');
+      }
     } catch (error) {
       _appendLog('Heartbeat failed: $error');
     }
@@ -408,6 +447,13 @@ class _AppShellState extends State<_AppShell> {
   Future<void> _runQueueTick() async {
     final config = _config;
     if (config == null || _processing) return;
+
+    // Power is off — do nothing (heartbeat will still run to report status)
+    if (!_isPoweredOn) {
+      if (mounted) setState(() => _status = 'Paused');
+      return;
+    }
+
     if (!_phonePermissionGranted ||
         !_smsPermissionGranted ||
         !_accessibilityEnabled) {
@@ -622,8 +668,23 @@ class _AppShellState extends State<_AppShell> {
       _currentJobId = null;
       _status = 'Idle';
       _lastError = null;
+      _isPoweredOn = true;
       _logs.clear();
     });
+  }
+
+  // ── Power Toggle ──────────────────────────────────────────────────────────────
+
+  Future<void> _togglePower() async {
+    final newValue = !_isPoweredOn;
+    setState(() {
+      _isPoweredOn = newValue;
+      _status = newValue ? 'Idle' : 'Paused';
+    });
+    await BackendService.savePowerState(newValue);
+    _appendLog(newValue ? 'Agent powered ON.' : 'Agent powered OFF.');
+    // Immediately notify server with new state and explicit flag
+    await _sendHeartbeat(isPowerToggle: true);
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
@@ -640,6 +701,7 @@ class _AppShellState extends State<_AppShell> {
       return SetupScreen(
         backendUrlController: _backendUrlController,
         tokenController: _tokenController,
+        deviceNameController: _deviceNameController,
         saving: _savingBackendUrl,
         registering: _registering,
         phoneGranted: _phonePermissionGranted,
@@ -666,6 +728,8 @@ class _AppShellState extends State<_AppShell> {
       phoneGranted: _phonePermissionGranted,
       smsGranted: _smsPermissionGranted,
       accessibilityEnabled: _accessibilityEnabled,
+      isPoweredOn: _isPoweredOn,
+      onTogglePower: _togglePower,
       onRunNow: _runQueueTick,
       onOpenSettings: () async {
         await Navigator.push(
@@ -674,6 +738,7 @@ class _AppShellState extends State<_AppShell> {
             builder: (_) => SettingsPage(
               backendUrlController: _backendUrlController,
               tokenController: _tokenController,
+              deviceNameController: _deviceNameController,
               config: _config,
               backendConfigured: _backendConfigured,
               saving: _savingBackendUrl,
@@ -709,6 +774,7 @@ class SetupScreen extends StatefulWidget {
     super.key,
     required this.backendUrlController,
     required this.tokenController,
+    required this.deviceNameController,
     required this.saving,
     required this.registering,
     required this.phoneGranted,
@@ -729,6 +795,7 @@ class SetupScreen extends StatefulWidget {
 
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
+  final TextEditingController deviceNameController;
   final bool saving;
   final bool registering;
   final bool phoneGranted;
@@ -863,6 +930,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   _SetupRegisterStep(
                     backendUrlController: widget.backendUrlController,
                     tokenController: widget.tokenController,
+                    deviceNameController: widget.deviceNameController,
                     saving: widget.saving,
                     registering: widget.registering,
                     backendConfigured: widget.backendConfigured,
@@ -987,6 +1055,7 @@ class _SetupRegisterStep extends StatelessWidget {
   const _SetupRegisterStep({
     required this.backendUrlController,
     required this.tokenController,
+    required this.deviceNameController,
     required this.saving,
     required this.registering,
     required this.backendConfigured,
@@ -998,6 +1067,7 @@ class _SetupRegisterStep extends StatelessWidget {
 
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
+  final TextEditingController deviceNameController;
   final bool saving;
   final bool registering;
   final bool backendConfigured;
@@ -1099,6 +1169,17 @@ class _SetupRegisterStep extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+          // Optional: device name override
+          TextField(
+            controller: deviceNameController,
+            decoration: const InputDecoration(
+              labelText: 'Device Name (optional)',
+              hintText: 'Leave blank to use auto-detected name',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.phone_android),
+            ),
+          ),
+          const SizedBox(height: 12),
           // Manual: registration token
           TextField(
             controller: tokenController,
@@ -1155,6 +1236,8 @@ class HomeScreen extends StatelessWidget {
     required this.phoneGranted,
     required this.smsGranted,
     required this.accessibilityEnabled,
+    required this.isPoweredOn,
+    required this.onTogglePower,
     required this.onRunNow,
     required this.onOpenSettings,
   });
@@ -1168,6 +1251,8 @@ class HomeScreen extends StatelessWidget {
   final bool phoneGranted;
   final bool smsGranted;
   final bool accessibilityEnabled;
+  final bool isPoweredOn;
+  final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
   final Future<void> Function() onOpenSettings;
 
@@ -1197,6 +1282,14 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
         actions: [
+          // ── Power button ────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: _PowerButton(
+              isPoweredOn: isPoweredOn,
+              onToggle: onTogglePower,
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
@@ -1205,58 +1298,73 @@ class HomeScreen extends StatelessWidget {
         ],
         elevation: 0,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // ── Status hero card ────────────────────────────────────────────
-          _StatusHeroCard(
-            status: status,
-            currentJobId: currentJobId,
-            lastError: lastError,
-            processing: processing,
-            registered: registered,
-            allReady: _allReady,
-          ),
-          const SizedBox(height: 16),
-
-          // ── Permission warning banner (if not ready) ────────────────────
-          if (!_allReady)
-            _WarningBanner(
-              message: 'Some permissions are missing. Tap Settings to fix.',
-              onTap: onOpenSettings,
-            ),
-          if (!_allReady) const SizedBox(height: 16),
-
-          // ── Device info card ────────────────────────────────────────────
-          if (registered) ...[
-            _DeviceInfoCard(config: config!),
-            const SizedBox(height: 16),
-          ],
-
-          // ── Action button ───────────────────────────────────────────────
-          if (registered && _allReady)
-            FilledButton.icon(
-              onPressed: processing ? null : onRunNow,
-              icon: processing
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.play_arrow_rounded),
-              label: Text(processing ? 'Processing...' : 'Run Queue Check'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Status hero card ──────────────────────────────────────
+              _StatusHeroCard(
+                status: status,
+                currentJobId: currentJobId,
+                lastError: lastError,
+                processing: processing,
+                registered: registered,
+                allReady: _allReady,
               ),
-            ),
-          if (registered && _allReady) const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-          // ── Log panel ───────────────────────────────────────────────────
-          _LogCard(logs: logs),
-        ],
+              // ── Permission warning banner (if not ready) ──────────────
+              if (!_allReady) ...[
+                _WarningBanner(
+                  message:
+                      'Some permissions are missing. Tap Settings to fix.',
+                  onTap: onOpenSettings,
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Power-off banner ──────────────────────────────────────
+              if (!isPoweredOn) ...[
+                _PowerOffBanner(onTurnOn: onTogglePower),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Device info card ──────────────────────────────────────
+              if (registered) ...[
+                _DeviceInfoCard(config: config!),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Action button ─────────────────────────────────────────
+              if (registered && _allReady && isPoweredOn) ...[
+                FilledButton.icon(
+                  onPressed: processing ? null : onRunNow,
+                  icon: processing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.play_arrow_rounded),
+                  label: Text(
+                      processing ? 'Processing...' : 'Run Queue Check'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Log panel (fills all remaining space) ─────────────────
+              Expanded(child: _LogCard(logs: logs)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1491,6 +1599,104 @@ class _WarningBanner extends StatelessWidget {
   }
 }
 
+// ── Power Button — shown in the AppBar ───────────────────────────────────────
+class _PowerButton extends StatelessWidget {
+  const _PowerButton({required this.isPoweredOn, required this.onToggle});
+  final bool isPoweredOn;
+  final Future<void> Function() onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final onColor = const Color(0xFF1B6B4D);
+    final offColor = cs.outline;
+    return Tooltip(
+      message: isPoweredOn ? 'Power OFF' : 'Power ON',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: isPoweredOn
+              ? [
+                  BoxShadow(
+                    color: onColor.withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ]
+              : null,
+        ),
+        child: IconButton(
+          icon: Icon(
+            Icons.power_settings_new_rounded,
+            color: isPoweredOn ? onColor : offColor,
+          ),
+          onPressed: onToggle,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Power-off banner — amber strip shown in the body ─────────────────────────
+class _PowerOffBanner extends StatelessWidget {
+  const _PowerOffBanner({required this.onTurnOn});
+  final Future<void> Function() onTurnOn;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTurnOn,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF8E1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFFE082)),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.power_off_rounded,
+              color: Color(0xFFE65100),
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Agent is paused',
+                    style: TextStyle(
+                      color: Color(0xFFE65100),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'No jobs will be executed. Tap to turn on.',
+                    style: TextStyle(
+                      color: Color(0xFFBF360C),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.power_settings_new_rounded,
+              color: Color(0xFFE65100),
+              size: 18,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _LogCard extends StatelessWidget {
   const _LogCard({required this.logs});
   final List<String> logs;
@@ -1505,42 +1711,82 @@ class _LogCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: cs.outlineVariant),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Activity Log',
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: cs.outline),
+      // Use a Column so the list fills whatever height the card is given.
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header ──────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Row(
+              children: [
+                Icon(Icons.list_alt_rounded, size: 14, color: cs.outline),
+                const SizedBox(width: 6),
+                Text(
+                  'Activity Log',
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelMedium
+                      ?.copyWith(color: cs.outline),
+                ),
+                const Spacer(),
+                if (logs.isNotEmpty)
+                  Text(
+                    '${logs.length} event${logs.length == 1 ? '' : 's'}',
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: cs.outline),
+                  ),
+              ],
             ),
-            const SizedBox(height: 12),
-            if (logs.isEmpty)
-              Text(
-                'No events yet.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: cs.outline),
-              )
-            else
-              ...logs
-                  .take(20)
-                  .map(
-                    (entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+
+          // ── Scrollable log list ──────────────────────────────────────────
+          Expanded(
+            child: logs.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
                       child: Text(
-                        entry,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                        ),
+                        'No events yet.',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: cs.outline),
                       ),
                     ),
+                  )
+                : ListView.builder(
+                    // newest-first: index 0 is the most recent entry.
+                    // No reverse needed because _appendLog already inserts
+                    // at index 0.  Scroll starts at the top (newest).
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          logs[index],
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                                color: index == 0
+                                    ? cs.onSurface
+                                    : cs.onSurfaceVariant,
+                              ),
+                        ),
+                      );
+                    },
                   ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1555,6 +1801,7 @@ class SettingsPage extends StatelessWidget {
     super.key,
     required this.backendUrlController,
     required this.tokenController,
+    required this.deviceNameController,
     required this.config,
     required this.backendConfigured,
     required this.saving,
@@ -1574,6 +1821,7 @@ class SettingsPage extends StatelessWidget {
 
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
+  final TextEditingController deviceNameController;
   final AgentConfig? config;
   final bool backendConfigured;
   final bool saving;
@@ -1859,6 +2107,16 @@ class SettingsPage extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 16),
+                    TextField(
+                      controller: deviceNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Device Name (optional)',
+                        hintText: 'Leave blank to use auto-detected name',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.phone_android),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: tokenController,
                       minLines: 2,

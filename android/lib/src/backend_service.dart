@@ -1,8 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart';
 import 'models.dart';
 
 /// REST API-based backend service.
@@ -25,9 +30,11 @@ class BackendService {
   static const _kAuthUid     = 'agent_auth_uid';
 
   // Keys for shared preferences
-  static const _kBackendBaseUrl = 'agent_backend_base_url';
-  static const _kDeviceName  = 'agent_device_name';
-  static const _kSimProvider = 'agent_sim_provider';
+  static const _kBackendBaseUrl  = 'agent_backend_base_url';
+  static const _kDeviceName      = 'agent_device_name';
+  static const _kSimProvider     = 'agent_sim_provider';
+  static const _kIsPoweredOn     = 'agent_is_powered_on';
+  static const _kLastDeviceInfo  = 'agent_last_device_info';
 
   // ─── Initialize ─────────────────────────────────────────────────────────────
 
@@ -95,6 +102,19 @@ class BackendService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kDeviceName);
     await prefs.remove(_kSimProvider);
+    await prefs.remove(_kIsPoweredOn);
+  }
+
+  // ─── Power State ─────────────────────────────────────────────────────────────
+
+  static Future<void> savePowerState(bool isPoweredOn) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kIsPoweredOn, isPoweredOn);
+  }
+
+  static Future<bool> loadPowerState() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kIsPoweredOn) ?? true; // default ON
   }
 
   // ─── Device Registration ────────────────────────────────────────────────────
@@ -135,22 +155,166 @@ class BackendService {
 
   // ─── Heartbeat ──────────────────────────────────────────────────────────────
 
-  static Future<void> sendHeartbeat({
+  static Future<bool?> sendHeartbeat({
     String? currentJob,
     String? simProvider,
     String? name,
     String? appVersion,
+    bool isPoweredOn = true,
+    bool powerToggle = false,
   }) async {
     try {
-      await _authPost('/api/agent/heartbeat', {
+      final response = await _authPost('/api/agent/heartbeat', {
         if (currentJob != null) 'currentJob': currentJob,
         if (simProvider != null) 'simProvider': simProvider,
         if (name != null) 'name': name,
         if (appVersion != null) 'appVersion': appVersion,
+        'isPoweredOn': isPoweredOn,
+        'powerToggle': powerToggle,
       });
+      return response['data']['isPoweredOn'] as bool?;
     } catch (e) {
       debugPrint('[BackendService] Heartbeat failed: $e');
+      return null;
     }
+  }
+
+  // ─── Device Info ────────────────────────────────────────────────────────────
+
+  /// Collects hardware/network info and sends it to the backend.
+  /// Falls back silently on any error. Stores last payload locally.
+  static Future<void> sendDeviceInfo() async {
+    try {
+      final payload = await _collectDeviceInfo();
+      // Persist locally for offline inspection
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kLastDeviceInfo, jsonEncode(payload));
+      // Send to backend (ignore errors — non-critical)
+      await _authPost('/api/agent/device-info', payload);
+      debugPrint('[BackendService] Device info sent');
+    } catch (e) {
+      debugPrint('[BackendService] sendDeviceInfo failed: $e');
+    }
+  }
+
+  /// Returns the last device info payload stored locally, or null.
+  static Future<Map<String, dynamic>?> loadLastDeviceInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kLastDeviceInfo);
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _collectDeviceInfo() async {
+    // ── Device model/brand/Android version ──
+    String deviceName = '', model = '', brand = '', manufacturer = '',
+        androidVersion = '';
+    int sdkInt = 0;
+    try {
+      final plugin = DeviceInfoPlugin();
+      final info = await plugin.androidInfo;
+      model = info.model;
+      brand = info.brand;
+      manufacturer = info.manufacturer;
+      androidVersion = info.version.release;
+      sdkInt = info.version.sdkInt;
+      deviceName = '$brand $model'.trim();
+    } catch (_) {}
+
+    // ── RAM from /proc/meminfo ──
+    int ramTotalMb = 0, ramAvailableMb = 0;
+    try {
+      final content = await File('/proc/meminfo').readAsString();
+      for (final line in content.split('\n')) {
+        final parts = line.trim().split(RegExp(r'\s+'));
+        if (parts.length >= 2) {
+          final kb = int.tryParse(parts[1]) ?? 0;
+          if (line.startsWith('MemTotal:')) ramTotalMb = kb ~/ 1024;
+          if (line.startsWith('MemAvailable:')) ramAvailableMb = kb ~/ 1024;
+        }
+      }
+    } catch (_) {}
+
+    // ── Storage via native channel (StatFs on /data partition) ──
+    int storageTotalMb = 0, storageAvailableMb = 0;
+    try {
+      const _nativeChannel = MethodChannel('drecharge_agent/native');
+      final info = await _nativeChannel.invokeMapMethod<String, dynamic>('getStorageInfo');
+      storageTotalMb     = (info?['totalMb'] as num?)?.toInt() ?? 0;
+      storageAvailableMb = (info?['freeMb']  as num?)?.toInt() ?? 0;
+    } catch (_) {}
+
+    // ── Battery ──
+    int batteryLevel = 0;
+    bool isCharging = false;
+    try {
+      final battery = Battery();
+      batteryLevel = await battery.batteryLevel;
+      final state  = await battery.batteryState;
+      isCharging = state == BatteryState.charging || state == BatteryState.full;
+    } catch (_) {}
+
+    // ── Network type ──
+    String networkType = 'unknown';
+    try {
+      final result = await Connectivity().checkConnectivity();
+      if (result.contains(ConnectivityResult.wifi)) {
+        networkType = 'wifi';
+      } else if (result.contains(ConnectivityResult.mobile)) {
+        networkType = 'mobile';
+      } else if (result.contains(ConnectivityResult.none)) {
+        networkType = 'none';
+      } else {
+        networkType = 'other';
+      }
+    } catch (_) {}
+
+    // ── Local IP address ──
+    String ipAddress = '';
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback) {
+            ipAddress = addr.address;
+            break;
+          }
+        }
+        if (ipAddress.isNotEmpty) break;
+      }
+    } catch (_) {}
+
+    // ── SIM carrier (use stored provider name) ──
+    String simCarrier = '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      simCarrier = prefs.getString(_kSimProvider) ?? '';
+    } catch (_) {}
+
+    return {
+      'deviceName': deviceName,
+      'model': model,
+      'brand': brand,
+      'manufacturer': manufacturer,
+      'androidVersion': androidVersion,
+      'sdkInt': sdkInt,
+      'ramTotalMb': ramTotalMb,
+      'ramAvailableMb': ramAvailableMb,
+      'storageTotalMb': storageTotalMb,
+      'storageAvailableMb': storageAvailableMb,
+      'batteryLevel': batteryLevel,
+      'isCharging': isCharging,
+      'networkType': networkType,
+      'ipAddress': ipAddress,
+      'simCarrier': simCarrier,
+    };
   }
 
   // ─── Queue / Job Management ─────────────────────────────────────────────────

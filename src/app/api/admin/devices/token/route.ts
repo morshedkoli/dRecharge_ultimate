@@ -54,7 +54,9 @@ export async function GET(request: NextRequest) {
       authEmail: d.authEmail,
       lastHeartbeat: d.lastHeartbeat,
       currentJob: d.currentJob,
+      isPoweredOn: d.isPoweredOn !== false, // default true for old devices
       appVersion: d.appVersion,
+      assignedServices: d.assignedServices ?? [],
       registeredAt: d.registeredAt,
     }));
     return NextResponse.json({ devices: mapped });

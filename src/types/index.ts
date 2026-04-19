@@ -135,7 +135,7 @@ export interface Service {
 }
 
 // ─── Agent Device ─────────────────────────────────────────────────────────────
-export type DeviceStatus = "online" | "offline" | "busy" | "revoked";
+export type DeviceStatus = "online" | "offline" | "busy" | "revoked" | "paused";
 
 export interface AgentDevice {
   deviceId: string;
@@ -144,8 +144,31 @@ export interface AgentDevice {
   simProvider: string;
   lastHeartbeat: Date | string;
   currentJob?: string;
+  isPoweredOn: boolean;
   authUid: string;
+  assignedServices: string[];
   registeredAt: Date | string;
+}
+
+// ─── Device Info ──────────────────────────────────────────────────────────────
+export interface DeviceInfoData {
+  deviceId: string;
+  deviceName: string;
+  model: string;
+  brand: string;
+  manufacturer: string;
+  androidVersion: string;
+  sdkInt: number;
+  ramTotalMb: number;
+  ramAvailableMb: number;
+  storageTotalMb: number;
+  storageAvailableMb: number;
+  batteryLevel: number;
+  isCharging: boolean;
+  networkType: string;
+  ipAddress: string;
+  simCarrier: string;
+  syncedAt: Date | string;
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────

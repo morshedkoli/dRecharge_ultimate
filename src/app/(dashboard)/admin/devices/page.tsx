@@ -1,13 +1,14 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAgentDevices } from "@/lib/hooks/admin/useAgentDevices";
 import { DeviceStatusDot } from "@/components/admin/DeviceStatusDot";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
-import { revokeDevice } from "@/lib/functions";
+import { revokeDevice, toggleDevicePower, getDeviceInfo, updateDeviceServices } from "@/lib/functions";
 import { fullDateTime, relativeTime } from "@/lib/utils";
 import { toast } from "sonner";
-import { Smartphone, Plus, Copy, Link as LinkIcon, QrCode as QrCodeIcon } from "lucide-react";
+import { DeviceInfoData, Service } from "@/types";
+import { Smartphone, Plus, Copy, Link as LinkIcon, QrCode as QrCodeIcon, Power, ChevronDown, ChevronUp, RefreshCw, Cpu, Battery, Wifi, HardDrive, Layers, Check, Save } from "lucide-react";
 
 function AgentQrCode({ payload, size = 220 }: { payload: string; size?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -38,9 +39,302 @@ function AgentQrCode({ payload, size = 220 }: { payload: string; size?: number }
   );
 }
 
+function DeviceInfoPanel({ deviceId }: { deviceId: string }) {
+  const [info, setInfo] = useState<DeviceInfoData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
+
+  const fetchInfo = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getDeviceInfo(deviceId);
+      setInfo(result.info);
+    } catch {
+      toast.error("Failed to load device info");
+    } finally {
+      setLoading(false);
+      setFetched(true);
+    }
+  }, [deviceId]);
+
+  useEffect(() => { fetchInfo(); }, [fetchInfo]);
+
+  if (loading) {
+    return <div className="h-20 rounded-xl bg-surface-container/50 animate-pulse mt-4" />;
+  }
+
+  if (fetched && !info) {
+    return (
+      <div className="mt-4 px-4 py-3 rounded-xl bg-surface-container text-xs text-on-surface-variant text-center">
+        No hardware info synced yet
+      </div>
+    );
+  }
+
+  if (!info) return null;
+
+  const ramUsedPct = info.ramTotalMb > 0
+    ? Math.round(((info.ramTotalMb - info.ramAvailableMb) / info.ramTotalMb) * 100)
+    : 0;
+  const storageUsedPct = info.storageTotalMb > 0
+    ? Math.round(((info.storageTotalMb - info.storageAvailableMb) / info.storageTotalMb) * 100)
+    : 0;
+
+  return (
+    <div className="mt-4 space-y-3 text-xs">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope">
+          Device Info
+        </span>
+        <div className="flex items-center gap-2 text-on-surface-variant">
+          <span>{relativeTime(info.syncedAt)}</span>
+          <button onClick={fetchInfo} title="Refresh" className="hover:text-on-surface transition-colors">
+            <RefreshCw className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* Hardware */}
+      <div className="space-y-1.5 border border-black/[0.04] rounded-xl p-3 bg-surface-container/30">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">
+          <Cpu className="w-3 h-3" /> Hardware
+        </div>
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">Model</span>
+          <span className="text-on-surface font-medium">{info.brand} {info.model}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">Manufacturer</span>
+          <span className="text-on-surface font-medium">{info.manufacturer}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-on-surface-variant">Android</span>
+          <span className="text-on-surface font-medium">{info.androidVersion} (SDK {info.sdkInt})</span>
+        </div>
+      </div>
+
+      {/* RAM & Storage */}
+      <div className="space-y-2 border border-black/[0.04] rounded-xl p-3 bg-surface-container/30">
+        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">
+          <HardDrive className="w-3 h-3" /> Memory & Storage
+        </div>
+        {info.ramTotalMb > 0 && (
+          <div>
+            <div className="flex justify-between mb-1">
+              <span className="text-on-surface-variant">RAM</span>
+              <span className="text-on-surface font-medium">
+                {Math.round(info.ramAvailableMb / 1024 * 10) / 10}GB free / {Math.round(info.ramTotalMb / 1024 * 10) / 10}GB
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-surface-container overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${ramUsedPct > 85 ? "bg-red-400" : ramUsedPct > 65 ? "bg-amber-400" : "bg-primary"}`}
+                style={{ width: `${ramUsedPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {info.storageTotalMb > 0 && (
+          <div>
+            <div className="flex justify-between mb-1">
+              <span className="text-on-surface-variant">Storage</span>
+              <span className="text-on-surface font-medium">
+                {Math.round(info.storageAvailableMb / 1024 * 10) / 10}GB free / {Math.round(info.storageTotalMb / 1024 * 10) / 10}GB
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-surface-container overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${storageUsedPct > 85 ? "bg-red-400" : storageUsedPct > 65 ? "bg-amber-400" : "bg-primary"}`}
+                style={{ width: `${storageUsedPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Battery & Network */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="border border-black/[0.04] rounded-xl p-3 bg-surface-container/30 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-1.5">
+            <Battery className="w-3 h-3" /> Battery
+          </div>
+          <div className={`text-lg font-bold font-manrope ${info.batteryLevel <= 20 ? "text-red-500" : info.batteryLevel <= 40 ? "text-amber-500" : "text-primary"}`}>
+            {info.batteryLevel}%
+          </div>
+          <div className="text-on-surface-variant">{info.isCharging ? "Charging" : "On battery"}</div>
+        </div>
+        <div className="border border-black/[0.04] rounded-xl p-3 bg-surface-container/30 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-1.5">
+            <Wifi className="w-3 h-3" /> Network
+          </div>
+          <div className="text-on-surface font-medium capitalize">{info.networkType}</div>
+          {info.ipAddress && <div className="text-on-surface-variant font-mono">{info.ipAddress}</div>}
+          {info.simCarrier && <div className="text-on-surface-variant">{info.simCarrier}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ServiceAssignmentPanel ────────────────────────────────────────────────────
+function ServiceAssignmentPanel({
+  deviceId,
+  currentAssigned,
+  allServices,
+  assignedMap, // serviceId → deviceId (other devices)
+  onSaved,
+}: {
+  deviceId: string;
+  currentAssigned: string[];
+  allServices: Service[];
+  assignedMap: Record<string, string>;
+  onSaved: (serviceIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(currentAssigned));
+  const [saving, setSaving] = useState(false);
+  const dirty = (
+    selected.size !== currentAssigned.length ||
+    [...selected].some(id => !currentAssigned.includes(id))
+  );
+
+  function toggle(serviceId: string) {
+    setSelected(prev => {
+      const s = new Set(prev);
+      s.has(serviceId) ? s.delete(serviceId) : s.add(serviceId);
+      return s;
+    });
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const result = await updateDeviceServices(deviceId, [...selected]);
+      onSaved(result.assignedServices);
+      toast.success("Services updated");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update services");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (allServices.length === 0) {
+    return (
+      <div className="mt-4 px-4 py-3 rounded-xl bg-surface-container text-xs text-on-surface-variant text-center">
+        No services created yet
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-2">
+        Assigned Services
+      </div>
+      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+        {allServices.map(svc => {
+          const takenByOther = assignedMap[svc.id] && assignedMap[svc.id] !== deviceId;
+          const takenDeviceName = takenByOther ? assignedMap[`${svc.id}__name`] : null;
+          const isChecked = selected.has(svc.id);
+
+          return (
+            <label
+              key={svc.id}
+              className={[
+                "flex items-center gap-3 px-3 py-2 rounded-xl border transition-all cursor-pointer text-xs font-manrope",
+                takenByOther
+                  ? "opacity-50 cursor-not-allowed border-black/[0.04] bg-surface-container/20"
+                  : isChecked
+                  ? "border-primary/30 bg-[#E8F1EE]"
+                  : "border-black/[0.04] bg-surface-container/30 hover:bg-surface-container/60",
+              ].join(" ")}
+            >
+              <input
+                type="checkbox"
+                className="accent-primary w-3.5 h-3.5 shrink-0"
+                checked={isChecked}
+                disabled={takenByOther}
+                onChange={() => !takenByOther && toggle(svc.id)}
+              />
+              <span className={`flex-1 font-medium ${isChecked ? "text-primary" : "text-on-surface"}`}>
+                {svc.name}
+              </span>
+              {!svc.isActive && (
+                <span className="text-[10px] text-on-surface-variant bg-surface-container px-1.5 py-0.5 rounded-full">
+                  inactive
+                </span>
+              )}
+              {takenByOther && takenDeviceName && (
+                <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-full shrink-0">
+                  {takenDeviceName}
+                </span>
+              )}
+              {isChecked && !takenByOther && (
+                <Check className="w-3 h-3 text-primary shrink-0" />
+              )}
+            </label>
+          );
+        })}
+      </div>
+      {dirty && (
+        <button
+          onClick={save}
+          disabled={saving}
+          className="mt-2 flex items-center gap-1.5 px-4 py-2 bg-primary text-on-primary text-xs font-bold font-manrope rounded-xl hover:opacity-90 disabled:opacity-50 transition-all"
+        >
+          <Save className="w-3.5 h-3.5" />
+          {saving ? "Saving…" : "Save Changes"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function DevicesPage() {
   const { devices, loading, refetch, silentRefetch } = useAgentDevices();
   const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set());
+  const [powerTogglingIds, setPowerTogglingIds] = useState<Set<string>>(new Set());
+  const [expandedInfoIds, setExpandedInfoIds] = useState<Set<string>>(new Set());
+  const [expandedServiceIds, setExpandedServiceIds] = useState<Set<string>>(new Set());
+  const [allServices, setAllServices] = useState<Service[]>([]);
+  // Track per-device assigned services locally for optimistic UI after saves
+  const [deviceServices, setDeviceServices] = useState<Record<string, string[]>>({});
+
+  // Fetch all services once on mount
+  useEffect(() => {
+    fetch("/api/admin/services", { credentials: "include" })
+      .then(r => r.json())
+      .then(d => setAllServices(d.services || []))
+      .catch(() => {});
+  }, []);
+
+  // Sync deviceServices from fetched devices
+  useEffect(() => {
+    if (devices.length === 0) return;
+    setDeviceServices(prev => {
+      const next = { ...prev };
+      for (const d of devices) {
+        if (!(d.deviceId in next)) {
+          next[d.deviceId] = d.assignedServices ?? [];
+        }
+      }
+      return next;
+    });
+  }, [devices]);
+
+  // Build map: serviceId → { deviceId, deviceName } across all visible devices
+  const assignedMap = useCallback((): Record<string, string> => {
+    const map: Record<string, string> = {};
+    for (const d of devices) {
+      const assigned = deviceServices[d.deviceId] ?? d.assignedServices ?? [];
+      for (const svcId of assigned) {
+        map[svcId] = d.deviceId;
+        map[`${svcId}__name`] = d.name;
+      }
+    }
+    return map;
+  }, [devices, deviceServices]);
   const visibleDevices = devices.filter(d => d.status !== "revoked" && !revokedIds.has(d.deviceId));
   const [agentBaseUrl, setAgentBaseUrl] = useState<string>("");
   const [bootstrapUrl, setBootstrapUrl] = useState<string>("");
@@ -241,10 +535,52 @@ export default function DevicesPage() {
                 <div className="p-3 bg-[#E8F1EE] rounded-xl">
                   <Smartphone className="w-6 h-6 text-primary" />
                 </div>
-                <DeviceStatusDot status={device.status} />
+                <div className="flex items-center gap-3">
+                  {/* Power toggle button */}
+                  <button
+                    id={`power-btn-${device.deviceId}`}
+                    disabled={powerTogglingIds.has(device.deviceId) || device.status === "revoked"}
+                    title={device.isPoweredOn ? "Turn off agent" : "Turn on agent"}
+                    onClick={async () => {
+                      setPowerTogglingIds(prev => new Set([...prev, device.deviceId]));
+                      try {
+                        await toggleDevicePower(device.deviceId, !device.isPoweredOn);
+                        toast.success(
+                          device.isPoweredOn
+                            ? `${device.name} paused`
+                            : `${device.name} resumed`
+                        );
+                        await silentRefetch();
+                      } catch (e: unknown) {
+                        toast.error(e instanceof Error ? e.message : "Failed to toggle power");
+                      } finally {
+                        setPowerTogglingIds(prev => { const s = new Set(prev); s.delete(device.deviceId); return s; });
+                      }
+                    }}
+                    className={[
+                      "p-2 rounded-xl border transition-all duration-200",
+                      device.isPoweredOn
+                        ? "border-green-200 bg-green-50 text-green-600 hover:bg-green-100"
+                        : "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100",
+                      (powerTogglingIds.has(device.deviceId) || device.status === "revoked")
+                        ? "opacity-50 cursor-not-allowed"
+                        : "",
+                    ].join(" ")}
+                  >
+                    <Power className="w-4 h-4" strokeWidth={2.5} />
+                  </button>
+                  <DeviceStatusDot status={device.status} />
+                </div>
               </div>
               <h3 className="font-headline font-bold text-[#134235] text-xl mb-1">{device.name}</h3>
-              <p className="text-xs text-on-surface-variant mb-6 font-manrope font-semibold uppercase tracking-wider">SIM: {device.simProvider}</p>
+
+              {/* Power-off notice */}
+              {!device.isPoweredOn && device.status !== "offline" && (
+                <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-100 text-amber-700 text-xs font-manrope font-semibold">
+                  <Power className="w-3.5 h-3.5" />
+                  Agent is paused — no jobs will be executed
+                </div>
+              )}
 
               <div className="space-y-2.5 text-xs text-on-surface-variant border-t border-black/[0.03] pt-4">
                 <div className="flex justify-between">
@@ -270,7 +606,58 @@ export default function DevicesPage() {
                 </div>
               </div>
 
-              <div className="mt-5 pt-4 border-t border-black/[0.03]">
+              {/* Services toggle */}
+              <div className="mt-4 pt-4 border-t border-black/[0.03]">
+                <button
+                  onClick={() => setExpandedServiceIds(prev => {
+                    const s = new Set(prev);
+                    s.has(device.deviceId) ? s.delete(device.deviceId) : s.add(device.deviceId);
+                    return s;
+                  })}
+                  className="flex items-center gap-1.5 text-xs font-bold font-manrope text-primary hover:opacity-80 transition-opacity"
+                >
+                  {expandedServiceIds.has(device.deviceId) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  <Layers className="w-3.5 h-3.5" />
+                  Services
+                  {(deviceServices[device.deviceId] ?? device.assignedServices ?? []).length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-primary text-on-primary text-[10px] font-bold">
+                      {(deviceServices[device.deviceId] ?? device.assignedServices ?? []).length}
+                    </span>
+                  )}
+                </button>
+                {expandedServiceIds.has(device.deviceId) && (
+                  <ServiceAssignmentPanel
+                    deviceId={device.deviceId}
+                    currentAssigned={deviceServices[device.deviceId] ?? device.assignedServices ?? []}
+                    allServices={allServices}
+                    assignedMap={assignedMap()}
+                    onSaved={(ids) => {
+                      setDeviceServices(prev => ({ ...prev, [device.deviceId]: ids }));
+                      silentRefetch();
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Device Info toggle */}
+              <div className="mt-2">
+                <button
+                  onClick={() => setExpandedInfoIds(prev => {
+                    const s = new Set(prev);
+                    s.has(device.deviceId) ? s.delete(device.deviceId) : s.add(device.deviceId);
+                    return s;
+                  })}
+                  className="flex items-center gap-1.5 text-xs font-bold font-manrope text-on-surface-variant hover:text-on-surface transition-colors"
+                >
+                  {expandedInfoIds.has(device.deviceId) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  Device Info
+                </button>
+                {expandedInfoIds.has(device.deviceId) && (
+                  <DeviceInfoPanel deviceId={device.deviceId} />
+                )}
+              </div>
+
+              <div className="mt-4 pt-4 border-t border-black/[0.03]">
                 <ConfirmDialog
                   title="Revoke device access?"
                   description="This device will immediately lose access to the execution queue."
