@@ -2,10 +2,11 @@ import { cn } from "@/lib/utils";
 import { DeviceStatus } from "@/types";
 
 const MAP: Record<DeviceStatus, { color: string; animate: boolean; label: string }> = {
-  online:  { color: "bg-green-500", animate: true,  label: "Online" },
-  busy:    { color: "bg-blue-500",  animate: true,  label: "Busy" },
+  online:  { color: "bg-green-500",   animate: true,  label: "Online" },
+  busy:    { color: "bg-blue-500",    animate: true,  label: "Busy" },
   offline: { color: "bg-on-surface-variant", animate: false, label: "Offline" },
-  revoked: { color: "bg-red-500", animate: false, label: "Revoked" },
+  revoked: { color: "bg-red-500",     animate: false, label: "Revoked" },
+  paused:  { color: "bg-amber-400",   animate: false, label: "Paused" },
 };
 
 export function DeviceStatusDot({ status }: { status: DeviceStatus }) {
