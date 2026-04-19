@@ -94,9 +94,10 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
     );
   }
 
-  const canAct    = job.status === "queued" || job.status === "processing";
+  const canAct    = job.status === "queued" || job.status === "processing" || job.status === "waiting";
   const canForceF = canAct;
   const isSuccess = job.status === "done" || job.parsedResult?.success === true;
+  const isWaiting    = job.status === "waiting";
   const isFailed     = job.status === "failed";
   const isCancelled  = job.status === "cancelled";
 
@@ -117,6 +118,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
         {/* Status stripe */}
         <div className={`h-1 w-full ${
           isSuccess    ? "bg-[#134235]" :
+          isWaiting    ? "bg-amber-400" :
           isFailed     ? "bg-red-500" :
           isCancelled  ? "bg-orange-400" :
           job.status === "processing" ? "bg-amber-400" :
@@ -127,12 +129,15 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
           {/* Icon */}
           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${
             isSuccess   ? "bg-[#E8F1EE]" :
+            isWaiting   ? "bg-amber-50" :
             isFailed    ? "bg-red-50" :
             isCancelled ? "bg-orange-50" :
             "bg-surface-container"
           }`}>
             {isSuccess ? (
               <CheckCircle className="w-7 h-7 text-[#134235]" />
+            ) : isWaiting ? (
+              <AlertTriangle className="w-7 h-7 text-amber-600" />
             ) : isFailed ? (
               <XCircle className="w-7 h-7 text-red-500" />
             ) : isCancelled ? (
@@ -214,7 +219,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
             }}
           >
             <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#E8F1EE] text-[#134235] text-sm rounded-xl hover:bg-[#d4e8e0] font-manrope font-bold transition-colors">
-              <SmartphoneNfc className="w-4 h-4" /> Simulate Execution
+              <SmartphoneNfc className="w-4 h-4" /> Mark Success
             </button>
           </ConfirmDialog>
 
@@ -324,18 +329,26 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
             <div className="py-2">
               {/* Parse outcome banner */}
               <div className={`flex items-center gap-3 px-4 py-3 rounded-xl mt-2 mb-4 ${
-                job.parsedResult.success
+                job.status === "waiting"
+                  ? "bg-amber-50 border border-amber-100"
+                  : job.parsedResult.success
                   ? "bg-[#E8F1EE] border border-[#134235]/10"
                   : "bg-red-50 border border-red-100"
               }`}>
-                {job.parsedResult.success
+                {job.status === "waiting"
+                  ? <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  : job.parsedResult.success
                   ? <CheckCircle className="w-5 h-5 text-[#134235] shrink-0" />
                   : <XCircle    className="w-5 h-5 text-red-600 shrink-0" />
                 }
                 <span className={`font-manrope font-bold text-sm ${
-                  job.parsedResult.success ? "text-[#134235]" : "text-red-700"
+                  job.status === "waiting"
+                    ? "text-amber-700"
+                    : job.parsedResult.success ? "text-[#134235]" : "text-red-700"
                 }`}>
-                  {job.parsedResult.success ? "Transaction Confirmed" : "Transaction Failed"}
+                  {job.status === "waiting"
+                    ? "Waiting For Manual Review"
+                    : job.parsedResult.success ? "Transaction Confirmed" : "Transaction Failed"}
                 </span>
               </div>
 
@@ -346,7 +359,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
                 <Field icon={CreditCard} label="Confirmed Amount" value={<WalletAmount amount={job.parsedResult.amount} />} />
               )}
               {job.parsedResult.reason && (
-                <Field icon={AlertTriangle} label="Failure Reason" value={<span className="text-red-600">{job.parsedResult.reason}</span>} />
+                <Field
+                  icon={AlertTriangle}
+                  label={job.status === "waiting" ? "Waiting Reason" : "Failure Reason"}
+                  value={<span className={job.status === "waiting" ? "text-amber-700" : "text-red-600"}>{job.parsedResult.reason}</span>}
+                />
               )}
             </div>
           )}

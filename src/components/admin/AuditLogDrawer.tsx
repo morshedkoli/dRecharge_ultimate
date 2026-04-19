@@ -16,6 +16,7 @@ const ACTION_LABELS: Record<string, string> = {
   BALANCE_REQUEST_APPROVED: "Balance request approved",
   BALANCE_REQUEST_REJECTED: "Balance request rejected",
   TX_INITIATED:             "Transaction initiated",
+  TX_WAITING:               "Transaction moved to waiting review",
   TX_COMPLETED:             "Transaction completed",
   TX_FAILED:                "Transaction failed",
   TEMPLATE_UPDATED:         "USSD template updated",

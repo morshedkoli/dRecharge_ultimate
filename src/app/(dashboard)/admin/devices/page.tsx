@@ -39,7 +39,7 @@ function AgentQrCode({ payload, size = 220 }: { payload: string; size?: number }
 }
 
 export default function DevicesPage() {
-  const { devices, loading, refetch } = useAgentDevices();
+  const { devices, loading, refetch, silentRefetch } = useAgentDevices();
   const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set());
   const visibleDevices = devices.filter(d => d.status !== "revoked" && !revokedIds.has(d.deviceId));
   const [agentBaseUrl, setAgentBaseUrl] = useState<string>("");
@@ -50,6 +50,8 @@ export default function DevicesPage() {
   const [tokenExpiresAt, setTokenExpiresAt] = useState<number | null>(null);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [registrationDetected, setRegistrationDetected] = useState(false);
+  const deviceCountAtTokenGenRef = useRef<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,7 +83,32 @@ export default function DevicesPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Poll for new device registration while a token is active
+  useEffect(() => {
+    if (!token) {
+      setRegistrationDetected(false);
+      return;
+    }
+    const interval = setInterval(async () => {
+      await silentRefetch();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [token, silentRefetch]);
+
+  // Detect when a new device registers (count increases after token was generated)
+  useEffect(() => {
+    if (!token || registrationDetected) return;
+    if (visibleDevices.length > deviceCountAtTokenGenRef.current) {
+      setRegistrationDetected(true);
+      setToken(null);
+      setTokenExpiresAt(null);
+      toast.success("Device registered successfully!");
+    }
+  }, [visibleDevices.length, token, registrationDetected]);
+
   async function handleGenerateToken() {
+    deviceCountAtTokenGenRef.current = visibleDevices.length;
+    setRegistrationDetected(false);
     setTokenLoading(true);
     try {
       const res = await fetch("/api/admin/devices/token", { method: "POST" });
@@ -348,10 +375,16 @@ export default function DevicesPage() {
               </div>
             </div>
 
-            <button onClick={() => { setToken(null); setTokenExpiresAt(null); }}
-              className="text-sm text-on-surface-variant hover:text-on-surface font-semibold">
-              Generate new token
-            </button>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-sm text-on-surface-variant font-manrope">
+                <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                Waiting for device to scan…
+              </div>
+              <button onClick={() => { setToken(null); setTokenExpiresAt(null); setRegistrationDetected(false); }}
+                className="text-sm text-on-surface-variant hover:text-on-surface font-semibold">
+                Cancel / Generate new token
+              </button>
+            </div>
           </div>
         )}
       </div>

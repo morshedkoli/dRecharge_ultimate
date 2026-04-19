@@ -24,7 +24,21 @@ export function useAgentDevices() {
     }
   }, []);
 
+  const silentRefetch = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/devices/token", { credentials: "include" });
+      const data = await res.json();
+      const list: AgentDevice[] = (data.devices || []).map((d: AgentDevice) => ({
+        ...d,
+        status: computeDeviceStatus(d),
+      }));
+      setDevices(list);
+    } catch (err) {
+      console.error("useAgentDevices fetch error:", err);
+    }
+  }, []);
+
   useEffect(() => { fetchDevices(); }, [fetchDevices]);
 
-  return { devices, loading, refetch: fetchDevices };
+  return { devices, loading, refetch: fetchDevices, silentRefetch };
 }

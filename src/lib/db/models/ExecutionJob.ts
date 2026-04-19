@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
-export type JobStatus = "queued" | "processing" | "done" | "failed" | "cancelled";
+export type JobStatus = "queued" | "processing" | "waiting" | "done" | "failed" | "cancelled";
 
 export interface IExecutionJob extends Document<string> {
   _id: string;
@@ -67,7 +67,7 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     },
     status: {
       type: String,
-      enum: ["queued", "processing", "done", "failed", "cancelled"],
+      enum: ["queued", "processing", "waiting", "done", "failed", "cancelled"],
       default: "queued",
     },
     locked: { type: Boolean, default: false },

@@ -54,6 +54,7 @@ export default function UserHistoryPage() {
       case "complete": return "bg-green-50 text-green-700 border-green-200/60";
       case "pending":  return "bg-amber-50 text-amber-700 border-amber-200/60";
       case "processing":return "bg-blue-50 text-blue-700 border-blue-200/60";
+      case "waiting":  return "bg-amber-50 text-amber-700 border-amber-200/60";
       case "failed":   return "bg-red-50 text-red-700 border-red-200/60";
       default:         return "bg-gray-50 text-gray-700 border-gray-200/60";
     }
@@ -74,6 +75,7 @@ export default function UserHistoryPage() {
       case "approved": return <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />;
       case "pending":  return <Clock className="w-3.5 h-3.5 mr-1.5" />;
       case "processing":return <Activity className="w-3.5 h-3.5 mr-1.5 animate-pulse" />;
+      case "waiting":  return <Clock className="w-3.5 h-3.5 mr-1.5" />;
       case "failed":   
       case "rejected": return <XCircle className="w-3.5 h-3.5 mr-1.5" />;
       default:         return null;

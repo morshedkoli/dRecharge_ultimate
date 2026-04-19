@@ -12,6 +12,7 @@ const STATUS_TABS: { key: JobStatus | "all"; label: string; dotColor: string }[]
   { key: "all",        label: "All",        dotColor: "bg-outline-variant" },
   { key: "queued",     label: "Queued",     dotColor: "bg-outline-variant" },
   { key: "processing", label: "Processing", dotColor: "bg-blue-500" },
+  { key: "waiting",    label: "Waiting",    dotColor: "bg-amber-500" },
   { key: "done",       label: "Done",       dotColor: "bg-primary" },
   { key: "failed",     label: "Failed",     dotColor: "bg-red-500" },
 ];

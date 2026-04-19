@@ -6,7 +6,7 @@ import User from "@/lib/db/models/User";
 import Service from "@/lib/db/models/Service";
 import AgentDevice from "@/lib/db/models/AgentDevice";
 import { writeLog } from "@/lib/db/audit";
-import { notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
+import { notifyTransactionCompleted, notifyTransactionFailed, notifyTransactionWaiting } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
 import mongoose from "mongoose";
 
@@ -29,6 +29,8 @@ interface FailureMatch {
   matched: boolean;
   message: string;
 }
+
+type FinalJobOutcome = "done" | "failed" | "waiting";
 
 /** Try to match rawSms against each failure template. Returns first match. */
 function matchFailureTemplates(
@@ -60,8 +62,9 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const dbSession = await mongoose.startSession();
 
-    // The agent now reports the definitive success/failure based on its own SMS matching.
-    // We honour agent's decision but always re-validate server-side for safety.
+    // The agent reports the raw execution result, but the server decides whether the
+    // request is confirmed, failed, or needs manual review.
+    let outcome: FinalJobOutcome = clientResult?.success === true ? "done" : "waiting";
     let isSuccess = clientResult?.success === true;
     let failureReason: string | undefined = clientResult?.reason;
     let finalParsedResult = { ...(clientResult || { success: isSuccess }) };
@@ -93,6 +96,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           const sRegex = buildRegex(successFormat, job.recipientNumber, job.amount);
           const successMatch = sRegex ? rawSms.match(sRegex) : null;
           if (successMatch) {
+            outcome = "done";
             isSuccess = true;
             failureReason = undefined;
             finalParsedResult.success = true;
@@ -104,19 +108,22 @@ export async function POST(request: NextRequest, { params }: Params) {
               failureTemplates, rawSms, job.recipientNumber, job.amount
             );
             if (failureMatch) {
+              outcome = "failed";
               isSuccess = false;
               failureReason = failureMatch.message;
               finalParsedResult.success = false;
               finalParsedResult.reason = failureMatch.message;
             } else if (failureTemplates.length > 0 || successFormat) {
               // SMS received but didn't match any pattern
+              outcome = "waiting";
               isSuccess = false;
-              failureReason = "Transaction could not be confirmed — unrecognized SMS received.";
+              failureReason = "Transaction could not be confirmed automatically — SMS did not match any success or failure template.";
               finalParsedResult.success = false;
               finalParsedResult.reason = failureReason;
             } else {
               // No templates configured — trust the agent's reported result
               isSuccess = clientResult?.success === true;
+              outcome = isSuccess ? "done" : "waiting";
               if (!isSuccess) {
                 failureReason = clientResult?.reason || "Transaction failed.";
                 finalParsedResult.reason = failureReason;
@@ -124,7 +131,8 @@ export async function POST(request: NextRequest, { params }: Params) {
             }
           }
         } else if (!rawSms?.trim()) {
-          // No SMS received at all
+          // No SMS received at all or the agent hit an execution issue before receiving one.
+          outcome = "waiting";
           isSuccess = false;
           failureReason = clientResult?.reason || `No confirmation SMS received within ${job.smsTimeout}s.`;
           finalParsedResult.success = false;
@@ -132,7 +140,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         }
 
         // ── Persist updates ─────────────────────────────────────────────────────
-        job.status = isSuccess ? "done" : "failed";
+        job.status = outcome;
         job.locked = false;
         job.rawSms = rawSms;
         job.parsedResult = finalParsedResult;
@@ -140,12 +148,12 @@ export async function POST(request: NextRequest, { params }: Params) {
         job.completedAt = new Date();
         await job.save({ session: dbSession });
 
-        tx.status = isSuccess ? "complete" : "failed";
-        if (!isSuccess && failureReason) (tx as any).failureReason = failureReason;
+        tx.status = outcome === "done" ? "complete" : outcome === "failed" ? "failed" : "waiting";
+        if (outcome !== "done" && failureReason) (tx as any).failureReason = failureReason;
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 
-        if (!isSuccess) {
+        if (outcome === "failed") {
           await User.findByIdAndUpdate(
             tx.userId,
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
@@ -165,21 +173,25 @@ export async function POST(request: NextRequest, { params }: Params) {
       await dbSession.endSession();
     }
 
+    const finalOutcome = outcome as FinalJobOutcome;
+
     await writeLog({
-      action: isSuccess ? "TX_COMPLETED" : "TX_FAILED",
+      action: finalOutcome === "done" ? "TX_COMPLETED" : finalOutcome === "failed" ? "TX_FAILED" : "TX_WAITING",
       entityId: txId,
-      severity: isSuccess ? "info" : "warn",
-      meta: { jobId, parsedResult: finalParsedResult, failureReason },
+      severity: finalOutcome === "done" ? "info" : "warn",
+      meta: { jobId, parsedResult: finalParsedResult, failureReason, outcome: finalOutcome },
     });
 
-    // Notify the user with the specific failure reason
+    // Notify the user based on the final authoritative outcome.
     try {
       const tx = await Transaction.findById(txId).lean();
       if (tx) {
-        if (isSuccess) {
+        if (finalOutcome === "done") {
           await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");
-        } else {
+        } else if (finalOutcome === "failed") {
           await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
+        } else {
+          await notifyTransactionWaiting(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         }
       }
     } catch { /* non-critical */ }

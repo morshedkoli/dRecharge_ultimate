@@ -47,10 +47,16 @@ export async function POST(request: NextRequest) {
 
     try {
       await dbSession.withTransaction(async () => {
-        const user = await User.findById(uid).session(dbSession);
-        if (!user) throw new Error("User not found");
-        if (user.walletLocked) throw new Error("Wallet is locked by another transaction. Please wait.");
-        if (user.walletBalance < amount) throw new Error("Insufficient balance");
+        const user = await User.findOneAndUpdate(
+          { _id: uid, walletBalance: { $gte: amount } },
+          { $inc: { walletBalance: -amount } },
+          { new: true, session: dbSession },
+        );
+        if (!user) {
+          const existingUser = await User.findById(uid).session(dbSession);
+          if (!existingUser) throw new Error("User not found");
+          throw new Error("Insufficient balance");
+        }
 
         txId = "TX_" + nanoid(20);
         jobId = "JOB_" + nanoid(20);
@@ -90,10 +96,6 @@ export async function POST(request: NextRequest) {
           attempt: 0,
           createdAt: new Date(),
         }], { session: dbSession });
-
-        user.walletBalance -= amount;
-        user.walletLocked = true;
-        await user.save({ session: dbSession });
       });
     } finally {
       await dbSession.endSession();

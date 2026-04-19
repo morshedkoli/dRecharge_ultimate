@@ -39,10 +39,12 @@ export async function PATCH(request: NextRequest) {
 
         job.status = "failed";
         job.locked = false;
+        job.parsedResult = { success: false, reason: reason || "Admin force-failed" };
         job.completedAt = new Date();
         await job.save({ session: dbSession });
 
         tx.status = "failed";
+        if (reason) (tx as any).failureReason = reason;
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 

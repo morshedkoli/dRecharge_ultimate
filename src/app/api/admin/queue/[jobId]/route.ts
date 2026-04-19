@@ -101,6 +101,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";
+        if (!isSuccess) (tx as any).failureReason = "Admin simulated failure";
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 

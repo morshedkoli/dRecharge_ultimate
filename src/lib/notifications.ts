@@ -119,6 +119,28 @@ export async function notifyTransactionFailed(userId: string, amount: number, re
   });
 }
 
+export async function notifyTransactionWaiting(userId: string, amount: number, recipientNumber: string, reason?: string) {
+  const base = `${fmt(amount)} recharge to ${mask(recipientNumber)} is waiting for manual review.`;
+  const body = reason ? `${base} Reason: ${reason}` : base;
+
+  await Promise.all([
+    createNotification({
+      recipientUid: userId,
+      type: "tx_waiting",
+      title: "Recharge awaiting review",
+      body,
+      link: "/user/history",
+    }),
+    createNotification({
+      recipientUid: "admin",
+      type: "tx_waiting",
+      title: "Transaction waiting for admin review",
+      body: `${fmt(amount)} recharge to ${mask(recipientNumber)} needs manual review.${reason ? ` Reason: ${reason}` : ""}`,
+      link: "/admin/queue",
+    }),
+  ]);
+}
+
 export async function notifyTransactionCancelled(userId: string, amount: number) {
   await createNotification({
     recipientUid: userId,

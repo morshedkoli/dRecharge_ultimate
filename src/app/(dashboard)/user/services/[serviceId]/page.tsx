@@ -72,10 +72,9 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
   }
 
   const balance = profile?.walletBalance || 0;
-  const isLocked = profile?.walletLocked || false;
   const amount = parseFloat(amountStr) || 0;
   const isOverBalance = amount > balance;
-  const isValid = recipient.length >= 10 && amount > 0 && !isOverBalance && !isLocked;
+  const isValid = recipient.length >= 10 && amount > 0 && !isOverBalance;
   const effectivePin = profile?.pin?.trim() || "1234";
   const requiredPinLength = effectivePin.length;
 
@@ -163,7 +162,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                     onChange={(e) => setRecipient(e.target.value)} 
                     required
                     placeholder="e.g. 01700000000"
-                    disabled={submitting || isLocked}
+                    disabled={submitting}
                     className="w-full pl-12 pr-4 py-3.5 bg-surface-container border border-black/5 rounded-2xl text-[15px] font-medium focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all placeholder:text-on-surface-variant/40" 
                   />
                 </div>
@@ -181,7 +180,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                     onChange={(e) => setAmountStr(e.target.value)} 
                     required
                     placeholder="0.00"
-                    disabled={submitting || isLocked}
+                    disabled={submitting}
                     className="w-full pl-12 pr-4 py-3.5 bg-surface-container border border-black/5 rounded-2xl text-[15px] font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all placeholder:text-on-surface-variant/40" 
                   />
                 </div>
@@ -226,13 +225,6 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                 <span className="text-xl mr-1 font-bold text-[#A2C2B5]">৳</span>
                 {balance.toLocaleString()}
               </p>
-              
-              {isLocked && (
-                <div className="mt-4 bg-red-500/10 border border-red-500/20 text-red-100 text-xs px-4 py-3 rounded-xl font-bold backdrop-blur-sm leading-relaxed flex items-start gap-2">
-                  <Lock className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
-                  Your wallet is locked while a transaction is processing.
-                </div>
-              )}
             </div>
             {/* Decoration */}
             <div className="absolute right-0 bottom-0 w-48 h-48 bg-white/5 rounded-full blur-2xl translate-y-1/3 translate-x-1/4 pointer-events-none" />
