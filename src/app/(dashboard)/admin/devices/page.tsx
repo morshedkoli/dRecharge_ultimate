@@ -234,7 +234,7 @@ function ServiceAssignmentPanel({
       </div>
       <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
         {allServices.map(svc => {
-          const takenByOther = assignedMap[svc.id] && assignedMap[svc.id] !== deviceId;
+          const takenByOther = !!(assignedMap[svc.id] && assignedMap[svc.id] !== deviceId);
           const takenDeviceName = takenByOther ? assignedMap[`${svc.id}__name`] : null;
           const isChecked = selected.has(svc.id);
 
