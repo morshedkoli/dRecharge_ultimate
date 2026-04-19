@@ -14,7 +14,17 @@ export async function GET(request: NextRequest) {
     }
 
     await connectDB();
-    const job = await ExecutionJob.findOne({ status: "queued" })
+
+    // Only dispatch jobs whose service is assigned to this device
+    const assignedServices: string[] = agentSession.device.assignedServices ?? [];
+    if (assignedServices.length === 0) {
+      return NextResponse.json({ job: null });
+    }
+
+    const job = await ExecutionJob.findOne({
+      status: "queued",
+      serviceId: { $in: assignedServices },
+    })
       .sort({ queuedAt: 1, createdAt: 1 })
       .lean();
 
