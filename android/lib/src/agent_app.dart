@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -75,9 +76,11 @@ class _AppShellState extends State<_AppShell> {
   String? _currentJobId;
   String? _lastError;
   final List<String> _logs = <String>[];
+  SubscriptionInfo? _subscriptionInfo;
   Timer? _pollTimer;
   Timer? _heartbeatTimer;
   Timer? _deviceInfoTimer;
+  Timer? _subscriptionTimer;
 
   @override
   void initState() {
@@ -90,6 +93,7 @@ class _AppShellState extends State<_AppShell> {
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
     _deviceInfoTimer?.cancel();
+    _subscriptionTimer?.cancel();
     _backendUrlController.dispose();
     _tokenController.dispose();
     _deviceNameController.dispose();
@@ -124,11 +128,18 @@ class _AppShellState extends State<_AppShell> {
       }
 
       await _refreshCapabilities();
+      unawaited(_refreshSubscription());
     } catch (error) {
       _lastError = error.toString();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _refreshSubscription() async {
+    final info = await BackendService.fetchSubscriptionStatus();
+    if (!mounted) return;
+    setState(() => _subscriptionInfo = info);
   }
 
   // ── Capabilities ─────────────────────────────────────────────────────────
@@ -399,6 +410,7 @@ class _AppShellState extends State<_AppShell> {
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
     _deviceInfoTimer?.cancel();
+    _subscriptionTimer?.cancel();
 
     _pollTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -412,10 +424,13 @@ class _AppShellState extends State<_AppShell> {
       const Duration(minutes: 5),
       (_) => unawaited(BackendService.sendDeviceInfo()),
     );
+    _subscriptionTimer = Timer.periodic(
+      const Duration(hours: 1),
+      (_) => unawaited(_refreshSubscription()),
+    );
 
     unawaited(_runQueueTick());
     unawaited(_sendHeartbeat());
-    // Send device info immediately on startup
     unawaited(BackendService.sendDeviceInfo());
   }
 
@@ -451,6 +466,13 @@ class _AppShellState extends State<_AppShell> {
     // Power is off — do nothing (heartbeat will still run to report status)
     if (!_isPoweredOn) {
       if (mounted) setState(() => _status = 'Paused');
+      return;
+    }
+
+    // Subscription gate — block if not active; "unknown" is grace (API down)
+    final sub = _subscriptionInfo;
+    if (sub != null && sub.state != 'active' && sub.state != 'unknown') {
+      if (mounted) setState(() => _status = 'Suspended — subscription ${sub.state}');
       return;
     }
 
@@ -737,6 +759,7 @@ class _AppShellState extends State<_AppShell> {
       smsGranted: _smsPermissionGranted,
       accessibilityEnabled: _accessibilityEnabled,
       isPoweredOn: _isPoweredOn,
+      subscriptionInfo: _subscriptionInfo,
       onTogglePower: _togglePower,
       onRunNow: _runQueueTick,
       onOpenSettings: () async {
@@ -1248,6 +1271,7 @@ class HomeScreen extends StatelessWidget {
     required this.onTogglePower,
     required this.onRunNow,
     required this.onOpenSettings,
+    this.subscriptionInfo,
   });
 
   final AgentConfig? config;
@@ -1260,6 +1284,7 @@ class HomeScreen extends StatelessWidget {
   final bool smsGranted;
   final bool accessibilityEnabled;
   final bool isPoweredOn;
+  final SubscriptionInfo? subscriptionInfo;
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
   final Future<void> Function() onOpenSettings;
@@ -1321,7 +1346,11 @@ class HomeScreen extends StatelessWidget {
                 registered: registered,
                 allReady: _allReady,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+
+              // ── Subscription card ─────────────────────────────────────
+              _SubscriptionCard(info: subscriptionInfo),
+              const SizedBox(height: 12),
 
               // ── Permission warning banner (if not ready) ──────────────
               if (!_allReady) ...[
@@ -1521,6 +1550,335 @@ class _DeviceInfoCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _SubscriptionCard
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SubscriptionCard extends StatelessWidget {
+  const _SubscriptionCard({this.info});
+  final SubscriptionInfo? info;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    // Loading / not yet fetched
+    if (info == null) {
+      return Card(
+        elevation: 0,
+        color: cs.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: cs.outlineVariant),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              Icon(Icons.shield_outlined, size: 18, color: cs.outline),
+              const SizedBox(width: 10),
+              Text(
+                'Checking licence…',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: cs.outline),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final String state     = info!.state;
+    final bool isActive    = state == 'active';
+    final bool isExpiring  = info!.isExpiring;
+    final bool isExpired   = state == 'expired';
+    final bool isInactive  = state == 'inactive';
+    final bool isUntracked = state == 'untracked';
+    final bool isBlocked   = isExpired || isInactive || isUntracked;
+
+    final Color statusColor = isBlocked
+        ? const Color(0xFFDC2626)   // red-600
+        : isExpiring
+        ? const Color(0xFFD97706)   // amber-600
+        : const Color(0xFF1B6B4D);  // brand green
+
+    final IconData statusIcon = isBlocked
+        ? Icons.shield_off_outlined
+        : Icons.shield_outlined;
+
+    final String statusLabel = switch (state) {
+      'active'    => isExpiring ? 'Expiring' : 'Active',
+      'expired'   => 'Expired',
+      'inactive'  => 'Inactive',
+      'untracked' => 'Unregistered',
+      _           => 'Unknown',
+    };
+
+    // Progress bar fraction (0–365d mapped to 0–1)
+    final double barFraction = info!.daysUntilExpiry != null && isActive
+        ? (info!.daysUntilExpiry! / 365.0).clamp(0.0, 1.0)
+        : 0.0;
+
+    final Color cardBorderColor = isBlocked
+        ? const Color(0xFFFECACA)   // red-200
+        : isExpiring
+        ? const Color(0xFFFDE68A)   // amber-200
+        : cs.outlineVariant;
+
+    final Color cardBg = isBlocked
+        ? const Color(0xFFFFF5F5)
+        : isExpiring
+        ? const Color(0xFFFFFBEB)
+        : cs.surfaceContainerLow;
+
+    return Card(
+      elevation: 0,
+      color: cardBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: cardBorderColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header row ──────────────────────────────────────────
+            Row(
+              children: [
+                Icon(statusIcon, size: 16, color: statusColor),
+                const SizedBox(width: 6),
+                Text(
+                  'Licence',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: cs.outline,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: statusColor.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Domain ───────────────────────────────────────────────
+            Row(
+              children: [
+                Icon(
+                  Icons.language_rounded,
+                  size: 14,
+                  color: cs.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    info!.domain.isNotEmpty ? info!.domain : 'Unknown domain',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurface,
+                      fontFamily: 'monospace',
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // ── Tracked / subscribed flags ───────────────────────────
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                _StatusDot(on: info!.tracked,    label: 'Tracked'),
+                const SizedBox(width: 12),
+                _StatusDot(on: info!.subscribed, label: 'Subscribed'),
+                const SizedBox(width: 12),
+                _StatusDot(on: !info!.expired,   label: 'Valid'),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // ── Expiry date row ──────────────────────────────────────
+            if (info!.expiresAt != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    isBlocked ? 'Expired on' : 'Expires on',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  Row(
+                    children: [
+                      Text(
+                        _formatDate(info!.expiresAt!),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: statusColor,
+                        ),
+                      ),
+                      if (!isBlocked && info!.daysUntilExpiry != null) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '(${info!.daysUntilExpiry}d left)',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // ── Progress bar ─────────────────────────────────────
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: barFraction,
+                  minHeight: 5,
+                  backgroundColor: cs.outlineVariant.withOpacity(0.4),
+                  valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+                ),
+              ),
+            ],
+
+            // ── CTA ─────────────────────────────────────────────────
+            if (isBlocked || isExpiring) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: Icon(Icons.open_in_new_rounded, size: 14, color: statusColor),
+                  label: Text(
+                    switch (state) {
+                      'expired'   => 'Renew Now — Jobs Suspended',
+                      'inactive'  => 'Get Subscription',
+                      'untracked' => 'Register Domain',
+                      _           => 'Renew Subscription',
+                    },
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: statusColor.withOpacity(0.4)),
+                    backgroundColor: statusColor.withOpacity(0.06),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  onPressed: () async {
+                    final uri = Uri.parse('https://drecharge.com');
+                    // Use url_launcher if available; ignore errors otherwise
+                    try {
+                      await _launchUrl(uri);
+                    } catch (_) {}
+                  },
+                ),
+              ),
+            ],
+
+            // ── Last checked ─────────────────────────────────────────
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                'Checked ${_relativeTime(info!.checkedAt)}',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant.withOpacity(0.5),
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _formatDate(DateTime dt) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  static String _relativeTime(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  static Future<void> _launchUrl(Uri uri) async {
+    // Avoid adding url_launcher dependency — open via Android intent channel
+    // This is a best-effort helper; silently fails if not supported.
+    const platform = MethodChannel('drecharge_agent/native');
+    try {
+      await platform.invokeMethod('openUrl', {'url': uri.toString()});
+    } catch (_) {}
+  }
+}
+
+class _StatusDot extends StatelessWidget {
+  const _StatusDot({required this.on, required this.label});
+  final bool on;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = on ? const Color(0xFF1B6B4D) : const Color(0xFFDC2626);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

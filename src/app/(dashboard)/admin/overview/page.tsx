@@ -171,48 +171,64 @@ function SubscriptionCard() {
 
   if (!status) return null;
 
-  const isExpired  = !status.subscribed;
-  const isWarning  = status.subscribed && status.daysUntilExpiry !== null && status.daysUntilExpiry <= 14;
-  const isGood     = status.subscribed && !isWarning;
+  const state = status.state;
 
-  // Progress bar: 0–365 days mapped to 0–100%
-  const maxDays = 365;
-  const barPct = status.daysUntilExpiry !== null
-    ? Math.max(0, Math.min(100, (status.daysUntilExpiry / maxDays) * 100))
+  // ── Visual config per state ──────────────────────────────────
+  const stateConfig = {
+    active: {
+      badge: { label: "Active",     bg: "bg-[#EBF3EE]", text: "text-[#2D5A4C]", border: "border-[#C3D9CE]" },
+      icon: ShieldCheck, iconBg: "bg-[#EBF3EE]", iconColor: "text-[#2D5A4C]",
+      cardBorder: "border-black/[0.05]", barColor: "bg-[#2D5A4C]",
+      expiryLabel: "Expires", expiryColor: "text-[#134235]",
+      cta: null,
+    },
+    expired: {
+      badge: { label: "Expired",    bg: "bg-red-50",    text: "text-red-600",   border: "border-red-200" },
+      icon: ShieldOff, iconBg: "bg-red-50", iconColor: "text-red-500",
+      cardBorder: "border-red-100", barColor: "bg-red-400",
+      expiryLabel: "Expired on", expiryColor: "text-red-600",
+      cta: { label: "Renew Subscription — Transactions Suspended", style: "bg-red-600 text-white hover:bg-red-700 shadow-sm shadow-red-200" },
+    },
+    inactive: {
+      badge: { label: "Inactive",   bg: "bg-orange-50", text: "text-orange-600", border: "border-orange-200" },
+      icon: ShieldAlert, iconBg: "bg-orange-50", iconColor: "text-orange-500",
+      cardBorder: "border-orange-100", barColor: "bg-orange-400",
+      expiryLabel: "Expires", expiryColor: "text-orange-600",
+      cta: { label: "Get Subscription", style: "bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100" },
+    },
+    untracked: {
+      badge: { label: "Unregistered", bg: "bg-gray-100", text: "text-gray-600", border: "border-gray-200" },
+      icon: ShieldOff, iconBg: "bg-gray-100", iconColor: "text-gray-500",
+      cardBorder: "border-gray-200", barColor: "bg-gray-300",
+      expiryLabel: "Expires", expiryColor: "text-gray-500",
+      cta: { label: "Register Domain", style: "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200" },
+    },
+    unknown: {
+      badge: { label: "Unknown",    bg: "bg-gray-100",  text: "text-gray-500",  border: "border-gray-200" },
+      icon: ShieldCheck, iconBg: "bg-gray-100", iconColor: "text-gray-400",
+      cardBorder: "border-black/[0.05]", barColor: "bg-gray-300",
+      expiryLabel: "Expires", expiryColor: "text-gray-500",
+      cta: null,
+    },
+  } as const;
+
+  const cfg = stateConfig[state] ?? stateConfig.unknown;
+  const BadgeIcon = cfg.icon;
+
+  // Progress bar — 0-365d
+  const barPct = status.daysUntilExpiry !== null && state === "active"
+    ? Math.max(0, Math.min(100, (status.daysUntilExpiry / 365) * 100))
     : 0;
 
-  const badge = isExpired
-    ? { label: "Expired",    bg: "bg-red-50",    text: "text-red-600",   border: "border-red-200",   icon: ShieldOff   }
-    : isWarning
-    ? { label: "Expiring",   bg: "bg-amber-50",  text: "text-amber-700", border: "border-amber-200", icon: ShieldAlert }
-    : { label: "Active",     bg: "bg-[#EBF3EE]", text: "text-[#2D5A4C]", border: "border-[#C3D9CE]", icon: ShieldCheck };
-
-  const barColor = isExpired
-    ? "bg-red-400"
-    : isWarning
-    ? "bg-amber-400"
-    : "bg-[#2D5A4C]";
-
-  const iconBg = isExpired
-    ? "bg-red-50"
-    : isWarning
-    ? "bg-amber-50"
-    : "bg-[#EBF3EE]";
-  const iconColor = isExpired
-    ? "text-red-500"
-    : isWarning
-    ? "text-amber-500"
-    : "text-[#2D5A4C]";
-
-  const BadgeIcon = badge.icon;
+  const isWarning = state === "active" && status.daysUntilExpiry !== null && status.daysUntilExpiry <= 14;
 
   return (
-    <div className={`bg-white rounded-2xl border premium-shadow p-5 ${isExpired ? "border-red-100" : isWarning ? "border-amber-100" : "border-black/[0.05]"}`}>
+    <div className={`bg-white rounded-2xl border premium-shadow p-5 ${cfg.cardBorder}`}>
       {/* Header row */}
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
-          <div className={`p-2 rounded-xl shrink-0 ${iconBg}`}>
-            <BadgeIcon className={`w-5 h-5 ${iconColor}`} />
+          <div className={`p-2 rounded-xl shrink-0 ${cfg.iconBg}`}>
+            <BadgeIcon className={`w-5 h-5 ${cfg.iconColor}`} />
           </div>
           <div className="min-w-0">
             <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/50 font-manrope">
@@ -227,26 +243,37 @@ function SubscriptionCard() {
           </div>
         </div>
 
-        {/* Status badge */}
-        <span className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold font-manrope border ${badge.bg} ${badge.text} ${badge.border}`}>
+        {/* State badge */}
+        <span className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold font-manrope border ${cfg.badge.bg} ${cfg.badge.text} ${cfg.badge.border}`}>
           <BadgeIcon className="w-3 h-3" />
-          {badge.label}
+          {cfg.badge.label}
         </span>
       </div>
 
-      {/* Expiry info row */}
+      {/* Sub-details: tracked + subscribed flags */}
+      <div className="flex items-center gap-4 mb-3 text-[10px] font-bold font-manrope uppercase tracking-widest">
+        <span className={status.tracked ? "text-[#2D5A4C]" : "text-red-500"}>
+          {status.tracked ? "✓ Tracked" : "✗ Not tracked"}
+        </span>
+        <span className={status.subscribed ? "text-[#2D5A4C]" : "text-red-500"}>
+          {status.subscribed ? "✓ Subscribed" : "✗ Not subscribed"}
+        </span>
+        <span className={!status.expired ? "text-[#2D5A4C]" : "text-red-500"}>
+          {status.expired ? "✗ Expired" : "✓ Not expired"}
+        </span>
+      </div>
+
+      {/* Expiry info */}
       <div className="flex items-center justify-between text-xs font-manrope mb-2.5">
         {status.expiresAt ? (
           <>
-            <span className="text-on-surface-variant/60">
-              {isExpired ? "Expired" : "Expires"}
-            </span>
-            <span className={`font-bold ${isExpired ? "text-red-600" : isWarning ? "text-amber-700" : "text-[#134235]"}`}>
+            <span className="text-on-surface-variant/60">{cfg.expiryLabel}</span>
+            <span className={`font-bold ${isWarning ? "text-amber-700" : cfg.expiryColor}`}>
               {new Date(status.expiresAt).toLocaleDateString("en-US", {
                 month: "short", day: "numeric", year: "numeric",
               })}
-              {!isExpired && status.daysUntilExpiry !== null && (
-                <span className="ml-1.5 font-normal text-on-surface-variant/50">
+              {state === "active" && status.daysUntilExpiry !== null && (
+                <span className={`ml-1.5 font-normal ${isWarning ? "text-amber-600" : "text-on-surface-variant/50"}`}>
                   ({status.daysUntilExpiry}d left)
                 </span>
               )}
@@ -261,27 +288,27 @@ function SubscriptionCard() {
       {status.expiresAt && (
         <div className="h-1.5 w-full rounded-full bg-[#F4F6F5] overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-700 ${barColor}`}
-            style={{ width: `${isExpired ? 0 : barPct}%` }}
+            className={`h-full rounded-full transition-all duration-700 ${isWarning ? "bg-amber-400" : cfg.barColor}`}
+            style={{ width: `${barPct}%` }}
           />
         </div>
       )}
 
-      {/* Renew CTA if expired or expiring */}
-      {(isExpired || isWarning) && (
+      {/* CTA */}
+      {(cfg.cta || isWarning) && (
         <a
           href="https://drecharge.com"
           target="_blank"
           rel="noopener noreferrer"
           className={[
             "mt-3 flex items-center justify-center gap-1.5 w-full py-2 rounded-xl text-xs font-bold font-manrope transition-all",
-            isExpired
-              ? "bg-red-600 text-white hover:bg-red-700 shadow-sm shadow-red-200"
-              : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100",
+            isWarning && state === "active"
+              ? "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+              : cfg.cta?.style ?? "",
           ].join(" ")}
         >
           <ExternalLink className="w-3.5 h-3.5" />
-          {isExpired ? "Renew Now — Transactions Suspended" : "Renew Subscription"}
+          {isWarning && state === "active" ? "Renew Subscription" : cfg.cta?.label}
         </a>
       )}
 

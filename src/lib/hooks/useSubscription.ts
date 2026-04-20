@@ -1,8 +1,17 @@
 "use client";
 import { useEffect, useState } from "react";
 
+export type SubscriptionState =
+  | "active"
+  | "expired"
+  | "inactive"
+  | "untracked"
+  | "unknown";
+
 export interface SubscriptionStatus {
+  state: SubscriptionState;
   subscribed: boolean;
+  tracked: boolean;
   expired: boolean;
   expiresAt: string | null;
   daysUntilExpiry: number | null;
@@ -18,10 +27,7 @@ export function useSubscription() {
     fetch("/api/subscription", { credentials: "include" })
       .then((r) => r.json())
       .then((data: SubscriptionStatus) => setStatus(data))
-      .catch(() => {
-        // API unreachable — don't block the UI
-        setStatus(null);
-      })
+      .catch(() => setStatus(null))
       .finally(() => setLoading(false));
   }, []);
 

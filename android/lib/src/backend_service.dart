@@ -329,6 +329,27 @@ class BackendService {
     };
   }
 
+  // ─── Subscription ───────────────────────────────────────────────────────────
+
+  /// Fetches subscription status from the backend's /api/subscription endpoint.
+  /// Returns null on network error — caller should treat null as "unknown".
+  static Future<SubscriptionInfo?> fetchSubscriptionStatus() async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/subscription');
+      final response = await http
+          .get(uri, headers: _unauthHeaders())
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return SubscriptionInfo.fromMap(data);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[BackendService] fetchSubscriptionStatus failed: $e');
+      return null;
+    }
+  }
+
   // ─── Queue / Job Management ─────────────────────────────────────────────────
 
   /// Fetch the next queued job. Returns null if queue is empty.

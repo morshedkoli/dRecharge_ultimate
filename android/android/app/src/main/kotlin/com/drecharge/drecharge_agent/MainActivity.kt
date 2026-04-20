@@ -2,6 +2,7 @@ package com.drecharge.drecharge_agent
 
 import android.app.KeyguardManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
@@ -48,6 +49,7 @@ class MainActivity : FlutterActivity() {
                     "getStorageInfo"    -> handleGetStorageInfo(result)
                     "wakeScreen"        -> handleWakeScreen(result)
                     "releaseWakeLock"   -> handleReleaseWakeLock(result)
+                    "openUrl"           -> handleOpenUrl(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -172,6 +174,19 @@ class MainActivity : FlutterActivity() {
             result.success(true)
         } catch (e: Exception) {
             result.error("wake_release_error", e.message, null)
+        }
+    }
+
+    private fun handleOpenUrl(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val url = call.argument<String>("url") ?: return result.error("missing_arg", "url required", null)
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("open_url_error", e.message, null)
         }
     }
 

@@ -1,3 +1,49 @@
+// ─── SubscriptionInfo ────────────────────────────────────────────────────────
+
+class SubscriptionInfo {
+  const SubscriptionInfo({
+    required this.state,
+    required this.subscribed,
+    required this.tracked,
+    required this.expired,
+    required this.expiresAt,
+    required this.daysUntilExpiry,
+    required this.domain,
+    required this.checkedAt,
+  });
+
+  final String state; // "active" | "expired" | "inactive" | "untracked" | "unknown"
+  final bool subscribed;
+  final bool tracked;
+  final bool expired;
+  final DateTime? expiresAt;
+  final int? daysUntilExpiry;
+  final String domain;
+  final DateTime checkedAt;
+
+  bool get isActive   => state == 'active';
+  bool get isExpiring => state == 'active' && daysUntilExpiry != null && daysUntilExpiry! <= 14;
+
+  factory SubscriptionInfo.fromMap(Map<String, dynamic> data) {
+    return SubscriptionInfo(
+      state: (data['state'] ?? 'unknown').toString(),
+      subscribed: data['subscribed'] == true,
+      tracked: data['tracked'] == true,
+      expired: data['expired'] == true,
+      expiresAt: data['expiresAt'] != null
+          ? DateTime.tryParse(data['expiresAt'].toString())
+          : null,
+      daysUntilExpiry: data['daysUntilExpiry'] is int
+          ? data['daysUntilExpiry'] as int
+          : int.tryParse('${data['daysUntilExpiry'] ?? ''}'),
+      domain: (data['domain'] ?? '').toString(),
+      checkedAt: data['checkedAt'] != null
+          ? DateTime.tryParse(data['checkedAt'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+    );
+  }
+}
+
 // ─── AgentConfig ────────────────────────────────────────────────────────────
 
 class AgentConfig {

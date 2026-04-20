@@ -6,8 +6,30 @@ const SUBSCRIPTION_API =
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const CACHE_KEY = "subscription_cache";
 
+/**
+ * Possible subscription states, derived from all API fields combined:
+ *
+ * "active"    — tracked=true, subscribed=true, expired=false, status="subscribed"
+ * "expired"   — tracked=true, was subscribed, expired=true
+ * "inactive"  — tracked=true, subscribed=false (cancelled / never purchased)
+ * "untracked" — tracked=false (domain not registered in system)
+ * "unknown"   — API unreachable, no cache available (grace: treated as active)
+ */
+export type SubscriptionState =
+  | "active"
+  | "expired"
+  | "inactive"
+  | "untracked"
+  | "unknown";
+
 export interface SubscriptionStatus {
+  /** Derived state — primary field for all logic. */
+  state: SubscriptionState;
+  /** True only when state === "active". Use this for gate checks. */
   subscribed: boolean;
+  /** True when domain is tracked in the system. */
+  tracked: boolean;
+  /** True when a subscription existed but has lapsed. */
   expired: boolean;
   expiresAt: string | null;
   daysUntilExpiry: number | null;
@@ -15,7 +37,7 @@ export interface SubscriptionStatus {
   checkedAt: string;
 }
 
-// Module-level in-memory cache (warm-function fast path)
+// Module-level in-memory cache (warm-function fast path in serverless)
 let _memCache: { status: SubscriptionStatus; cachedAt: number } | null = null;
 
 export function getSiteDomain(): string {
@@ -24,9 +46,7 @@ export function getSiteDomain(): string {
 
   const siteUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_SITE_URL;
   if (siteUrl) {
-    try {
-      return new URL(siteUrl).hostname;
-    } catch {}
+    try { return new URL(siteUrl).hostname; } catch {}
   }
 
   const vercelUrl = process.env.VERCEL_URL;
@@ -39,10 +59,47 @@ function isDevDomain(domain: string): boolean {
   return (
     domain === "localhost" ||
     domain === "127.0.0.1" ||
+    domain.startsWith("192.168.") ||
     domain.endsWith(".local") ||
     domain.endsWith(".localhost") ||
-    domain.includes("10.0.2.2")
+    domain.includes("10.0.2.2") ||
+    domain.includes("vercel.app") // preview deployments
   );
+}
+
+/**
+ * Derives a SubscriptionState from all four API fields.
+ * ALL must be satisfied for "active":
+ *   tracked=true, subscribed=true, expired=false, status="subscribed"
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function deriveState(entry: any): SubscriptionState {
+  if (!entry) return "untracked";
+
+  const tracked    = entry.tracked    === true;
+  const subscribed = entry.subscribed === true;
+  const expired    = entry.expired    === true;
+  const status     = String(entry.status ?? "").toLowerCase().trim();
+
+  if (!tracked) return "untracked";
+  if (expired)  return "expired";
+  if (subscribed && status === "subscribed") return "active";
+  return "inactive"; // tracked but not subscribed (cancelled / pending)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildStatus(domain: string, entry: any, checkedAt: string): SubscriptionStatus {
+  const state = deriveState(entry);
+  return {
+    state,
+    subscribed: state === "active",
+    tracked: entry?.tracked === true,
+    expired: entry?.expired === true,
+    expiresAt: entry?.expiresAt ?? null,
+    daysUntilExpiry: entry?.daysUntilExpiry ?? null,
+    domain,
+    checkedAt,
+  };
 }
 
 async function fetchFromApi(domain: string): Promise<SubscriptionStatus> {
@@ -57,16 +114,18 @@ async function fetchFromApi(domain: string): Promise<SubscriptionStatus> {
   if (!res.ok) throw new Error(`Subscription API HTTP ${res.status}`);
 
   const json = await res.json();
-  const entry = json?.data?.domains?.[0];
+  if (!json?.success) throw new Error("Subscription API returned success=false");
 
-  return {
-    subscribed: entry?.subscribed === true && entry?.expired !== true,
-    expired: entry?.expired === true,
-    expiresAt: entry?.expiresAt ?? null,
-    daysUntilExpiry: entry?.daysUntilExpiry ?? null,
-    domain,
-    checkedAt: json?.checkedAt ?? new Date().toISOString(),
-  };
+  const domains: unknown[] = json?.data?.domains ?? [];
+
+  // Match by domain name first; fall back to first entry
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const entry = (domains as any[]).find(
+    (d) => String(d?.domain ?? "").toLowerCase() === domain.toLowerCase()
+  ) ?? (domains.length > 0 ? domains[0] : null);
+
+  const checkedAt: string = json?.checkedAt ?? new Date().toISOString();
+  return buildStatus(domain, entry, checkedAt);
 }
 
 async function loadFromDb(): Promise<SubscriptionStatus | null> {
@@ -77,7 +136,9 @@ async function loadFromDb(): Promise<SubscriptionStatus | null> {
     const age = Date.now() - new Date(cached.cachedAt).getTime();
     if (age > CACHE_TTL_MS) return null;
     return {
+      state: (cached.state as SubscriptionState) ?? "unknown",
       subscribed: cached.subscribed,
+      tracked: cached.tracked ?? false,
       expired: cached.expired,
       expiresAt: cached.expiresAt,
       daysUntilExpiry: cached.daysUntilExpiry,
@@ -102,14 +163,25 @@ async function saveToDb(status: SubscriptionStatus): Promise<void> {
   }
 }
 
+/** Clears both caches — call after a known renewal to force fresh check. */
+export async function invalidateSubscriptionCache(): Promise<void> {
+  _memCache = null;
+  try {
+    await connectDB();
+    await SubscriptionCache.deleteOne({ _id: CACHE_KEY });
+  } catch {}
+}
+
 export async function checkSubscription(): Promise<SubscriptionStatus> {
   const domain = getSiteDomain();
   const now = Date.now();
 
-  // Dev / local → always subscribed
+  // Dev / local / preview → always active (skip external check)
   if (isDevDomain(domain)) {
     return {
+      state: "active",
       subscribed: true,
+      tracked: true,
       expired: false,
       expiresAt: null,
       daysUntilExpiry: null,
@@ -130,7 +202,7 @@ export async function checkSubscription(): Promise<SubscriptionStatus> {
     return dbCached;
   }
 
-  // 3. Fetch from external API
+  // 3. Live fetch from external API
   try {
     const status = await fetchFromApi(domain);
     _memCache = { status, cachedAt: now };
@@ -139,12 +211,14 @@ export async function checkSubscription(): Promise<SubscriptionStatus> {
   } catch (err) {
     console.error("[subscription] API fetch failed:", err);
 
-    // Stale in-memory cache as last resort (don't block users on API downtime)
+    // Stale memory cache → use it (don't block users on transient API downtime)
     if (_memCache) return _memCache.status;
 
-    // API down + no cache → grace (subscribed: true)
+    // Nothing at all → "unknown" grace state (treated as active)
     return {
+      state: "unknown",
       subscribed: true,
+      tracked: false,
       expired: false,
       expiresAt: null,
       daysUntilExpiry: null,
