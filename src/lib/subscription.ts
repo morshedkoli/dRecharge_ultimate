@@ -42,7 +42,7 @@ let _memCache: { status: SubscriptionStatus; cachedAt: number } | null = null;
 
 export function getSiteDomain(): string {
   const explicit = process.env.SITE_DOMAIN;
-  if (explicit) return explicit.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (explicit) return explicit.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
 
   const siteUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_SITE_URL;
   if (siteUrl) {
@@ -62,8 +62,7 @@ function isDevDomain(domain: string): boolean {
     domain.startsWith("192.168.") ||
     domain.endsWith(".local") ||
     domain.endsWith(".localhost") ||
-    domain.includes("10.0.2.2") ||
-    domain.includes("vercel.app") // preview deployments
+    domain.includes("10.0.2.2")
   );
 }
 
@@ -105,10 +104,9 @@ function buildStatus(domain: string, entry: any, checkedAt: string): Subscriptio
 }
 
 async function fetchFromApi(domain: string): Promise<SubscriptionStatus> {
-  const res = await fetch(SUBSCRIPTION_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ domains: [domain] }),
+  const url = `${SUBSCRIPTION_API}/?domain=${encodeURIComponent(domain)}`;
+  const res = await fetch(url, {
+    method: "GET",
     signal: AbortSignal.timeout(10_000),
     cache: "no-store",
   });
@@ -118,8 +116,8 @@ async function fetchFromApi(domain: string): Promise<SubscriptionStatus> {
   const json = await res.json();
   if (!json?.success) throw new Error("Subscription API returned success=false");
 
-  // API returns domain data in json.data (single object) and duplicated at top level.
-  // If neither exists, treat as untracked.
+  // Response: json.data is the domain object; top-level fields are duplicates.
+  // null entry → deriveState returns "untracked".
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entry: any = json?.data ?? (json?.domain ? json : null);
 

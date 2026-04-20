@@ -24,10 +24,11 @@ export function useSubscription() {
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
 
-  const fetchStatus = (opts?: { silent?: boolean }) => {
+  const fetchStatus = (opts?: { silent?: boolean; bust?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     else setReloading(true);
-    return fetch("/api/subscription", { credentials: "include", cache: "no-store" })
+    const url = opts?.bust ? "/api/subscription?refresh=1" : "/api/subscription";
+    return fetch(url, { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((data: SubscriptionStatus) => setStatus(data))
       .catch(() => {})
@@ -39,7 +40,7 @@ export function useSubscription() {
 
   useEffect(() => { fetchStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const refetch = () => fetchStatus({ silent: true });
+  const refetch = () => fetchStatus({ silent: true, bust: true });
 
   return { status, loading, reloading, refetch };
 }

@@ -1256,7 +1256,7 @@ class _SetupRegisterStep extends StatelessWidget {
 // HomeScreen — main dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.config,
@@ -1292,119 +1292,665 @@ class HomeScreen extends StatelessWidget {
   final Future<void> Function() onOpenSettings;
   final Future<void> Function() onReloadSubscription;
 
-  bool get _allReady => phoneGranted && smsGranted && accessibilityEnabled;
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _tabIndex = 0;
+
+  bool get _allReady =>
+      widget.phoneGranted && widget.smsGranted && widget.accessibilityEnabled;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final registered = config != null;
 
     return Scaffold(
-      backgroundColor: cs.surface,
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: cs.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(Icons.bolt_rounded, color: cs.primary, size: 18),
-            ),
-            const SizedBox(width: 10),
-            const Text('dRecharge Agent'),
-          ],
-        ),
-        actions: [
-          // ── Power button ────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: _PowerButton(
-              isPoweredOn: isPoweredOn,
-              onToggle: onTogglePower,
-            ),
+      backgroundColor: const Color(0xFFF5F7F6),
+      appBar: _buildAppBar(cs),
+      body: IndexedStack(
+        index: _tabIndex,
+        children: [
+          _DashboardTab(
+            config: widget.config,
+            status: widget.status,
+            currentJobId: widget.currentJobId,
+            lastError: widget.lastError,
+            processing: widget.processing,
+            logs: widget.logs,
+            phoneGranted: widget.phoneGranted,
+            smsGranted: widget.smsGranted,
+            accessibilityEnabled: widget.accessibilityEnabled,
+            isPoweredOn: widget.isPoweredOn,
+            subscriptionInfo: widget.subscriptionInfo,
+            allReady: _allReady,
+            onTogglePower: widget.onTogglePower,
+            onRunNow: widget.onRunNow,
+            onOpenSettings: widget.onOpenSettings,
+            onReloadSubscription: widget.onReloadSubscription,
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
-            onPressed: onOpenSettings,
+          _ActivityTab(logs: widget.logs),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        backgroundColor: cs.surface,
+        elevation: 0,
+        indicatorColor: const Color(0xFF1B6B4D).withOpacity(0.12),
+        destinations: [
+          NavigationDestination(
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home_rounded, color: Color(0xFF1B6B4D)),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: widget.logs.isNotEmpty,
+              label: Text(
+                widget.logs.length > 99 ? '99+' : '${widget.logs.length}',
+              ),
+              child: const Icon(Icons.history_outlined),
+            ),
+            selectedIcon: const Icon(Icons.history_rounded, color: Color(0xFF1B6B4D)),
+            label: 'Activity',
           ),
         ],
-        elevation: 0,
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // ── Status hero card ──────────────────────────────────────
-              _StatusHeroCard(
-                status: status,
-                currentJobId: currentJobId,
-                lastError: lastError,
-                processing: processing,
-                registered: registered,
-                allReady: _allReady,
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(ColorScheme cs) {
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      scrolledUnderElevation: 1,
+      title: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1B6B4D), Color(0xFF134235)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              const SizedBox(height: 12),
-
-              // ── Subscription card ─────────────────────────────────────
-              _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
-              const SizedBox(height: 12),
-
-              // ── Permission warning banner (if not ready) ──────────────
-              if (!_allReady) ...[
-                _WarningBanner(
-                  message:
-                      'Some permissions are missing. Tap Settings to fix.',
-                  onTap: onOpenSettings,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 10),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'dRecharge',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF134235),
+                  height: 1.1,
                 ),
-                const SizedBox(height: 16),
-              ],
+              ),
+              Text(
+                'Agent',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF6B9E89),
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        _PowerButton(
+          isPoweredOn: widget.isPoweredOn,
+          onToggle: widget.onTogglePower,
+        ),
+        IconButton(
+          icon: const Icon(Icons.settings_outlined, size: 20),
+          tooltip: 'Settings',
+          onPressed: widget.onOpenSettings,
+        ),
+        const SizedBox(width: 4),
+      ],
+    );
+  }
+}
 
-              // ── Power-off banner ──────────────────────────────────────
-              if (!isPoweredOn) ...[
-                _PowerOffBanner(onTurnOn: onTogglePower),
-                const SizedBox(height: 16),
-              ],
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard Tab — Home
+// ─────────────────────────────────────────────────────────────────────────────
 
-              // ── Device info card ──────────────────────────────────────
-              if (registered) ...[
-                _DeviceInfoCard(config: config!),
-                const SizedBox(height: 16),
-              ],
+class _DashboardTab extends StatelessWidget {
+  const _DashboardTab({
+    required this.config,
+    required this.status,
+    required this.currentJobId,
+    required this.lastError,
+    required this.processing,
+    required this.logs,
+    required this.phoneGranted,
+    required this.smsGranted,
+    required this.accessibilityEnabled,
+    required this.isPoweredOn,
+    required this.subscriptionInfo,
+    required this.allReady,
+    required this.onTogglePower,
+    required this.onRunNow,
+    required this.onOpenSettings,
+    required this.onReloadSubscription,
+  });
 
-              // ── Action button ─────────────────────────────────────────
-              if (registered && _allReady && isPoweredOn) ...[
-                FilledButton.icon(
-                  onPressed: processing ? null : onRunNow,
-                  icon: processing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.play_arrow_rounded),
-                  label: Text(
-                      processing ? 'Processing...' : 'Run Queue Check'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 50),
+  final AgentConfig? config;
+  final String status;
+  final String? currentJobId;
+  final String? lastError;
+  final bool processing;
+  final List<String> logs;
+  final bool phoneGranted;
+  final bool smsGranted;
+  final bool accessibilityEnabled;
+  final bool isPoweredOn;
+  final SubscriptionInfo? subscriptionInfo;
+  final bool allReady;
+  final Future<void> Function() onTogglePower;
+  final Future<void> Function() onRunNow;
+  final Future<void> Function() onOpenSettings;
+  final Future<void> Function() onReloadSubscription;
+
+  @override
+  Widget build(BuildContext context) {
+    final registered = config != null;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        // ── Status hero ────────────────────────────────────────────────
+        _StatusHeroCard(
+          status: status,
+          currentJobId: currentJobId,
+          lastError: lastError,
+          processing: processing,
+          registered: registered,
+          allReady: allReady,
+          isPoweredOn: isPoweredOn,
+        ),
+        const SizedBox(height: 12),
+
+        // ── Quick actions row ──────────────────────────────────────────
+        if (registered) ...[
+          _QuickActionsRow(
+            isPoweredOn: isPoweredOn,
+            processing: processing,
+            allReady: allReady,
+            onTogglePower: onTogglePower,
+            onRunNow: onRunNow,
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        // ── Alerts ────────────────────────────────────────────────────
+        if (!allReady) ...[
+          _AlertBanner(
+            icon: Icons.warning_amber_rounded,
+            color: const Color(0xFFB45309),
+            bg: const Color(0xFFFFFBEB),
+            border: const Color(0xFFFDE68A),
+            message: 'Missing permissions — tap to fix',
+            onTap: onOpenSettings,
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (!isPoweredOn) ...[
+          _AlertBanner(
+            icon: Icons.power_off_rounded,
+            color: const Color(0xFFE65100),
+            bg: const Color(0xFFFFF8E1),
+            border: const Color(0xFFFFE082),
+            message: 'Agent paused — tap to turn on',
+            onTap: onTogglePower,
+          ),
+          const SizedBox(height: 8),
+        ],
+
+        // ── Subscription ───────────────────────────────────────────────
+        _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
+        const SizedBox(height: 12),
+
+        // ── Device info ────────────────────────────────────────────────
+        if (registered) ...[
+          _DeviceInfoCard(config: config!),
+          const SizedBox(height: 12),
+        ],
+
+        // ── Recent activity preview ────────────────────────────────────
+        _RecentActivityPreview(logs: logs),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Activity Tab — full log
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ActivityTab extends StatelessWidget {
+  const _ActivityTab({required this.logs});
+  final List<String> logs;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Column(
+      children: [
+        // ── Header ────────────────────────────────────────────────────
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: Row(
+            children: [
+              const Icon(Icons.history_rounded, size: 18, color: Color(0xFF134235)),
+              const SizedBox(width: 8),
+              const Text(
+                'Activity Log',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF134235),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEBF3EE),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${logs.length} event${logs.length == 1 ? '' : 's'}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1B6B4D),
                   ),
                 ),
-                const SizedBox(height: 16),
-              ],
-
-              // ── Log panel (fills all remaining space) ─────────────────
-              Expanded(child: _LogCard(logs: logs)),
+              ),
             ],
           ),
         ),
+        const Divider(height: 1),
+
+        // ── Log list ──────────────────────────────────────────────────
+        Expanded(
+          child: logs.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inbox_rounded, size: 48, color: cs.outlineVariant),
+                      const SizedBox(height: 12),
+                      Text(
+                        'No activity yet',
+                        style: TextStyle(color: cs.outline, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Events will appear here as the agent runs.',
+                        style: TextStyle(color: cs.outlineVariant, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: logs.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 56),
+                  itemBuilder: (context, index) {
+                    final entry = logs[index];
+                    final isNew = index == 0;
+                    final isError = entry.toLowerCase().contains('error') ||
+                        entry.toLowerCase().contains('fail');
+                    final isSuccess = entry.toLowerCase().contains('success') ||
+                        entry.toLowerCase().contains('complet') ||
+                        entry.toLowerCase().contains('delivered');
+
+                    final dotColor = isError
+                        ? const Color(0xFFDC2626)
+                        : isSuccess
+                        ? const Color(0xFF1B6B4D)
+                        : const Color(0xFF94A3B8);
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Timeline dot
+                          Column(
+                            children: [
+                              const SizedBox(height: 3),
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: dotColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              entry,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                                fontWeight: isNew ? FontWeight.w600 : FontWeight.normal,
+                                color: isError
+                                    ? const Color(0xFFDC2626)
+                                    : isNew
+                                    ? const Color(0xFF1B6B4D)
+                                    : cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quick Actions Row
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _QuickActionsRow extends StatelessWidget {
+  const _QuickActionsRow({
+    required this.isPoweredOn,
+    required this.processing,
+    required this.allReady,
+    required this.onTogglePower,
+    required this.onRunNow,
+  });
+
+  final bool isPoweredOn;
+  final bool processing;
+  final bool allReady;
+  final Future<void> Function() onTogglePower;
+  final Future<void> Function() onRunNow;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        // Power toggle chip
+        Expanded(
+          child: _ActionChip(
+            icon: Icons.power_settings_new_rounded,
+            label: isPoweredOn ? 'Running' : 'Paused',
+            color: isPoweredOn ? const Color(0xFF1B6B4D) : const Color(0xFF94A3B8),
+            bg: isPoweredOn ? const Color(0xFFEBF3EE) : const Color(0xFFF1F5F9),
+            onTap: onTogglePower,
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Run now chip
+        Expanded(
+          child: _ActionChip(
+            icon: processing ? Icons.sync_rounded : Icons.play_circle_outline_rounded,
+            label: processing ? 'Processing…' : 'Run Now',
+            color: const Color(0xFF1B6B4D),
+            bg: const Color(0xFFEBF3EE),
+            onTap: (processing || !allReady || !isPoweredOn) ? null : onRunNow,
+            loading: processing,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionChip extends StatelessWidget {
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.bg,
+    this.onTap,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final Color bg;
+  final Future<void> Function()? onTap;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onTap == null;
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: disabled ? const Color(0xFFF1F5F9) : bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: disabled ? const Color(0xFFE2E8F0) : color.withOpacity(0.25),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            loading
+                ? SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: color,
+                    ),
+                  )
+                : Icon(icon, size: 16, color: disabled ? const Color(0xFF94A3B8) : color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: disabled ? const Color(0xFF94A3B8) : color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alert Banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AlertBanner extends StatelessWidget {
+  const _AlertBanner({
+    required this.icon,
+    required this.color,
+    required this.bg,
+    required this.border,
+    required this.message,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final Color bg;
+  final Color border;
+  final String message;
+  final Future<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 16, color: color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recent Activity Preview (home tab)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RecentActivityPreview extends StatelessWidget {
+  const _RecentActivityPreview({required this.logs});
+  final List<String> logs;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final preview = logs.take(5).toList();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE8EDEB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Row(
+              children: [
+                const Icon(Icons.history_rounded, size: 15, color: Color(0xFF6B9E89)),
+                const SizedBox(width: 6),
+                const Text(
+                  'Recent Activity',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF134235),
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const Spacer(),
+                if (logs.isNotEmpty)
+                  Text(
+                    '${logs.length} total',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF6B9E89),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          if (preview.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Center(
+                child: Text(
+                  'No activity yet',
+                  style: TextStyle(fontSize: 12, color: cs.outlineVariant),
+                ),
+              ),
+            )
+          else
+            ...preview.asMap().entries.map((e) {
+              final isError = e.value.toLowerCase().contains('error') ||
+                  e.value.toLowerCase().contains('fail');
+              final isSuccess = e.value.toLowerCase().contains('success') ||
+                  e.value.toLowerCase().contains('complet') ||
+                  e.value.toLowerCase().contains('delivered');
+              final dotColor = isError
+                  ? const Color(0xFFDC2626)
+                  : isSuccess
+                  ? const Color(0xFF1B6B4D)
+                  : const Color(0xFFCBD5E1);
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: dotColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        e.value,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: isError
+                              ? const Color(0xFFDC2626)
+                              : e.key == 0
+                              ? const Color(0xFF1B6B4D)
+                              : cs.onSurfaceVariant,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
       ),
     );
   }
@@ -1418,6 +1964,7 @@ class _StatusHeroCard extends StatelessWidget {
     required this.processing,
     required this.registered,
     required this.allReady,
+    required this.isPoweredOn,
   });
 
   final String status;
@@ -1426,88 +1973,178 @@ class _StatusHeroCard extends StatelessWidget {
   final bool processing;
   final bool registered;
   final bool allReady;
+  final bool isPoweredOn;
 
-  Color _statusColor(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    if (lastError != null) return cs.error;
-    if (processing) return cs.primary;
-    if (!registered || !allReady) return cs.outline;
-    return const Color(0xFF1B6B4D);
-  }
-
-  IconData _statusIcon() {
-    if (lastError != null) return Icons.error_outline_rounded;
-    if (processing) return Icons.sync_rounded;
-    if (!registered) return Icons.link_off_rounded;
-    if (!allReady) return Icons.warning_amber_rounded;
-    return Icons.check_circle_outline_rounded;
+  _StatusStyle _style() {
+    if (lastError != null) return _StatusStyle(
+      icon: Icons.error_outline_rounded,
+      color: const Color(0xFFDC2626),
+      bg: const Color(0xFFFEF2F2),
+      border: const Color(0xFFFECACA),
+      label: 'Error',
+    );
+    if (processing) return _StatusStyle(
+      icon: Icons.sync_rounded,
+      color: const Color(0xFF1B6B4D),
+      bg: const Color(0xFFEBF3EE),
+      border: const Color(0xFFC3D9CE),
+      label: 'Processing',
+    );
+    if (!registered) return _StatusStyle(
+      icon: Icons.link_off_rounded,
+      color: const Color(0xFF64748B),
+      bg: const Color(0xFFF8FAFC),
+      border: const Color(0xFFE2E8F0),
+      label: 'Not registered',
+    );
+    if (!isPoweredOn) return _StatusStyle(
+      icon: Icons.power_off_rounded,
+      color: const Color(0xFFE65100),
+      bg: const Color(0xFFFFF8E1),
+      border: const Color(0xFFFFE082),
+      label: 'Paused',
+    );
+    if (!allReady) return _StatusStyle(
+      icon: Icons.warning_amber_rounded,
+      color: const Color(0xFFB45309),
+      bg: const Color(0xFFFFFBEB),
+      border: const Color(0xFFFDE68A),
+      label: 'Needs attention',
+    );
+    return _StatusStyle(
+      icon: Icons.check_circle_rounded,
+      color: const Color(0xFF1B6B4D),
+      bg: const Color(0xFFEBF3EE),
+      border: const Color(0xFFC3D9CE),
+      label: 'Active',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final color = _statusColor(context);
-    return Card(
-      elevation: 0,
-      color: cs.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: cs.outlineVariant),
+    final s = _style();
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: s.bg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: s.border),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(_statusIcon(), color: color, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'Status',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelMedium?.copyWith(color: cs.outline),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: s.color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              status,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
+                child: Icon(s.icon, size: 18, color: s.color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: s.color.withOpacity(0.7),
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    Text(
+                      status,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: s.color,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (processing)
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: s.color,
+                  ),
+                ),
+            ],
+          ),
+          if (currentJobId != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: s.color.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.receipt_long_rounded, size: 12, color: s.color),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Job: $currentJobId',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: s.color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (currentJobId != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Job: $currentJobId',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
+          ],
+          if (lastError != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDC2626).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                lastError!,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFFDC2626),
                   fontFamily: 'monospace',
                 ),
               ),
-            ],
-            if (lastError != null) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: cs.errorContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  lastError!,
-                  style: TextStyle(color: cs.onErrorContainer, fontSize: 12),
-                ),
-              ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
+}
+
+class _StatusStyle {
+  const _StatusStyle({
+    required this.icon,
+    required this.color,
+    required this.bg,
+    required this.border,
+    required this.label,
+  });
+  final IconData icon;
+  final Color color;
+  final Color bg;
+  final Color border;
+  final String label;
 }
 
 class _DeviceInfoCard extends StatelessWidget {
@@ -1516,43 +2153,89 @@ class _DeviceInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Card(
-      elevation: 0,
-      color: cs.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: cs.outlineVariant),
+        border: Border.all(color: const Color(0xFFE8EDEB)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Device',
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: cs.outline),
-            ),
-            const SizedBox(height: 12),
-            _InfoRow(
-              icon: Icons.phone_android,
-              label: 'Name',
-              value: config.name,
-            ),
-            const SizedBox(height: 8),
-            _InfoRow(
-              icon: Icons.fingerprint,
-              label: 'Device ID',
-              value: config.deviceId.length > 16
-                  ? '${config.deviceId.substring(0, 16)}…'
-                  : config.deviceId,
-              mono: true,
-            ),
-          ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.phone_android_rounded, size: 14, color: Color(0xFF6B9E89)),
+              SizedBox(width: 6),
+              Text(
+                'Device',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF134235),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _DeviceInfoCell(
+                  label: 'Name',
+                  value: config.name,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _DeviceInfoCell(
+                  label: 'Device ID',
+                  value: config.deviceId.length > 12
+                      ? '${config.deviceId.substring(0, 12)}…'
+                      : config.deviceId,
+                  mono: true,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceInfoCell extends StatelessWidget {
+  const _DeviceInfoCell({required this.label, required this.value, this.mono = false});
+  final String label;
+  final String value;
+  final bool mono;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF6B9E89),
+          ),
         ),
-      ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF134235),
+            fontFamily: mono ? 'monospace' : null,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
     );
   }
 }
@@ -2000,47 +2683,6 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _WarningBanner extends StatelessWidget {
-  const _WarningBanner({required this.message, required this.onTap});
-  final String message;
-  final Future<void> Function() onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: cs.errorContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              color: cs.onErrorContainer,
-              size: 18,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(color: cs.onErrorContainer, fontSize: 13),
-              ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              color: cs.onErrorContainer,
-              size: 14,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ── Power Button — shown in the AppBar ───────────────────────────────────────
 class _PowerButton extends StatelessWidget {
@@ -2081,159 +2723,7 @@ class _PowerButton extends StatelessWidget {
   }
 }
 
-// ── Power-off banner — amber strip shown in the body ─────────────────────────
-class _PowerOffBanner extends StatelessWidget {
-  const _PowerOffBanner({required this.onTurnOn});
-  final Future<void> Function() onTurnOn;
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTurnOn,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFF8E1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFFFE082)),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.power_off_rounded,
-              color: Color(0xFFE65100),
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Agent is paused',
-                    style: TextStyle(
-                      color: Color(0xFFE65100),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'No jobs will be executed. Tap to turn on.',
-                    style: TextStyle(
-                      color: Color(0xFFBF360C),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(
-              Icons.power_settings_new_rounded,
-              color: Color(0xFFE65100),
-              size: 18,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LogCard extends StatelessWidget {
-  const _LogCard({required this.logs});
-  final List<String> logs;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Card(
-      elevation: 0,
-      color: cs.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: cs.outlineVariant),
-      ),
-      // Use a Column so the list fills whatever height the card is given.
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Header ──────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: Row(
-              children: [
-                Icon(Icons.list_alt_rounded, size: 14, color: cs.outline),
-                const SizedBox(width: 6),
-                Text(
-                  'Activity Log',
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelMedium
-                      ?.copyWith(color: cs.outline),
-                ),
-                const Spacer(),
-                if (logs.isNotEmpty)
-                  Text(
-                    '${logs.length} event${logs.length == 1 ? '' : 's'}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelSmall
-                        ?.copyWith(color: cs.outline),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Divider(height: 1),
-
-          // ── Scrollable log list ──────────────────────────────────────────
-          Expanded(
-            child: logs.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        'No events yet.',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: cs.outline),
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    // newest-first: index 0 is the most recent entry.
-                    // No reverse needed because _appendLog already inserts
-                    // at index 0.  Scroll starts at the top (newest).
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    itemCount: logs.length,
-                    itemBuilder: (context, index) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Text(
-                          logs[index],
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                fontFamily: 'monospace',
-                                fontSize: 11,
-                                color: index == 0
-                                    ? cs.onSurface
-                                    : cs.onSurfaceVariant,
-                              ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SettingsPage — backend URL, permissions, device registration
