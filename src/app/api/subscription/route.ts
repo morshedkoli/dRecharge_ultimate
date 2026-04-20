@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkSubscription, invalidateSubscriptionCache, getSiteDomain } from "@/lib/subscription";
+export const dynamic = "force-dynamic";
 
 const EXTERNAL_API = "https://drecharge.com/subscription/api/v1/check-domain";
 
@@ -7,7 +8,7 @@ export type LicenseUiState = "active" | "expired" | "inactive" | "not_registered
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function deriveUiState(data: any): LicenseUiState {
-  if (!data?.tracked || data?.status === "not_found") return "not_registered";
+  if (!data || !data.tracked || data.status === "not_found") return "not_registered";
   if (data.tracked && data.expired) return "expired";
   if (data.tracked && data.subscribed && !data.expired) return "active";
   return "inactive";
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
       }
       const json = await res.json();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data: any = json?.data ?? {};
+      const data: any = json?.data?.domain ? json.data : (json?.domain ? json : {});
       const checkedAt: string = json?.checkedAt ?? new Date().toISOString();
       return NextResponse.json({
         ...data,
