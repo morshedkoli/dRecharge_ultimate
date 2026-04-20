@@ -4,6 +4,7 @@ import { AdminGuard } from "@/components/admin/AdminGuard";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminTopbar } from "@/components/admin/AdminTopbar";
 import { SubscriptionGate, SubscriptionWarningBanner } from "@/components/SubscriptionGate";
+import { SetupWizard } from "@/components/SetupWizard";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -11,6 +12,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <AdminGuard>
+      <SetupWizard />
       <SubscriptionGate>
         <div className="flex h-screen overflow-hidden bg-[#F4F6F5]">
           <AdminSidebar

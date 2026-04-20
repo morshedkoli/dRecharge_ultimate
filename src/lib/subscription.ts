@@ -55,6 +55,28 @@ export function getSiteDomain(): string {
   return "localhost";
 }
 
+/**
+ * Returns the configured subscription domain:
+ * 1. DB SiteSettings.domain (admin-configured — highest priority)
+ * 2. SITE_DOMAIN env var
+ * 3. NEXTAUTH_URL / VERCEL_URL
+ * 4. "localhost" fallback
+ */
+async function getConfiguredDomain(): Promise<string> {
+  try {
+    await connectDB();
+    // import() avoids circular dep issues
+    const SiteSettings = (await import("@/lib/db/models/SiteSettings")).default;
+    const settings = await SiteSettings.findById("site_settings").lean();
+    if (settings?.domain && settings.setupComplete) {
+      return settings.domain.trim();
+    }
+  } catch {
+    // fall through to env-based detection
+  }
+  return getSiteDomain();
+}
+
 function isDevDomain(domain: string): boolean {
   return (
     domain === "localhost" ||
@@ -170,7 +192,7 @@ export async function invalidateSubscriptionCache(): Promise<void> {
 }
 
 export async function checkSubscription(): Promise<SubscriptionStatus> {
-  const domain = getSiteDomain();
+  const domain = await getConfiguredDomain();
   const now = Date.now();
 
   // Dev / local / preview → always active (skip external check)

@@ -1,10 +1,10 @@
 "use client";
 import { useSubscription, type SubscriptionStatus } from "@/lib/hooks/useSubscription";
-import { AlertTriangle, ExternalLink, RefreshCw, ShieldOff } from "lucide-react";
+import { AlertTriangle, ExternalLink, Loader2, RefreshCw, ShieldOff } from "lucide-react";
 
 // ── Warning banner — rendered inside <main> ───────────────────────────────────
 export function SubscriptionWarningBanner() {
-  const { status, loading } = useSubscription();
+  const { status, loading, reloading, refetch } = useSubscription();
   if (loading || !status) return null;
   // Only show warning when active but close to expiry
   if (status.state !== "active") return null;
@@ -40,12 +40,24 @@ export function SubscriptionWarningBanner() {
       >
         Renew now <ExternalLink className="w-3 h-3" />
       </a>
+      <button
+        onClick={refetch}
+        disabled={reloading}
+        title="Refresh subscription status"
+        className="flex items-center gap-1 underline underline-offset-2 hover:text-amber-900 transition-colors disabled:opacity-50"
+      >
+        {reloading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+      </button>
     </div>
   );
 }
 
 // ── Blocked screen ─────────────────────────────────────────────────────────────
-function BlockedScreen({ status }: { status: SubscriptionStatus }) {
+function BlockedScreen({ status, onRefresh, refreshing }: {
+  status: SubscriptionStatus;
+  onRefresh: () => void;
+  refreshing: boolean;
+}) {
   const isUntracked = status.state === "untracked";
 
   type StateCfg = { title: string; description: string; iconBg: string; iconColor: string; cardBorder: string };
@@ -147,12 +159,17 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
                 {status.state === "inactive" ? "Get Subscription" : "Renew Subscription"}
               </a>
             )}
+
+            {/* Check Again — busts server cache and re-fetches live from external API */}
             <button
-              onClick={() => window.location.reload()}
-              className="flex items-center justify-center gap-2 w-full px-6 py-3 border border-gray-200 text-gray-600 text-sm font-bold font-manrope rounded-xl hover:bg-gray-50 transition-all"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="flex items-center justify-center gap-2 w-full px-6 py-3 border border-gray-200 text-gray-600 text-sm font-bold font-manrope rounded-xl hover:bg-gray-50 transition-all disabled:opacity-60"
             >
-              <RefreshCw className="w-4 h-4" />
-              Check Again
+              {refreshing
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Checking…</>
+                : <><RefreshCw className="w-4 h-4" /> Check Again</>
+              }
             </button>
           </div>
         </div>
@@ -160,7 +177,7 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
         <p className="text-center text-xs text-gray-400 mt-4 font-manrope">
           {isUntracked
             ? "Contact your administrator if you believe this domain should be registered."
-            : "Contact support if you believe this is an error."}
+            : "After renewing, click \"Check Again\" to refresh your licence status."}
         </p>
       </div>
     </div>
@@ -169,14 +186,14 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
 
 // ── Gate — wraps full layout ───────────────────────────────────────────────────
 export function SubscriptionGate({ children }: { children: React.ReactNode }) {
-  const { status, loading } = useSubscription();
+  const { status, loading, reloading, refetch } = useSubscription();
 
   // Loading — render children (avoids flash)
   if (loading || !status) return <>{children}</>;
 
   // Block if not active — but "unknown" is grace (API down), let through
   if (!status.subscribed && status.state !== "unknown") {
-    return <BlockedScreen status={status} />;
+    return <BlockedScreen status={status} onRefresh={refetch} refreshing={reloading} />;
   }
 
   return <>{children}</>;
