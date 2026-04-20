@@ -762,6 +762,7 @@ class _AppShellState extends State<_AppShell> {
       subscriptionInfo: _subscriptionInfo,
       onTogglePower: _togglePower,
       onRunNow: _runQueueTick,
+      onReloadSubscription: _refreshSubscription,
       onOpenSettings: () async {
         await Navigator.push(
           context,
@@ -1271,6 +1272,7 @@ class HomeScreen extends StatelessWidget {
     required this.onTogglePower,
     required this.onRunNow,
     required this.onOpenSettings,
+    required this.onReloadSubscription,
     this.subscriptionInfo,
   });
 
@@ -1288,6 +1290,7 @@ class HomeScreen extends StatelessWidget {
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
   final Future<void> Function() onOpenSettings;
+  final Future<void> Function() onReloadSubscription;
 
   bool get _allReady => phoneGranted && smsGranted && accessibilityEnabled;
 
@@ -1349,7 +1352,7 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 12),
 
               // ── Subscription card ─────────────────────────────────────
-              _SubscriptionCard(info: subscriptionInfo),
+              _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
               const SizedBox(height: 12),
 
               // ── Permission warning banner (if not ready) ──────────────
@@ -1559,8 +1562,9 @@ class _DeviceInfoCard extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SubscriptionCard extends StatelessWidget {
-  const _SubscriptionCard({this.info});
+  const _SubscriptionCard({this.info, required this.onReload});
   final SubscriptionInfo? info;
+  final Future<void> Function() onReload;
 
   @override
   Widget build(BuildContext context) {
@@ -1581,13 +1585,16 @@ class _SubscriptionCard extends StatelessWidget {
             children: [
               Icon(Icons.shield_outlined, size: 18, color: cs.outline),
               const SizedBox(width: 10),
-              Text(
-                'Checking licence…',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: cs.outline),
+              Expanded(
+                child: Text(
+                  'Checking licence…',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: cs.outline),
+                ),
               ),
+              _ReloadButton(onReload: onReload),
             ],
           ),
         ),
@@ -1609,7 +1616,7 @@ class _SubscriptionCard extends StatelessWidget {
         : const Color(0xFF1B6B4D);  // brand green
 
     final IconData statusIcon = isBlocked
-        ? Icons.shield_off_outlined
+        ? Icons.error_outline_rounded
         : Icons.shield_outlined;
 
     final String statusLabel = switch (state) {
@@ -1681,6 +1688,8 @@ class _SubscriptionCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                _ReloadButton(onReload: onReload),
               ],
             ),
             const SizedBox(height: 10),
@@ -1722,43 +1731,47 @@ class _SubscriptionCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
-            // ── Expiry date row ──────────────────────────────────────
-            if (info!.expiresAt != null) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    isBlocked ? 'Expired on' : 'Expires on',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                  Row(
-                    children: [
+            // ── Expiry date row (always shown) ───────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  isBlocked ? 'Expired on' : 'Expires on',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
+                ),
+                Row(
+                  children: [
+                    Text(
+                      info!.expiresAt != null
+                          ? _formatDate(info!.expiresAt!)
+                          : '—',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: info!.expiresAt != null
+                            ? statusColor
+                            : cs.onSurfaceVariant,
+                      ),
+                    ),
+                    if (!isBlocked && info!.daysUntilExpiry != null) ...[
+                      const SizedBox(width: 6),
                       Text(
-                        _formatDate(info!.expiresAt!),
+                        '(${info!.daysUntilExpiry}d left)',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: statusColor,
+                          color: cs.onSurfaceVariant,
                         ),
                       ),
-                      if (!isBlocked && info!.daysUntilExpiry != null) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          '(${info!.daysUntilExpiry}d left)',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
                     ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
 
-              // ── Progress bar ─────────────────────────────────────
+            // ── Progress bar (only when active with known expiry) ────
+            if (info!.expiresAt != null && barFraction > 0) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
@@ -1768,6 +1781,7 @@ class _SubscriptionCard extends StatelessWidget {
                   valueColor: AlwaysStoppedAnimation<Color>(statusColor),
                 ),
               ),
+              const SizedBox(height: 8),
             ],
 
             // ── CTA ─────────────────────────────────────────────────
@@ -1850,6 +1864,69 @@ class _SubscriptionCard extends StatelessWidget {
     try {
       await platform.invokeMethod('openUrl', {'url': uri.toString()});
     } catch (_) {}
+  }
+}
+
+class _ReloadButton extends StatefulWidget {
+  const _ReloadButton({required this.onReload});
+  final Future<void> Function() onReload;
+
+  @override
+  State<_ReloadButton> createState() => _ReloadButtonState();
+}
+
+class _ReloadButtonState extends State<_ReloadButton>
+    with SingleTickerProviderStateMixin {
+  bool _loading = false;
+  late final AnimationController _spinCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _spinCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+  }
+
+  @override
+  void dispose() {
+    _spinCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _tap() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    _spinCtrl.repeat();
+    try {
+      await widget.onReload();
+    } finally {
+      if (mounted) {
+        _spinCtrl.stop();
+        _spinCtrl.reset();
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: _tap,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: RotationTransition(
+          turns: _spinCtrl,
+          child: Icon(
+            Icons.refresh_rounded,
+            size: 16,
+            color: _loading ? cs.primary : cs.outline,
+          ),
+        ),
+      ),
+    );
   }
 }
 
