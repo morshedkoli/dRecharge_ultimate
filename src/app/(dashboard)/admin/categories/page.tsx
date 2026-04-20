@@ -1,28 +1,50 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { ServiceCategory } from "@/types";
 import { createCategory, updateCategory, deleteCategory } from "@/lib/functions";
 import { ImageUpload } from "@/components/admin/ImageUpload";
 import { toast } from "sonner";
 import { Tag, Plus, Pencil, Trash2, X, Check, Layers } from "lucide-react";
 
-function CategoryModal({ mode, initial, onClose }: { mode: "create" | "edit"; initial?: ServiceCategory; onClose: () => void }) {
+function CategoryModal({
+  mode,
+  initial,
+  onClose,
+  onCreated,
+  onUpdated,
+}: {
+  mode: "create" | "edit";
+  initial?: ServiceCategory;
+  onClose: () => void;
+  onCreated: (cat: ServiceCategory) => void;
+  onUpdated: (cat: ServiceCategory) => void;
+}) {
   const [name, setName] = useState(initial?.name ?? "");
   const [logo, setLogo] = useState(initial?.logo ?? "");
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
     if (!name.trim()) { toast.error("Category name is required"); return; }
     if (!logo.trim()) { toast.error("Logo (URL or emoji) is required"); return; }
     setSaving(true);
     try {
-      if (mode === "create") { await createCategory({ name, logo }); toast.success("Category created"); }
-      else if (initial) { await updateCategory({ categoryId: initial.id, name, logo }); toast.success("Category updated"); }
+      if (mode === "create") {
+        const result = await createCategory({ name: name.trim(), logo: logo.trim() });
+        toast.success("Category created");
+        onCreated({ id: result.categoryId, name: name.trim(), logo: logo.trim(), createdAt: new Date().toISOString() });
+      } else if (initial) {
+        await updateCategory({ categoryId: initial.id, name: name.trim(), logo: logo.trim() });
+        toast.success("Category updated");
+        onUpdated({ ...initial, name: name.trim(), logo: logo.trim() });
+      }
       onClose();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -77,18 +99,21 @@ export default function CategoriesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [svcCount, setSvcCount] = useState<Record<string, number>>({});
 
-  useEffect(() => {
-    let mounted = true;
-    fetch("/api/admin/categories")
-      .then(r => r.json())
-      .then(d => {
-        if (!mounted) return;
-        if (d.categories) setCategories(d.categories);
-        setLoading(false);
-      })
-      .catch(err => { console.error(err); if (mounted) setLoading(false); });
-    return () => { mounted = false; };
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/categories");
+      const d = await res.json();
+      if (d.categories) setCategories(d.categories);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   useEffect(() => {
     let mounted = true;
@@ -97,7 +122,7 @@ export default function CategoriesPage() {
       .then(d => {
         if (!mounted || !d.services) return;
         const counts: Record<string, number> = {};
-        d.services.forEach((s: any) => {
+        d.services.forEach((s: { categoryId?: string }) => {
           const cid = s.categoryId;
           if (cid) counts[cid] = (counts[cid] ?? 0) + 1;
         });
@@ -107,12 +132,29 @@ export default function CategoriesPage() {
     return () => { mounted = false; };
   }, []);
 
+  function handleCreated(cat: ServiceCategory) {
+    setCategories(prev => [...prev, cat]);
+  }
+
+  function handleUpdated(cat: ServiceCategory) {
+    setCategories(prev => prev.map(c => c.id === cat.id ? cat : c));
+  }
+
   async function handleDelete(cat: ServiceCategory) {
     if (!confirm(`Delete category "${cat.name}"? Services in this category will become uncategorised.`)) return;
     setDeletingId(cat.id);
-    try { await deleteCategory(cat.id); toast.success("Category deleted"); }
-    catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
-    finally { setDeletingId(null); }
+    // Optimistic removal
+    setCategories(prev => prev.filter(c => c.id !== cat.id));
+    try {
+      await deleteCategory(cat.id);
+      toast.success("Category deleted");
+    } catch (e: unknown) {
+      // Rollback on failure
+      setCategories(prev => [...prev, cat].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   function openCreate() { setEditing(undefined); setModalMode("create"); }
@@ -217,7 +259,15 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      {modalMode && <CategoryModal mode={modalMode} initial={editing} onClose={closeModal} />}
+      {modalMode && (
+        <CategoryModal
+          mode={modalMode}
+          initial={editing}
+          onClose={closeModal}
+          onCreated={handleCreated}
+          onUpdated={handleUpdated}
+        />
+      )}
     </div>
   );
 }

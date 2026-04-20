@@ -210,12 +210,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
             description="This will lock the transaction as complete, representing a successful mobile execution for testing purposes."
             confirmLabel="Simulate Done"
             onConfirm={async () => {
-              try {
-                await simulateJobResult(job.jobId, job.txId || "", true);
-                toast.success("Job marked as Done automatically");
-              } catch (err: any) {
-                toast.error(err.message || "Failed to simulate processing. Ensure job structure is valid.");
-              }
+              await simulateJobResult(job.jobId, job.txId || "", true);
+              setJob(j => j ? { ...j, status: "done", parsedResult: { ...(j.parsedResult ?? {}), success: true } } : j);
+              toast.success("Job marked as Done automatically");
             }}
           >
             <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#E8F1EE] text-[#134235] text-sm rounded-xl hover:bg-[#d4e8e0] font-manrope font-bold transition-colors">
@@ -229,12 +226,9 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
             confirmLabel="Force Fail"
             confirmVariant="destructive"
             onConfirm={async () => {
-              try {
-                await failTransaction(job.txId || "", job.jobId || "", "Admin force-failed");
-                toast.success("Job force-failed — wallet refunded");
-              } catch (err: any) {
-                toast.error(err.message || "Failed to force fail.");
-              }
+              await failTransaction(job.txId || "", job.jobId || "", "Admin force-failed");
+              setJob(j => j ? { ...j, status: "failed", locked: false, parsedResult: { ...(j.parsedResult ?? {}), success: false, reason: "Admin force-failed" } } : j);
+              toast.success("Job force-failed — wallet refunded");
             }}
           >
             <button className="inline-flex items-center gap-2 px-5 py-2.5 border border-red-200 text-red-600 text-sm rounded-xl hover:bg-red-50 font-manrope font-bold transition-colors">

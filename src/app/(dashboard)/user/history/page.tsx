@@ -43,6 +43,12 @@ export default function UserHistoryPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Keep live data in sync — matches the "Auto-refreshing" footer claim
+  useEffect(() => {
+    const interval = setInterval(fetchAll, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
   const allItems = [...transactions, ...balanceRequests].sort((a, b) => {
     const tA = new Date(a.createdAt).getTime() || 0;
     const tB = new Date(b.createdAt).getTime() || 0;

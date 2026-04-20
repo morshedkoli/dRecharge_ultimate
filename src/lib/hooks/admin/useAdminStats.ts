@@ -52,5 +52,5 @@ export function useAdminStats() {
     return () => clearInterval(interval);
   }, [fetchStats]);
 
-  return { stats, loading };
+  return { stats, loading, refetch: fetchStats };
 }

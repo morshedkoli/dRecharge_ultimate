@@ -10,7 +10,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Search, UserPlus, X, Users, ArrowRight } from "lucide-react";
 
-function RegisterUserDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function RegisterUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,12 +21,14 @@ function RegisterUserDialog({ open, onClose }: { open: boolean; onClose: () => v
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setSaving(true);
     try {
       const result = await createUserAccount({ displayName, email, password, phoneNumber: phoneNumber || undefined });
       toast.success(`User created (${result.uid.slice(0, 10)}...)`);
       setDisplayName(""); setEmail(""); setPassword(""); setPhoneNumber("");
       onClose();
+      onSuccess();
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to create user");
     } finally {
@@ -100,7 +102,7 @@ export default function UsersPage() {
   const [role, setRole] = useState<UserRole | "all">("all");
   const [status, setStatus] = useState<UserStatus | "all">("all");
   const [registerOpen, setRegisterOpen] = useState(false);
-  const { users, loading } = useUsers({ search, role, status });
+  const { users, loading, refetch } = useUsers({ search, role, status });
 
   return (
     <div className="p-6 sm:p-10 max-w-7xl mx-auto space-y-8 pb-12">
@@ -214,7 +216,7 @@ export default function UsersPage() {
         )}
       </div>
 
-      <RegisterUserDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
+      <RegisterUserDialog open={registerOpen} onClose={() => setRegisterOpen(false)} onSuccess={refetch} />
     </div>
   );
 }

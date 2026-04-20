@@ -8,6 +8,7 @@ import { writeLog } from "@/lib/db/audit";
 import { getSession } from "@/lib/auth/session";
 import { withAdminSession } from "@/lib/auth/session";
 import { resolveJobUssdSteps } from "@/lib/ussd";
+import { checkSubscription } from "@/lib/subscription";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 
@@ -28,6 +29,14 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getSession(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const sub = await checkSubscription();
+    if (!sub.subscribed) {
+      return NextResponse.json(
+        { error: "Subscription expired. Renew at drecharge.com to create transactions." },
+        { status: 403 }
+      );
+    }
 
     const { serviceId, recipientNumber, amount } = await request.json();
     if (!serviceId || !recipientNumber || !amount || amount <= 0) {

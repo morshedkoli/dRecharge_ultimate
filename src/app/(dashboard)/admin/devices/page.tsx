@@ -572,7 +572,28 @@ export default function DevicesPage() {
                   <DeviceStatusDot status={device.status} />
                 </div>
               </div>
-              <h3 className="font-headline font-bold text-[#134235] text-xl mb-1">{device.name}</h3>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <h3 className="font-headline font-bold text-[#134235] text-xl">{device.name}</h3>
+                {device.batteryLevel != null && (
+                  <div className={[
+                    "flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold font-manrope border",
+                    device.isCharging
+                      ? "bg-green-50 border-green-200 text-green-700"
+                      : device.batteryLevel <= 15
+                      ? "bg-red-50 border-red-200 text-red-600"
+                      : device.batteryLevel <= 30
+                      ? "bg-amber-50 border-amber-200 text-amber-700"
+                      : "bg-surface-container border-black/[0.06] text-on-surface-variant",
+                  ].join(" ")}>
+                    <Battery className={[
+                      "w-3 h-3",
+                      device.isCharging ? "text-green-600" : "",
+                    ].join(" ")} />
+                    {device.batteryLevel}%
+                    {device.isCharging && <span className="text-green-600">⚡</span>}
+                  </div>
+                )}
+              </div>
 
               {/* Power-off notice */}
               {!device.isPoweredOn && device.status !== "offline" && (

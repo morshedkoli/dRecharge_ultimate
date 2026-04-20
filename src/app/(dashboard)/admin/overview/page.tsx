@@ -7,12 +7,14 @@ import { useAdminStats } from "@/lib/hooks/admin/useAdminStats";
 import { useAuditLogs } from "@/lib/hooks/admin/useAuditLogs";
 import { useOverviewQueueStatus } from "@/lib/hooks/admin/useOverviewQueueStatus";
 import { useAnalyticsData } from "@/lib/hooks/admin/useAnalyticsData";
+import { useSubscription } from "@/lib/hooks/useSubscription";
 import { relativeTime } from "@/lib/utils";
 import { AuditLog } from "@/types";
 import {
   Users, Inbox, ListOrdered, Smartphone,
   CircleCheckBig, TriangleAlert, Cpu, ArrowUpRight,
   Activity, Clock, TrendingUp, ExternalLink,
+  ShieldCheck, ShieldOff, ShieldAlert, Globe,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -146,6 +148,152 @@ function Skeleton({ className = "" }: { className?: string }) {
 }
 
 /* ─────────────────────────────────────────────────────────────── */
+/* Subscription status card                                       */
+/* ─────────────────────────────────────────────────────────────── */
+function SubscriptionCard() {
+  const { status, loading } = useSubscription();
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl border border-black/[0.05] premium-shadow p-5 animate-pulse">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-xl bg-[#F4F6F5]" />
+          <div className="space-y-1.5 flex-1">
+            <div className="h-3.5 w-28 bg-[#F4F6F5] rounded" />
+            <div className="h-2.5 w-20 bg-[#F4F6F5] rounded" />
+          </div>
+          <div className="h-6 w-20 bg-[#F4F6F5] rounded-full" />
+        </div>
+        <div className="h-1.5 w-full bg-[#F4F6F5] rounded-full" />
+      </div>
+    );
+  }
+
+  if (!status) return null;
+
+  const isExpired  = !status.subscribed;
+  const isWarning  = status.subscribed && status.daysUntilExpiry !== null && status.daysUntilExpiry <= 14;
+  const isGood     = status.subscribed && !isWarning;
+
+  // Progress bar: 0–365 days mapped to 0–100%
+  const maxDays = 365;
+  const barPct = status.daysUntilExpiry !== null
+    ? Math.max(0, Math.min(100, (status.daysUntilExpiry / maxDays) * 100))
+    : 0;
+
+  const badge = isExpired
+    ? { label: "Expired",    bg: "bg-red-50",    text: "text-red-600",   border: "border-red-200",   icon: ShieldOff   }
+    : isWarning
+    ? { label: "Expiring",   bg: "bg-amber-50",  text: "text-amber-700", border: "border-amber-200", icon: ShieldAlert }
+    : { label: "Active",     bg: "bg-[#EBF3EE]", text: "text-[#2D5A4C]", border: "border-[#C3D9CE]", icon: ShieldCheck };
+
+  const barColor = isExpired
+    ? "bg-red-400"
+    : isWarning
+    ? "bg-amber-400"
+    : "bg-[#2D5A4C]";
+
+  const iconBg = isExpired
+    ? "bg-red-50"
+    : isWarning
+    ? "bg-amber-50"
+    : "bg-[#EBF3EE]";
+  const iconColor = isExpired
+    ? "text-red-500"
+    : isWarning
+    ? "text-amber-500"
+    : "text-[#2D5A4C]";
+
+  const BadgeIcon = badge.icon;
+
+  return (
+    <div className={`bg-white rounded-2xl border premium-shadow p-5 ${isExpired ? "border-red-100" : isWarning ? "border-amber-100" : "border-black/[0.05]"}`}>
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`p-2 rounded-xl shrink-0 ${iconBg}`}>
+            <BadgeIcon className={`w-5 h-5 ${iconColor}`} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/50 font-manrope">
+              Licence
+            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <Globe className="w-3 h-3 text-on-surface-variant/40 shrink-0" />
+              <p className="text-sm font-bold text-[#134235] font-manrope font-mono truncate">
+                {status.domain || "—"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Status badge */}
+        <span className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold font-manrope border ${badge.bg} ${badge.text} ${badge.border}`}>
+          <BadgeIcon className="w-3 h-3" />
+          {badge.label}
+        </span>
+      </div>
+
+      {/* Expiry info row */}
+      <div className="flex items-center justify-between text-xs font-manrope mb-2.5">
+        {status.expiresAt ? (
+          <>
+            <span className="text-on-surface-variant/60">
+              {isExpired ? "Expired" : "Expires"}
+            </span>
+            <span className={`font-bold ${isExpired ? "text-red-600" : isWarning ? "text-amber-700" : "text-[#134235]"}`}>
+              {new Date(status.expiresAt).toLocaleDateString("en-US", {
+                month: "short", day: "numeric", year: "numeric",
+              })}
+              {!isExpired && status.daysUntilExpiry !== null && (
+                <span className="ml-1.5 font-normal text-on-surface-variant/50">
+                  ({status.daysUntilExpiry}d left)
+                </span>
+              )}
+            </span>
+          </>
+        ) : (
+          <span className="text-on-surface-variant/40 italic">No expiry data</span>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      {status.expiresAt && (
+        <div className="h-1.5 w-full rounded-full bg-[#F4F6F5] overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+            style={{ width: `${isExpired ? 0 : barPct}%` }}
+          />
+        </div>
+      )}
+
+      {/* Renew CTA if expired or expiring */}
+      {(isExpired || isWarning) && (
+        <a
+          href="https://drecharge.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={[
+            "mt-3 flex items-center justify-center gap-1.5 w-full py-2 rounded-xl text-xs font-bold font-manrope transition-all",
+            isExpired
+              ? "bg-red-600 text-white hover:bg-red-700 shadow-sm shadow-red-200"
+              : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100",
+          ].join(" ")}
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          {isExpired ? "Renew Now — Transactions Suspended" : "Renew Subscription"}
+        </a>
+      )}
+
+      {/* Last checked */}
+      <p className="text-[10px] text-on-surface-variant/30 font-manrope mt-2.5 text-right">
+        Checked {relativeTime(status.checkedAt)}
+      </p>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────── */
 /* Page                                                           */
 /* ─────────────────────────────────────────────────────────────── */
 export default function OverviewPage() {
@@ -226,6 +374,9 @@ export default function OverviewPage() {
           loading={queueLoading}
         />
       </div>
+
+      {/* ── Subscription ────────────────────────────────────────────── */}
+      <SubscriptionCard />
 
       {/* ── Middle row: Chart + Sidebar ──────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

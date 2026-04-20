@@ -1,6 +1,10 @@
 package com.drecharge.drecharge_agent
 
+import android.app.KeyguardManager
+import android.content.Intent
+import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.os.StatFs
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -9,6 +13,21 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val channelName = "drecharge_agent/native"
+    private var screenWakeLock: PowerManager.WakeLock? = null
+
+    override fun onResume() {
+        super.onResume()
+        startAgentService()
+    }
+
+    private fun startAgentService() {
+        val serviceIntent = Intent(this, AgentForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -23,10 +42,12 @@ class MainActivity : FlutterActivity() {
                         UssdAutomationManager.openAccessibilitySettings(this)
                         result.success(null)
                     }
-                    "executeUssdSteps" -> handleExecuteUssdSteps(call, result)
-                    "executeUssdFlow"  -> handleExecuteUssdFlow(call, result)
-                    "readRecentSms"    -> handleReadRecentSms(call, result)
-                    "getStorageInfo"   -> handleGetStorageInfo(result)
+                    "executeUssdSteps"  -> handleExecuteUssdSteps(call, result)
+                    "executeUssdFlow"   -> handleExecuteUssdFlow(call, result)
+                    "readRecentSms"     -> handleReadRecentSms(call, result)
+                    "getStorageInfo"    -> handleGetStorageInfo(result)
+                    "wakeScreen"        -> handleWakeScreen(result)
+                    "releaseWakeLock"   -> handleReleaseWakeLock(result)
                     else -> result.notImplemented()
                 }
             }
@@ -107,5 +128,55 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             result.success(mapOf("totalMb" to 0L, "freeMb" to 0L))
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun handleWakeScreen(result: MethodChannel.Result) {
+        try {
+            // Acquire wake lock — turns screen on
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            screenWakeLock?.let { if (it.isHeld) it.release() }
+            val wl = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ON_AFTER_RELEASE,
+                "drecharge:job_exec"
+            )
+            wl.acquire(60_000L) // 60s max — released early by releaseWakeLock
+            screenWakeLock = wl
+
+            // Dismiss keyguard so USSD dialog is visible
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+                val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+                km.requestDismissKeyguard(this, null)
+            } else {
+                window.addFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    android.view.WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                )
+            }
+
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("wake_error", e.message, null)
+        }
+    }
+
+    private fun handleReleaseWakeLock(result: MethodChannel.Result) {
+        try {
+            screenWakeLock?.let { if (it.isHeld) it.release() }
+            screenWakeLock = null
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("wake_release_error", e.message, null)
+        }
+    }
+
+    override fun onDestroy() {
+        screenWakeLock?.let { if (it.isHeld) it.release() }
+        super.onDestroy()
     }
 }

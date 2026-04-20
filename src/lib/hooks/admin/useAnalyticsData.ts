@@ -67,5 +67,5 @@ export function useAnalyticsData(daysToFetch = 30) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  return { dailyData, serviceData, loading, error };
+  return { dailyData, serviceData, loading, error, refetch: fetchData };
 }

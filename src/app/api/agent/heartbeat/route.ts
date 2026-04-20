@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
     const name = String(body?.name || "").trim();
     const appVersion = String(body?.appVersion || "").trim();
     const isToggleCommand = body?.powerToggle === true;
+    const batteryLevel = typeof body?.batteryLevel === "number" ? body.batteryLevel : null;
+    const isCharging = typeof body?.isCharging === "boolean" ? body.isCharging : null;
 
     await connectDB();
 
@@ -49,6 +51,8 @@ export async function POST(request: NextRequest) {
     if (simProvider) update.simProvider = simProvider;
     if (name) update.name = name;
     if (appVersion) update.appVersion = appVersion;
+    if (batteryLevel !== null) update.batteryLevel = batteryLevel;
+    if (isCharging !== null) update.isCharging = isCharging;
 
     await AgentDevice.findByIdAndUpdate(agentSession.deviceId, update);
 

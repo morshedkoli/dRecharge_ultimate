@@ -5,10 +5,11 @@ import { createService, deleteService, saveService } from "@/lib/functions";
 import { relativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ImageUpload } from "@/components/admin/ImageUpload";
 import {
   Terminal, Plus, Trash2, Pencil, ToggleLeft, ToggleRight,
-  ChevronRight, Zap, Tag, ImageOff, ArrowRight,
+  Zap, Tag, ImageOff, ArrowRight,
 } from "lucide-react";
 
 function CatLogo({ logo, size = "sm" }: { logo: string; size?: "sm" | "md" }) {
@@ -29,6 +30,7 @@ function CatLogo({ logo, size = "sm" }: { logo: string; size?: "sm" | "md" }) {
 }
 
 function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose: () => void; categories: ServiceCategory[] }) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -39,6 +41,7 @@ function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
     if (!name.trim()) { toast.error("Service name is required"); return; }
     setSaving(true);
     try {
@@ -50,7 +53,7 @@ function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose
       });
       toast.success("Service created — now configure its USSD template");
       onClose();
-      window.location.href = `/admin/services/${result.serviceId}`;
+      router.push(`/admin/services/${result.serviceId}`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed");
     } finally {

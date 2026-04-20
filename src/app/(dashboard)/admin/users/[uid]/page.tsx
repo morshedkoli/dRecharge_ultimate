@@ -119,10 +119,12 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
   async function handleAddBalance() {
     const amt = parseFloat(addAmount);
     if (isNaN(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (submitting) return;
     setSubmitting(true);
     try {
       await callBalanceApi("add", amt, addNote);
       toast.success(`৳${amt.toFixed(2)} added to wallet`);
+      setUser(u => u ? { ...u, walletBalance: u.walletBalance + amt } : u);
       setShowAddBalance(false); setAddAmount(""); setAddNote("");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
     finally { setSubmitting(false); }
@@ -131,10 +133,12 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
   async function handleDeductBalance() {
     const amt = parseFloat(deductAmount);
     if (isNaN(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (submitting) return;
     setSubmitting(true);
     try {
       await callBalanceApi("deduct", amt, deductNote);
       toast.success(`৳${amt.toFixed(2)} deducted from wallet`);
+      setUser(u => u ? { ...u, walletBalance: Math.max(0, u.walletBalance - amt) } : u);
       setShowDeductBalance(false); setDeductAmount(""); setDeductNote("");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
     finally { setSubmitting(false); }
@@ -222,7 +226,11 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
                   description="User will be unable to access their account."
                   confirmLabel="Suspend"
                   confirmVariant="destructive"
-                  onConfirm={() => suspendUser(user.uid).then(() => { toast.success("User suspended"); }).catch((e) => { toast.error(e.message); })}
+                  onConfirm={async () => {
+                  await suspendUser(user.uid);
+                  setUser(u => u ? { ...u, status: "suspended" } : u);
+                  toast.success("User suspended");
+                }}
                 >
                   <button className="flex items-center gap-2 px-5 py-2.5 border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 rounded-xl text-sm font-bold font-manrope transition-all">
                     <ShieldOff className="w-4 h-4" /> Suspend
@@ -233,7 +241,11 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
                   title="Activate user?"
                   description="User will regain access to their account."
                   confirmLabel="Activate"
-                  onConfirm={() => activateUser(user.uid).then(() => { toast.success("User activated"); }).catch((e) => { toast.error(e.message); })}
+                  onConfirm={async () => {
+                  await activateUser(user.uid);
+                  setUser(u => u ? { ...u, status: "active" } : u);
+                  toast.success("User activated");
+                }}
                 >
                   <button className="flex items-center gap-2 px-5 py-2.5 border border-primary/20 text-primary bg-[#E8F1EE] hover:bg-primary/15 rounded-xl text-sm font-bold font-manrope transition-all">
                     <ShieldCheck className="w-4 h-4" /> Activate

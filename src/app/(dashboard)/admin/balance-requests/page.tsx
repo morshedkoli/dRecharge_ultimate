@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useBalanceRequests } from "@/lib/hooks/admin/useBalanceRequests";
 import { WalletAmount } from "@/components/admin/WalletAmount";
 import { StatusBadge } from "@/components/admin/StatusBadge";
@@ -8,10 +8,21 @@ import { approveBalanceRequest, rejectBalanceRequest } from "@/lib/functions";
 import { relativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 import { CheckCircle, XCircle, Clock, History } from "lucide-react";
+import { BalanceRequest } from "@/types";
 
-function PendingTab({ usersMap }: { usersMap: Record<string, any> }) {
-  const { requests, loading } = useBalanceRequests("pending");
+function PendingTab({
+  requests,
+  loading,
+  refetch,
+  usersMap,
+}: {
+  requests: BalanceRequest[];
+  loading: boolean;
+  refetch: () => void;
+  usersMap: Record<string, { displayName: string; phone: string }>;
+}) {
   const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
 
   return (
     <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
@@ -34,7 +45,7 @@ function PendingTab({ usersMap }: { usersMap: Record<string, any> }) {
                 <div className="h-4 bg-surface-container rounded-lg animate-pulse" />
               </td></tr>
             ))}
-            {!loading && requests.map((req) => {
+            {!loading && requests.filter(r => !processingIds.has(r.id)).map((req) => {
               const user = usersMap[req.userId];
               return (
                 <tr key={req.id} className="group hover:bg-surface-container/20 transition-colors align-top">
@@ -58,8 +69,15 @@ function PendingTab({ usersMap }: { usersMap: Record<string, any> }) {
                         description={`This will add ৳ ${req.amount.toFixed(2)} to the user's wallet.`}
                         confirmLabel="Approve"
                         onConfirm={async () => {
-                          await approveBalanceRequest(req.id, adminNotes[req.id]);
-                          toast.success(`৳ ${req.amount.toFixed(2)} added to wallet`);
+                          setProcessingIds(prev => new Set([...prev, req.id]));
+                          try {
+                            await approveBalanceRequest(req.id, adminNotes[req.id]);
+                            toast.success(`৳ ${req.amount.toFixed(2)} added to wallet`);
+                            refetch();
+                          } catch (e) {
+                            setProcessingIds(prev => { const s = new Set(prev); s.delete(req.id); return s; });
+                            throw e;
+                          }
                         }}>
                         <button className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-on-primary text-xs rounded-xl hover:opacity-90 font-bold font-manrope shadow-sm">
                           <CheckCircle className="w-3.5 h-3.5" /> Approve
@@ -74,8 +92,15 @@ function PendingTab({ usersMap }: { usersMap: Record<string, any> }) {
                             toast.error("Please provide a rejection reason (min 5 chars)");
                             throw new Error("Note required");
                           }
-                          await rejectBalanceRequest(req.id, note);
-                          toast.success("Request rejected");
+                          setProcessingIds(prev => new Set([...prev, req.id]));
+                          try {
+                            await rejectBalanceRequest(req.id, note);
+                            toast.success("Request rejected");
+                            refetch();
+                          } catch (e) {
+                            setProcessingIds(prev => { const s = new Set(prev); s.delete(req.id); return s; });
+                            throw e;
+                          }
                         }}>
                         <button className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 text-xs rounded-xl hover:bg-red-50 font-bold font-manrope">
                           <XCircle className="w-3.5 h-3.5" /> Reject
@@ -89,7 +114,7 @@ function PendingTab({ usersMap }: { usersMap: Record<string, any> }) {
           </tbody>
         </table>
       </div>
-      {!loading && requests.length === 0 && (
+      {!loading && requests.filter(r => !processingIds.has(r.id)).length === 0 && (
         <div className="text-center py-16">
           <div className="w-14 h-14 rounded-2xl bg-[#E8F1EE] mx-auto flex items-center justify-center mb-4">
             <CheckCircle className="w-7 h-7 text-primary" />
@@ -101,8 +126,15 @@ function PendingTab({ usersMap }: { usersMap: Record<string, any> }) {
   );
 }
 
-function HistoryTab({ usersMap }: { usersMap: Record<string, any> }) {
-  const { requests, loading } = useBalanceRequests("processed");
+function HistoryTab({
+  requests,
+  loading,
+  usersMap,
+}: {
+  requests: BalanceRequest[];
+  loading: boolean;
+  usersMap: Record<string, { displayName: string; phone: string }>;
+}) {
   return (
     <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
       <div className="overflow-x-auto">
@@ -151,7 +183,24 @@ function HistoryTab({ usersMap }: { usersMap: Record<string, any> }) {
 
 export default function BalanceRequestsPage() {
   const [tab, setTab] = useState<"pending" | "history">("pending");
-  const [usersMap, setUsersMap] = useState<Record<string, { displayName: string, phone: string }>>({});
+  const [usersMap, setUsersMap] = useState<Record<string, { displayName: string; phone: string }>>({});
+
+  const {
+    requests: pendingRequests,
+    loading: pendingLoading,
+    refetch: refetchPending,
+  } = useBalanceRequests("pending");
+
+  const {
+    requests: historyRequests,
+    loading: historyLoading,
+    refetch: refetchHistory,
+  } = useBalanceRequests("processed");
+
+  const refetchBoth = useCallback(() => {
+    refetchPending();
+    refetchHistory();
+  }, [refetchPending, refetchHistory]);
 
   useEffect(() => {
     let mounted = true;
@@ -159,9 +208,9 @@ export default function BalanceRequestsPage() {
       .then((res) => res.json())
       .then((data) => {
         if (!mounted || !data.users) return;
-        const map: Record<string, { displayName: string, phone: string }> = {};
-        data.users.forEach((u: any) => {
-          map[u.uid || u._id] = { displayName: u.displayName, phone: u.phoneNumber };
+        const map: Record<string, { displayName: string; phone: string }> = {};
+        data.users.forEach((u: { uid?: string; _id?: string; displayName: string; phoneNumber: string }) => {
+          map[u.uid || u._id || ""] = { displayName: u.displayName, phone: u.phoneNumber };
         });
         setUsersMap(map);
       })
@@ -196,7 +245,20 @@ export default function BalanceRequestsPage() {
         ))}
       </div>
 
-      {tab === "pending" ? <PendingTab usersMap={usersMap} /> : <HistoryTab usersMap={usersMap} />}
+      {tab === "pending" ? (
+        <PendingTab
+          requests={pendingRequests}
+          loading={pendingLoading}
+          refetch={refetchBoth}
+          usersMap={usersMap}
+        />
+      ) : (
+        <HistoryTab
+          requests={historyRequests}
+          loading={historyLoading}
+          usersMap={usersMap}
+        />
+      )}
     </div>
   );
 }

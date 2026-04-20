@@ -13,6 +13,8 @@ export interface IAgentDevice extends Document<string> {
   lastHeartbeat: Date;
   currentJob?: string;
   isPoweredOn: boolean;
+  batteryLevel?: number;
+  isCharging?: boolean;
   appVersion?: string;
   deviceFingerprint?: string;
   assignedServices: string[]; // service IDs assigned to this device
@@ -37,6 +39,8 @@ const AgentDeviceSchema = new Schema<IAgentDevice>(
     jwtSecret: { type: String, required: true },
     lastHeartbeat: { type: Date, default: Date.now },
     currentJob: { type: String },
+    batteryLevel: { type: Number },
+    isCharging: { type: Boolean },
     appVersion: { type: String, default: "" },
     deviceFingerprint: { type: String, default: "" },
     assignedServices: { type: [String], default: [] },

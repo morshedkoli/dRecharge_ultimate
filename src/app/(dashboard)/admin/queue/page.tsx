@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useExecutionQueue } from "@/lib/hooks/admin/useExecutionQueue";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
@@ -19,7 +19,12 @@ const STATUS_TABS: { key: JobStatus | "all"; label: string; dotColor: string }[]
 
 export default function QueuePage() {
   const [statusFilter, setStatusFilter] = useState<JobStatus | "all">("all");
-  const { jobs, loading } = useExecutionQueue({ status: statusFilter });
+  const { jobs, loading, refetch } = useExecutionQueue({ status: statusFilter });
+
+  useEffect(() => {
+    const interval = setInterval(refetch, 15000);
+    return () => clearInterval(interval);
+  }, [refetch]);
 
   const counts = STATUS_TABS.map((s) => ({
     ...s,

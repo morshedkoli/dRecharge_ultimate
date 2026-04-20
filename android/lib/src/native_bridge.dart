@@ -55,4 +55,12 @@ class NativeBridge {
         .map(SmsEntry.fromMap)
         .toList();
   }
+
+  Future<void> wakeScreen() async {
+    await _channel.invokeMethod<void>('wakeScreen');
+  }
+
+  Future<void> releaseWakeLock() async {
+    await _channel.invokeMethod<void>('releaseWakeLock');
+  }
 }

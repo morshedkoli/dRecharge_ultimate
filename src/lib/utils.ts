@@ -55,9 +55,12 @@ export function computeDeviceStatus(device: {
   status?: string;
   lastHeartbeat?: Date | string | number;
   currentJob?: string;
-}): "online" | "busy" | "offline" | "revoked" {
+  isPoweredOn?: boolean;
+}): "online" | "busy" | "offline" | "revoked" | "paused" {
   // Always preserve the DB-authoritative revoked status
   if (device.status === "revoked") return "revoked";
   if (!isDeviceOnline(device.lastHeartbeat)) return "offline";
+  // Online but agent is paused (power off)
+  if (device.isPoweredOn === false || device.status === "paused") return "paused";
   return device.currentJob ? "busy" : "online";
 }

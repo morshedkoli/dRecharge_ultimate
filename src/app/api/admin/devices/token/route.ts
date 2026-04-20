@@ -55,6 +55,8 @@ export async function GET(request: NextRequest) {
       lastHeartbeat: d.lastHeartbeat,
       currentJob: d.currentJob,
       isPoweredOn: d.isPoweredOn !== false, // default true for old devices
+      batteryLevel: d.batteryLevel ?? null,
+      isCharging: d.isCharging ?? null,
       appVersion: d.appVersion,
       assignedServices: d.assignedServices ?? [],
       registeredAt: d.registeredAt,

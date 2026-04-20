@@ -29,5 +29,5 @@ export function useProfile() {
     if (!authLoading) fetchProfile();
   }, [authLoading, fetchProfile]);
 
-  return { profile, loading: loading || authLoading };
+  return { profile, loading: loading || authLoading, refetch: fetchProfile };
 }

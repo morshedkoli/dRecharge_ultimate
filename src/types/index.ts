@@ -145,6 +145,8 @@ export interface AgentDevice {
   lastHeartbeat: Date | string;
   currentJob?: string;
   isPoweredOn: boolean;
+  batteryLevel?: number | null;
+  isCharging?: boolean | null;
   authUid: string;
   assignedServices: string[];
   registeredAt: Date | string;

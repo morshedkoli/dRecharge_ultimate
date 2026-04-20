@@ -164,6 +164,16 @@ class BackendService {
     bool powerToggle = false,
   }) async {
     try {
+      // Collect battery info fresh for every heartbeat
+      int? batteryLevel;
+      bool? isCharging;
+      try {
+        final battery = Battery();
+        batteryLevel = await battery.batteryLevel;
+        final state = await battery.batteryState;
+        isCharging = state == BatteryState.charging || state == BatteryState.full;
+      } catch (_) {}
+
       final response = await _authPost('/api/agent/heartbeat', {
         if (currentJob != null) 'currentJob': currentJob,
         if (simProvider != null) 'simProvider': simProvider,
@@ -171,6 +181,8 @@ class BackendService {
         if (appVersion != null) 'appVersion': appVersion,
         'isPoweredOn': isPoweredOn,
         'powerToggle': powerToggle,
+        if (batteryLevel != null) 'batteryLevel': batteryLevel,
+        if (isCharging != null) 'isCharging': isCharging,
       });
       return response['data']['isPoweredOn'] as bool?;
     } catch (e) {

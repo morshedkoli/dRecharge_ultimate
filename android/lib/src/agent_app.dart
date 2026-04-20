@@ -523,6 +523,12 @@ class _AppShellState extends State<_AppShell> {
         'Executing ${steps.length} steps on SIM ${liveJob.simSlot}: $stepSummary',
       );
 
+      // Wake screen so USSD dialog is visible (no-op if screen already on)
+      try {
+        await _nativeBridge.wakeScreen();
+        _appendLog('Screen wake requested for job ${liveJob.jobId}.');
+      } catch (_) {}
+
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
       List<Map<String, dynamic>> stepsExecuted;
       try {
@@ -532,6 +538,7 @@ class _AppShellState extends State<_AppShell> {
           simSlot: liveJob.simSlot,
         );
       } catch (error) {
+        await _nativeBridge.releaseWakeLock().catchError((_) {});
         await _reportFailure(
           job: liveJob,
           reason: 'USSD execution failed: $error',
@@ -568,6 +575,7 @@ class _AppShellState extends State<_AppShell> {
         parsedResult: parsedResult,
         ussdStepsExecuted: stepsExecuted,
       );
+      await _nativeBridge.releaseWakeLock().catchError((_) {});
       _appendLog(
         !matchResult.hasMatch
             ? 'Job ${liveJob.jobId} reported without SMS.'
