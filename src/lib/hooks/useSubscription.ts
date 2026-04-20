@@ -22,14 +22,24 @@ export interface SubscriptionStatus {
 export function useSubscription() {
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloading, setReloading] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/subscription", { credentials: "include" })
+  const fetchStatus = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
+    else setReloading(true);
+    return fetch("/api/subscription", { credentials: "include", cache: "no-store" })
       .then((r) => r.json())
       .then((data: SubscriptionStatus) => setStatus(data))
-      .catch(() => setStatus(null))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch(() => {})
+      .finally(() => {
+        setLoading(false);
+        setReloading(false);
+      });
+  };
 
-  return { status, loading };
+  useEffect(() => { fetchStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refetch = () => fetchStatus({ silent: true });
+
+  return { status, loading, reloading, refetch };
 }

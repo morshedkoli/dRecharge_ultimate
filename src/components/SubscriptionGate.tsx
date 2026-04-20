@@ -46,21 +46,24 @@ export function SubscriptionWarningBanner() {
 
 // ── Blocked screen ─────────────────────────────────────────────────────────────
 function BlockedScreen({ status }: { status: SubscriptionStatus }) {
-  const config: Record<string, { title: string; description: string; cta: string }> = {
+  const isUntracked = status.state === "untracked";
+
+  type StateCfg = { title: string; description: string; iconBg: string; iconColor: string; cardBorder: string };
+  const config: Record<string, StateCfg> = {
     expired: {
       title: "Subscription Expired",
       description: `Your dRecharge licence for {domain} has expired. All transaction processing is suspended until renewed.`,
-      cta: "Renew Subscription",
+      iconBg: "bg-red-50", iconColor: "text-red-500", cardBorder: "border-red-100",
     },
     inactive: {
       title: "No Active Subscription",
       description: `Domain {domain} is registered but has no active subscription. Purchase a licence to use dRecharge.`,
-      cta: "Get Subscription",
+      iconBg: "bg-orange-50", iconColor: "text-orange-500", cardBorder: "border-orange-100",
     },
     untracked: {
       title: "Domain Not Registered",
-      description: `Domain {domain} is not registered in the dRecharge licence system. Contact support or purchase a licence.`,
-      cta: "Register Domain",
+      description: `Domain {domain} is not tracked in the dRecharge licence system. Contact your administrator to register this domain before using the platform.`,
+      iconBg: "bg-gray-100", iconColor: "text-gray-500", cardBorder: "border-gray-200",
     },
   };
 
@@ -70,10 +73,10 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F4F6F5] p-6">
       <div className="w-full max-w-md">
-        <div className="bg-white border border-red-100 rounded-2xl p-10 shadow-xl text-center space-y-6">
+        <div className={`bg-white border ${cfg.cardBorder} rounded-2xl p-10 shadow-xl text-center space-y-6`}>
           <div className="flex justify-center">
-            <div className="w-20 h-20 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center">
-              <ShieldOff className="w-10 h-10 text-red-500" />
+            <div className={`w-20 h-20 rounded-2xl ${cfg.iconBg} border ${cfg.cardBorder} flex items-center justify-center`}>
+              <ShieldOff className={`w-10 h-10 ${cfg.iconColor}`} />
             </div>
           </div>
 
@@ -96,6 +99,7 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
               <span className={`font-semibold capitalize ${
                 status.state === "expired"   ? "text-red-600"   :
                 status.state === "inactive"  ? "text-orange-600":
+                status.state === "untracked" ? "text-gray-500"  :
                                                "text-gray-500"
               }`}>{status.state}</span>
             </div>
@@ -122,15 +126,27 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
           </div>
 
           <div className="space-y-3">
-            <a
-              href="https://drecharge.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full px-6 py-3.5 bg-[#134235] text-white text-sm font-bold font-manrope rounded-xl hover:bg-[#1B6B4D] transition-all shadow-lg shadow-[#134235]/20"
-            >
-              <ExternalLink className="w-4 h-4" />
-              {cfg.cta}
-            </a>
+            {isUntracked ? (
+              /* Untracked: no drecharge.com link — admin must register */
+              <div className="flex items-start gap-3 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-left">
+                <AlertTriangle className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-600 font-manrope leading-relaxed">
+                  This domain is not registered. Contact your <strong className="text-gray-800">dRecharge administrator</strong> to register{" "}
+                  <span className="font-mono font-semibold text-gray-700">{status.domain || "this domain"}</span>{" "}
+                  and activate a subscription.
+                </p>
+              </div>
+            ) : (
+              <a
+                href="https://drecharge.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full px-6 py-3.5 bg-[#134235] text-white text-sm font-bold font-manrope rounded-xl hover:bg-[#1B6B4D] transition-all shadow-lg shadow-[#134235]/20"
+              >
+                <ExternalLink className="w-4 h-4" />
+                {status.state === "inactive" ? "Get Subscription" : "Renew Subscription"}
+              </a>
+            )}
             <button
               onClick={() => window.location.reload()}
               className="flex items-center justify-center gap-2 w-full px-6 py-3 border border-gray-200 text-gray-600 text-sm font-bold font-manrope rounded-xl hover:bg-gray-50 transition-all"
@@ -142,7 +158,9 @@ function BlockedScreen({ status }: { status: SubscriptionStatus }) {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4 font-manrope">
-          Contact support if you believe this is an error.
+          {isUntracked
+            ? "Contact your administrator if you believe this domain should be registered."
+            : "Contact support if you believe this is an error."}
         </p>
       </div>
     </div>

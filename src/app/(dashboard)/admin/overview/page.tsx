@@ -12,9 +12,9 @@ import { relativeTime } from "@/lib/utils";
 import { AuditLog } from "@/types";
 import {
   Users, Inbox, ListOrdered, Smartphone,
-  CircleCheckBig, TriangleAlert, Cpu, ArrowUpRight,
+  CircleCheckBig, TriangleAlert, AlertTriangle, Cpu, ArrowUpRight,
   Activity, Clock, TrendingUp, ExternalLink,
-  ShieldCheck, ShieldOff, ShieldAlert, Globe,
+  ShieldCheck, ShieldOff, ShieldAlert, Globe, RefreshCw,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -151,7 +151,7 @@ function Skeleton({ className = "" }: { className?: string }) {
 /* Subscription status card                                       */
 /* ─────────────────────────────────────────────────────────────── */
 function SubscriptionCard() {
-  const { status, loading } = useSubscription();
+  const { status, loading, reloading, refetch } = useSubscription();
 
   if (loading) {
     return (
@@ -201,7 +201,7 @@ function SubscriptionCard() {
       icon: ShieldOff, iconBg: "bg-gray-100", iconColor: "text-gray-500",
       cardBorder: "border-gray-200", barColor: "bg-gray-300",
       expiryLabel: "Expires", expiryColor: "text-gray-500",
-      cta: { label: "Register Domain", style: "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200" },
+      cta: null,
     },
     unknown: {
       badge: { label: "Unknown",    bg: "bg-gray-100",  text: "text-gray-500",  border: "border-gray-200" },
@@ -243,11 +243,22 @@ function SubscriptionCard() {
           </div>
         </div>
 
-        {/* State badge */}
-        <span className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold font-manrope border ${cfg.badge.bg} ${cfg.badge.text} ${cfg.badge.border}`}>
-          <BadgeIcon className="w-3 h-3" />
-          {cfg.badge.label}
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* State badge */}
+          <span className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold font-manrope border ${cfg.badge.bg} ${cfg.badge.text} ${cfg.badge.border}`}>
+            <BadgeIcon className="w-3 h-3" />
+            {cfg.badge.label}
+          </span>
+          {/* Reload button */}
+          <button
+            onClick={refetch}
+            disabled={reloading}
+            title="Check subscription now"
+            className="p-1.5 rounded-lg text-on-surface-variant/40 hover:text-on-surface-variant hover:bg-[#F4F6F5] transition-all disabled:opacity-40"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${reloading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {/* Sub-details: tracked + subscribed flags */}
@@ -268,16 +279,27 @@ function SubscriptionCard() {
         {status.expiresAt ? (
           <>
             <span className="text-on-surface-variant/60">{cfg.expiryLabel}</span>
-            <span className={`font-bold ${isWarning ? "text-amber-700" : cfg.expiryColor}`}>
-              {new Date(status.expiresAt).toLocaleDateString("en-US", {
-                month: "short", day: "numeric", year: "numeric",
-              })}
-              {state === "active" && status.daysUntilExpiry !== null && (
-                <span className={`ml-1.5 font-normal ${isWarning ? "text-amber-600" : "text-on-surface-variant/50"}`}>
-                  ({status.daysUntilExpiry}d left)
+            <div className="flex items-center gap-2">
+              <span className={`font-bold ${isWarning ? "text-amber-700" : cfg.expiryColor}`}>
+                {new Date(status.expiresAt).toLocaleDateString("en-US", {
+                  month: "short", day: "numeric", year: "numeric",
+                })}
+              </span>
+              {status.daysUntilExpiry !== null && (
+                <span className={[
+                  "px-1.5 py-0.5 rounded-md text-[10px] font-extrabold font-manrope tabular-nums",
+                  status.daysUntilExpiry <= 0 || state === "expired"
+                    ? "bg-red-50 text-red-600 border border-red-200"
+                    : isWarning
+                    ? "bg-amber-50 text-amber-700 border border-amber-200"
+                    : "bg-[#EBF3EE] text-[#2D5A4C] border border-[#C3D9CE]",
+                ].join(" ")}>
+                  {status.daysUntilExpiry <= 0
+                    ? `${Math.abs(status.daysUntilExpiry)}d ago`
+                    : `${status.daysUntilExpiry}d left`}
                 </span>
               )}
-            </span>
+            </div>
           </>
         ) : (
           <span className="text-on-surface-variant/40 italic">No expiry data</span>
@@ -295,7 +317,14 @@ function SubscriptionCard() {
       )}
 
       {/* CTA */}
-      {(cfg.cta || isWarning) && (
+      {state === "untracked" ? (
+        <div className="mt-3 flex items-start gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-left">
+          <AlertTriangle className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-gray-500 font-manrope leading-relaxed">
+            Contact your <strong className="text-gray-700">dRecharge administrator</strong> to register this domain and activate a subscription.
+          </p>
+        </div>
+      ) : (cfg.cta || isWarning) ? (
         <a
           href="https://drecharge.com"
           target="_blank"
@@ -310,7 +339,7 @@ function SubscriptionCard() {
           <ExternalLink className="w-3.5 h-3.5" />
           {isWarning && state === "active" ? "Renew Subscription" : cfg.cta?.label}
         </a>
-      )}
+      ) : null}
 
       {/* Last checked */}
       <p className="text-[10px] text-on-surface-variant/30 font-manrope mt-2.5 text-right">

@@ -90,14 +90,16 @@ function deriveState(entry: any): SubscriptionState {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildStatus(domain: string, entry: any, checkedAt: string): SubscriptionStatus {
   const state = deriveState(entry);
+  const rawDays = entry?.daysUntilExpiry;
   return {
     state,
     subscribed: state === "active",
     tracked: entry?.tracked === true,
     expired: entry?.expired === true,
     expiresAt: entry?.expiresAt ?? null,
-    daysUntilExpiry: entry?.daysUntilExpiry ?? null,
-    domain,
+    // negative = already expired by N days; null = unknown
+    daysUntilExpiry: typeof rawDays === "number" ? rawDays : null,
+    domain: entry?.domain ?? domain,
     checkedAt,
   };
 }
@@ -116,13 +118,10 @@ async function fetchFromApi(domain: string): Promise<SubscriptionStatus> {
   const json = await res.json();
   if (!json?.success) throw new Error("Subscription API returned success=false");
 
-  const domains: unknown[] = json?.data?.domains ?? [];
-
-  // Match by domain name first; fall back to first entry
+  // API returns domain data in json.data (single object) and duplicated at top level.
+  // If neither exists, treat as untracked.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entry = (domains as any[]).find(
-    (d) => String(d?.domain ?? "").toLowerCase() === domain.toLowerCase()
-  ) ?? (domains.length > 0 ? domains[0] : null);
+  const entry: any = json?.data ?? (json?.domain ? json : null);
 
   const checkedAt: string = json?.checkedAt ?? new Date().toISOString();
   return buildStatus(domain, entry, checkedAt);
