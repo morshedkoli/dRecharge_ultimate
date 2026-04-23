@@ -25,95 +25,97 @@ function PendingTab({
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
 
   return (
-    <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead>
-            <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-              <th className="px-8 py-4">User</th>
-              <th className="px-8 py-4">Amount</th>
-              <th className="px-8 py-4">Medium</th>
-              <th className="px-8 py-4">Note</th>
-              <th className="px-8 py-4">Requested</th>
-              <th className="px-8 py-4">Admin Note</th>
-              <th className="px-8 py-4">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-black/[0.03]">
-            {loading && Array(3).fill(0).map((_, i) => (
-              <tr key={i}><td colSpan={7} className="px-8 py-4">
-                <div className="h-4 bg-surface-container rounded-lg animate-pulse" />
-              </td></tr>
-            ))}
-            {!loading && requests.filter(r => !processingIds.has(r.id)).map((req) => {
-              const user = usersMap[req.userId];
-              return (
-                <tr key={req.id} className="group hover:bg-surface-container/20 transition-colors align-top">
-                  <td className="px-8 py-5">
-                    <p className="font-bold text-on-surface font-manrope">{user?.displayName || "Unknown User"}</p>
-                    <p className="font-mono text-[11px] text-on-surface-variant mt-0.5">{user?.phone || req.userId.slice(0, 8)}</p>
-                  </td>
-                  <td className="px-8 py-5 font-bold text-[#134235] font-inter"><WalletAmount amount={req.amount} /></td>
-                  <td className="px-8 py-5 text-on-surface-variant text-xs font-bold uppercase tracking-wider font-manrope">{req.medium || "—"}</td>
-                  <td className="px-8 py-5 text-on-surface-variant max-w-[160px] truncate">{req.note || "—"}</td>
-                  <td className="px-8 py-5 text-on-surface-variant text-xs">{relativeTime(req.createdAt)}</td>
-                  <td className="px-8 py-5">
-                    <input type="text" placeholder="Note (required for reject)"
+    <div className="space-y-6">
+      {loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {Array(4).fill(0).map((_, i) => (
+            <div key={i} className="h-[320px] bg-white border border-black/5 rounded-2xl p-6 animate-pulse premium-shadow" />
+          ))}
+        </div>
+      )}
+      
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {requests.filter(r => !processingIds.has(r.id)).map((req) => {
+            const user = usersMap[req.userId];
+            return (
+              <div key={req.id} className="bg-white border border-black/5 rounded-2xl p-6 flex flex-col premium-shadow card-hover transition-all duration-300">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="min-w-0 pr-2">
+                    <p className="font-bold text-[#134235] font-manrope text-lg truncate">{user?.displayName || "Unknown User"}</p>
+                    <p className="font-mono text-xs text-on-surface-variant mt-0.5 truncate">{user?.phone || req.userId.slice(0, 8)}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-bold text-[#134235] text-xl font-inter"><WalletAmount amount={req.amount} /></div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mt-1">{req.medium || "—"}</div>
+                  </div>
+                </div>
+                
+                <div className="space-y-3 flex-1 mb-6 text-sm">
+                  <div className="flex justify-between border-b border-black/[0.03] pb-2">
+                    <span className="text-on-surface-variant">Requested</span>
+                    <span className="font-medium text-on-surface">{relativeTime(req.createdAt)}</span>
+                  </div>
+                  <div className="flex flex-col gap-1 border-b border-black/[0.03] pb-2">
+                    <span className="text-on-surface-variant text-xs">User Note</span>
+                    <span className="font-medium text-on-surface text-xs leading-relaxed bg-surface-container/30 p-2 rounded-xl border border-black/[0.02] break-words line-clamp-3">{req.note || "No note provided"}</span>
+                  </div>
+                  <div className="pt-1">
+                    <input type="text" placeholder="Admin Note (required for reject)"
                       value={adminNotes[req.id] || ""}
                       onChange={(e) => setAdminNotes((n) => ({ ...n, [req.id]: e.target.value }))}
-                      className="w-full border border-outline-variant bg-surface rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 min-w-[180px]" />
-                  </td>
-                  <td className="px-8 py-5">
-                    <div className="flex gap-2">
-                      <ConfirmDialog title="Approve balance request?"
-                        description={`This will add ৳ ${req.amount.toFixed(2)} to the user's wallet.`}
-                        confirmLabel="Approve"
-                        onConfirm={async () => {
-                          setProcessingIds(prev => new Set([...prev, req.id]));
-                          try {
-                            await approveBalanceRequest(req.id, adminNotes[req.id]);
-                            toast.success(`৳ ${req.amount.toFixed(2)} added to wallet`);
-                            refetch();
-                          } catch (e) {
-                            setProcessingIds(prev => { const s = new Set(prev); s.delete(req.id); return s; });
-                            throw e;
-                          }
-                        }}>
-                        <button className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-on-primary text-xs rounded-xl hover:opacity-90 font-bold font-manrope shadow-sm">
-                          <CheckCircle className="w-3.5 h-3.5" /> Approve
-                        </button>
-                      </ConfirmDialog>
-                      <ConfirmDialog title="Reject this request?"
-                        description="The user will be notified with your admin note. A reason is required."
-                        confirmLabel="Reject" confirmVariant="destructive"
-                        onConfirm={async () => {
-                          const note = adminNotes[req.id];
-                          if (!note || note.trim().length < 5) {
-                            toast.error("Please provide a rejection reason (min 5 chars)");
-                            throw new Error("Note required");
-                          }
-                          setProcessingIds(prev => new Set([...prev, req.id]));
-                          try {
-                            await rejectBalanceRequest(req.id, note);
-                            toast.success("Request rejected");
-                            refetch();
-                          } catch (e) {
-                            setProcessingIds(prev => { const s = new Set(prev); s.delete(req.id); return s; });
-                            throw e;
-                          }
-                        }}>
-                        <button className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-red-200 text-red-600 text-xs rounded-xl hover:bg-red-50 font-bold font-manrope">
-                          <XCircle className="w-3.5 h-3.5" /> Reject
-                        </button>
-                      </ConfirmDialog>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                      className="w-full border border-outline-variant bg-surface rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-on-surface-variant/50" />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 mt-auto">
+                  <ConfirmDialog title="Approve balance request?"
+                    description={`This will add ৳ ${req.amount.toFixed(2)} to the user's wallet.`}
+                    confirmLabel="Approve"
+                    onConfirm={async () => {
+                      setProcessingIds(prev => new Set([...prev, req.id]));
+                      try {
+                        await approveBalanceRequest(req.id, adminNotes[req.id]);
+                        toast.success(`৳ ${req.amount.toFixed(2)} added to wallet`);
+                        refetch();
+                      } catch (e) {
+                        setProcessingIds(prev => { const s = new Set(prev); s.delete(req.id); return s; });
+                        throw e;
+                      }
+                    }}>
+                    <button className="flex-1 inline-flex justify-center items-center gap-1.5 px-3 py-2.5 bg-primary text-on-primary text-sm rounded-xl hover:opacity-90 font-bold font-manrope shadow-[0_4px_14px_rgba(19,66,53,0.15)] transition-all active:scale-[0.98]">
+                      <CheckCircle className="w-4 h-4" /> Approve
+                    </button>
+                  </ConfirmDialog>
+                  <ConfirmDialog title="Reject this request?"
+                    description="The user will be notified with your admin note. A reason is required."
+                    confirmLabel="Reject" confirmVariant="destructive"
+                    onConfirm={async () => {
+                      const note = adminNotes[req.id];
+                      if (!note || note.trim().length < 5) {
+                        toast.error("Please provide a rejection reason (min 5 chars)");
+                        throw new Error("Note required");
+                      }
+                      setProcessingIds(prev => new Set([...prev, req.id]));
+                      try {
+                        await rejectBalanceRequest(req.id, note);
+                        toast.success("Request rejected");
+                        refetch();
+                      } catch (e) {
+                        setProcessingIds(prev => { const s = new Set(prev); s.delete(req.id); return s; });
+                        throw e;
+                      }
+                    }}>
+                    <button className="flex-1 inline-flex justify-center items-center gap-1.5 px-3 py-2.5 border border-red-200 bg-red-50 text-red-600 text-sm rounded-xl hover:bg-red-100 font-bold font-manrope transition-all active:scale-[0.98]">
+                      <XCircle className="w-4 h-4" /> Reject
+                    </button>
+                  </ConfirmDialog>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {!loading && requests.filter(r => !processingIds.has(r.id)).length === 0 && (
         <div className="text-center py-16">
           <div className="w-14 h-14 rounded-2xl bg-[#E8F1EE] mx-auto flex items-center justify-center mb-4">
@@ -136,44 +138,51 @@ function HistoryTab({
   usersMap: Record<string, { displayName: string; phone: string }>;
 }) {
   return (
-    <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead>
-            <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-              <th className="px-8 py-4">User</th>
-              <th className="px-8 py-4">Amount</th>
-              <th className="px-8 py-4">Medium</th>
-              <th className="px-8 py-4">Status</th>
-              <th className="px-8 py-4">Admin Note</th>
-              <th className="px-8 py-4">Processed</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-black/[0.03]">
-            {loading && Array(3).fill(0).map((_, i) => (
-              <tr key={i}><td colSpan={6} className="px-8 py-4">
-                <div className="h-4 bg-surface-container rounded-lg animate-pulse" />
-              </td></tr>
-            ))}
-            {!loading && requests.map((req) => {
-              const user = usersMap[req.userId];
-              return (
-                <tr key={req.id} className="group hover:bg-surface-container/20 transition-colors">
-                  <td className="px-8 py-5">
-                    <p className="font-bold text-on-surface font-manrope">{user?.displayName || "Unknown User"}</p>
-                    <p className="font-mono text-[11px] text-on-surface-variant">{user?.phone || req.userId.slice(0, 8)}</p>
-                  </td>
-                  <td className="px-8 py-5 font-bold text-[#134235] font-inter"><WalletAmount amount={req.amount} /></td>
-                  <td className="px-8 py-5 text-on-surface-variant text-xs font-bold uppercase tracking-wider font-manrope">{req.medium || "—"}</td>
-                  <td className="px-8 py-5"><StatusBadge status={req.status} /></td>
-                  <td className="px-8 py-5 text-on-surface-variant max-w-[200px] truncate text-xs">{req.adminNote || "—"}</td>
-                  <td className="px-8 py-5 text-on-surface-variant text-xs">{relativeTime(req.processedAt)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div className="space-y-6">
+      {loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {Array(4).fill(0).map((_, i) => (
+            <div key={i} className="h-[220px] bg-white border border-black/5 rounded-2xl p-6 animate-pulse premium-shadow" />
+          ))}
+        </div>
+      )}
+      
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {requests.map((req) => {
+            const user = usersMap[req.userId];
+            return (
+              <div key={req.id} className="bg-white border border-black/5 rounded-2xl p-6 flex flex-col premium-shadow card-hover transition-all duration-300">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="min-w-0 pr-2">
+                    <p className="font-bold text-[#134235] font-manrope text-lg truncate">{user?.displayName || "Unknown User"}</p>
+                    <p className="font-mono text-xs text-on-surface-variant mt-0.5 truncate">{user?.phone || req.userId.slice(0, 8)}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-bold text-[#134235] text-xl font-inter"><WalletAmount amount={req.amount} /></div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mt-1">{req.medium || "—"}</div>
+                  </div>
+                </div>
+                
+                <div className="space-y-3 flex-1 text-sm">
+                  <div className="flex justify-between items-center border-b border-black/[0.03] pb-2">
+                    <span className="text-on-surface-variant">Status</span>
+                    <StatusBadge status={req.status} />
+                  </div>
+                  <div className="flex justify-between border-b border-black/[0.03] pb-2">
+                    <span className="text-on-surface-variant">Processed</span>
+                    <span className="font-medium text-on-surface text-xs">{relativeTime(req.processedAt)}</span>
+                  </div>
+                  <div className="flex flex-col gap-1 pt-1">
+                    <span className="text-on-surface-variant text-xs">Admin Note</span>
+                    <span className="font-medium text-on-surface text-xs leading-relaxed bg-surface-container/30 p-2 rounded-xl border border-black/[0.02] break-words line-clamp-3">{req.adminNote || "No note provided"}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {!loading && requests.length === 0 && (
         <p className="text-center text-on-surface-variant py-16 text-sm font-manrope">No processed requests</p>
       )}

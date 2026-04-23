@@ -20,7 +20,7 @@ export function useOverviewQueueStatus() {
   const fetchData = useCallback(async () => {
     try {
       const [queueRes, devicesRes] = await Promise.all([
-        fetch("/api/admin/queue", { credentials: "include" }),
+        fetch("/api/admin/history", { credentials: "include" }),
         fetch("/api/admin/devices/token", { credentials: "include" }),
       ]);
       const [queueData, devicesData] = await Promise.all([queueRes.json(), devicesRes.json()]);

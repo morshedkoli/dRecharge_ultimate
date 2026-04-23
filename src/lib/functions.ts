@@ -1,7 +1,7 @@
 import { UserRole, UssdStep, SmsFailureTemplate, DeviceInfoData } from "@/types";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
-async function apiFetch<T = unknown>(
+export async function apiFetch<T = unknown>(
   url: string,
   options?: RequestInit
 ): Promise<T> {
@@ -27,6 +27,33 @@ export const setUserRole = (uid: string, role: UserRole) =>
 
 export const adminAddBalance = (uid: string, amount: number, note?: string) =>
   apiFetch(`/api/admin/users/${uid}`, { method: "PATCH", body: JSON.stringify({ action: "addBalance", amount, note }) });
+
+export const adminSetCreditLimit = (uid: string, limit: number) =>
+  apiFetch(`/api/admin/users/${uid}`, { method: "PATCH", body: JSON.stringify({ action: "setCreditLimit", limit }) });
+
+export const adminChangeName = (uid: string, displayName: string) =>
+  apiFetch<{ success: boolean; displayName: string }>(`/api/admin/users/${uid}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "changeName", displayName }),
+  });
+
+export const adminChangeEmail = (uid: string, email: string) =>
+  apiFetch<{ success: boolean; email: string }>(`/api/admin/users/${uid}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "changeEmail", email }),
+  });
+
+export const adminChangePassword = (uid: string, newPassword: string) =>
+  apiFetch(`/api/admin/users/${uid}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "adminChangePassword", newPassword }),
+  });
+
+export const adminChangePin = (uid: string, pin: string) =>
+  apiFetch(`/api/admin/users/${uid}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "adminChangePin", pin }),
+  });
 
 export async function createUserAccount(data: {
   email: string;
@@ -71,19 +98,19 @@ export const initiateTransaction = (data: {
   });
 
 export const failTransaction = (txId: string, jobId: string, reason: string) =>
-  apiFetch("/api/admin/queue", {
+  apiFetch("/api/admin/history", {
     method: "PATCH",
     body: JSON.stringify({ jobId, txId, reason }),
   });
 
 export const simulateJobResult = (jobId: string, txId: string, isSuccess: boolean) =>
-  apiFetch(`/api/admin/queue/${jobId}`, {
+  apiFetch(`/api/admin/history/${jobId}`, {
     method: "PATCH",
     body: JSON.stringify({ txId, isSuccess }),
   });
 
 export const cancelJob = (jobId: string, reason?: string) =>
-  apiFetch(`/api/admin/queue/${jobId}`, {
+  apiFetch(`/api/admin/history/${jobId}`, {
     method: "DELETE",
     body: JSON.stringify({ reason: reason || "Admin cancelled" }),
   });
@@ -98,6 +125,7 @@ export const createService = (data: {
   ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
+  recipientLength?: number;
   successSmsFormat: string;
   failureSmsTemplates?: SmsFailureTemplate[];
   smsTimeout: number;
@@ -117,6 +145,7 @@ export const saveService = (data: {
   ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
+  recipientLength?: number;
   successSmsFormat: string;
   failureSmsTemplates?: SmsFailureTemplate[];
   smsTimeout: number;

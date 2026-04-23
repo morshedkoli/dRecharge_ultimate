@@ -4,12 +4,13 @@ import { AppUser, Transaction, BalanceRequest } from "@/types";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
-import { suspendUser, activateUser } from "@/lib/functions";
+import { suspendUser, activateUser, adminSetCreditLimit, adminChangeEmail, adminChangePassword, adminChangeName, adminChangePin } from "@/lib/functions";
 import { relativeTime, fullDateTime, getInitials, maskNumber } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   ArrowLeft, Lock, Plus, Minus, Wallet, Clock, CreditCard,
-  ShieldCheck, ShieldOff, Loader2, X, Receipt, RefreshCw, User
+  ShieldCheck, ShieldOff, Loader2, X, Receipt, RefreshCw, User,
+  Landmark, Key, Mail, ChevronDown, ChevronUp
 } from "lucide-react";
 import Link from "next/link";
 
@@ -91,6 +92,42 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
   const [deductNote, setDeductNote] = useState("");
   const [showDeductBalance, setShowDeductBalance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Credit limit
+  const [showCreditLimit, setShowCreditLimit] = useState(false);
+  const [creditLimitInput, setCreditLimitInput] = useState("");
+  const [savingCredit, setSavingCredit] = useState(false);
+  // Admin tools
+  const [showAdminTools, setShowAdminTools] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+  // Change name
+  const [newName, setNewName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [newPin, setNewPin] = useState("");
+  const [savingPin, setSavingPin] = useState(false);
+  // Manual Job Completion
+  const [savingManualJobPermission, setSavingManualJobPermission] = useState(false);
+
+  async function handleToggleManualJobs() {
+    setSavingManualJobPermission(true);
+    try {
+      const res = await fetch(`/api/admin/users/${uid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setCanManuallyCompleteJobs", canManuallyCompleteJobs: !user?.canManuallyCompleteJobs })
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || "Failed to update permission");
+      setUser(u => u ? { ...u, canManuallyCompleteJobs: payload.canManuallyCompleteJobs } : u);
+      toast.success(payload.canManuallyCompleteJobs ? "Manual job completion enabled" : "Manual job completion disabled");
+    } catch (e: any) {
+      toast.error(e.message || "Failed");
+    } finally {
+      setSavingManualJobPermission(false);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -144,12 +181,72 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
     finally { setSubmitting(false); }
   }
 
+  async function handleSetCreditLimit() {
+    const limit = parseFloat(creditLimitInput);
+    if (isNaN(limit) || limit < 0) { toast.error("Enter a valid credit limit (0 or more)"); return; }
+    setSavingCredit(true);
+    try {
+      await adminSetCreditLimit(uid, limit);
+      setUser(u => u ? { ...u, creditLimit: limit } : u);
+      toast.success(`Credit limit set to ৳${limit.toFixed(2)}`);
+      setShowCreditLimit(false); setCreditLimitInput("");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setSavingCredit(false); }
+  }
+
+  async function handleChangeEmail() {
+    if (!newEmail.trim()) { toast.error("Enter a new email"); return; }
+    setSavingEmail(true);
+    try {
+      const result = await adminChangeEmail(uid, newEmail.trim());
+      setUser(u => u ? { ...u, email: result.email } : u);
+      toast.success("Email updated successfully");
+      setNewEmail("");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setSavingEmail(false); }
+  }
+
+  async function handleChangePassword() {
+    if (newPassword.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    setSavingPassword(true);
+    try {
+      await adminChangePassword(uid, newPassword);
+      toast.success("Password changed successfully");
+      setNewPassword("");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setSavingPassword(false); }
+  }
+
+  async function handleChangeName() {
+    if (!newName.trim()) { toast.error("Enter a new name"); return; }
+    setSavingName(true);
+    try {
+      const result = await adminChangeName(uid, newName.trim());
+      setUser(u => u ? { ...u, displayName: result.displayName } : u);
+      toast.success("Name updated successfully");
+      setNewName("");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setSavingName(false); }
+  }
+
+  async function handleChangePin() {
+    if (!/^\d{4,6}$/.test(newPin)) { toast.error("PIN must be 4–6 digits"); return; }
+    setSavingPin(true);
+    try {
+      await adminChangePin(uid, newPin);
+      toast.success("PIN changed successfully");
+      setNewPin("");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setSavingPin(false); }
+  }
+
   // ── type badge colours ──────────────────────────────────────────────────────
   const txTypeBadge: Record<string, string> = {
     send:   "bg-blue-50 text-blue-700",
     topup:  "bg-[#E8F1EE] text-primary",
     deduct: "bg-red-50 text-red-700",
     refund: "bg-purple-50 text-purple-700",
+    credit: "bg-orange-50 text-orange-700",
   };
 
   if (!user) return (
@@ -262,17 +359,32 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
               <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-2 flex items-center gap-1.5">
                 <Wallet className="w-3.5 h-3.5" /> Wallet Balance
               </p>
-              <p className="font-headline text-3xl font-extrabold text-[#134235]">
-                <WalletAmount amount={user.walletBalance} />
+              <p className={`font-headline text-3xl font-extrabold ${user.walletBalance < 0 ? "text-red-600" : "text-[#134235]"}`}>
+                {user.walletBalance < 0 ? "-" : ""}৳{Math.abs(user.walletBalance).toFixed(2)}
+                {user.walletBalance < 0 && (
+                  <span className="ml-2 text-xs font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-lg align-middle">CREDIT USED</span>
+                )}
               </p>
-              <div className="flex items-center gap-3 mt-3">
+              {(user.creditLimit ?? 0) > 0 && (
+                <p className="mt-1 text-xs text-on-surface-variant font-manrope">
+                  Credit limit: <span className="font-bold text-orange-600">৳{(user.creditLimit ?? 0).toFixed(2)}</span>
+                  {user.walletBalance < 0 && (
+                    <span className="ml-2 text-red-500">({Math.min(Math.abs(user.walletBalance), user.creditLimit ?? 0).toFixed(2)} used)</span>
+                  )}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-2 mt-3">
                 <button onClick={() => setShowAddBalance(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-[#E8F1EE] text-primary hover:bg-primary/15 border border-primary/10 rounded-xl text-xs font-bold font-manrope transition-all">
+                  className="flex items-center gap-1.5 px-3 py-2 bg-[#E8F1EE] text-primary hover:bg-primary/15 border border-primary/10 rounded-xl text-xs font-bold font-manrope transition-all">
                   <Plus className="w-3.5 h-3.5" /> Add
                 </button>
                 <button onClick={() => setShowDeductBalance(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 rounded-xl text-xs font-bold font-manrope transition-all">
+                  className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 rounded-xl text-xs font-bold font-manrope transition-all">
                   <Minus className="w-3.5 h-3.5" /> Deduct
+                </button>
+                <button onClick={() => { setShowCreditLimit(true); setCreditLimitInput(String(user.creditLimit ?? 0)); }}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200 rounded-xl text-xs font-bold font-manrope transition-all">
+                  <Landmark className="w-3.5 h-3.5" /> Credit Limit
                 </button>
               </div>
             </div>
@@ -296,6 +408,146 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Admin Tools ─────────────────────────────────────────────────── */}
+      <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
+        <button
+          onClick={() => setShowAdminTools(v => !v)}
+          className="w-full flex items-center justify-between px-8 py-5 hover:bg-surface-container/20 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-violet-50">
+              <User className="w-4 h-4 text-violet-600" />
+            </div>
+            <div className="text-left">
+              <p className="font-manrope font-bold text-[#134235] text-sm">Admin Tools</p>
+              <p className="text-xs text-on-surface-variant">Change user name, email, password, or PIN</p>
+            </div>
+          </div>
+          {showAdminTools ? <ChevronUp className="w-4 h-4 text-on-surface-variant" /> : <ChevronDown className="w-4 h-4 text-on-surface-variant" />}
+        </button>
+
+        {showAdminTools && (
+          <div className="px-8 pb-8 pt-2 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-black/[0.03]">
+            {/* Change Name */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <User className="w-4 h-4 text-green-500" />
+                <p className="font-manrope font-bold text-sm text-[#134235]">Change Name</p>
+              </div>
+              <p className="text-xs text-on-surface-variant">Current: <span className="font-semibold text-on-surface">{user.displayName}</span></p>
+              <input
+                type="text"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="New display name"
+                className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-300 transition-all"
+              />
+              <button
+                onClick={handleChangeName}
+                disabled={savingName || !newName.trim()}
+                className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold font-manrope hover:bg-green-700 disabled:opacity-50 transition-all"
+              >
+                {savingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
+                {savingName ? "Saving…" : "Update Name"}
+              </button>
+            </div>
+
+            {/* Change Email */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Mail className="w-4 h-4 text-blue-500" />
+                <p className="font-manrope font-bold text-sm text-[#134235]">Change Email</p>
+              </div>
+              <p className="text-xs text-on-surface-variant">Current: <span className="font-semibold text-on-surface">{user.email}</span></p>
+              <input
+                type="email"
+                value={newEmail}
+                onChange={e => setNewEmail(e.target.value)}
+                placeholder="New email address"
+                className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 transition-all"
+              />
+              <button
+                onClick={handleChangeEmail}
+                disabled={savingEmail || !newEmail.trim()}
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold font-manrope hover:bg-blue-700 disabled:opacity-50 transition-all"
+              >
+                {savingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                {savingEmail ? "Saving…" : "Update Email"}
+              </button>
+            </div>
+
+            {/* Change Password */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Key className="w-4 h-4 text-violet-500" />
+                <p className="font-manrope font-bold text-sm text-[#134235]">Change Password</p>
+              </div>
+              <p className="text-xs text-on-surface-variant">Set a new password for this user directly.</p>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                placeholder="New password (min 6 chars)"
+                className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 transition-all"
+              />
+              <button
+                onClick={handleChangePassword}
+                disabled={savingPassword || newPassword.length < 6}
+                className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-bold font-manrope hover:bg-violet-700 disabled:opacity-50 transition-all"
+              >
+                {savingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+                {savingPassword ? "Saving…" : "Change Password"}
+              </button>
+            </div>
+
+            {/* Change PIN */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Lock className="w-4 h-4 text-orange-500" />
+                <p className="font-manrope font-bold text-sm text-[#134235]">Change Transaction PIN</p>
+              </div>
+              <p className="text-xs text-on-surface-variant">Set a new 4-6 digit PIN for this user.</p>
+              <input
+                type="text"
+                value={newPin}
+                onChange={e => setNewPin(e.target.value)}
+                placeholder="New PIN (4-6 digits)"
+                maxLength={6}
+                className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all"
+              />
+              <button
+                onClick={handleChangePin}
+                disabled={savingPin || !/^\d{4,6}$/.test(newPin)}
+                className="flex items-center gap-2 px-5 py-2.5 bg-orange-600 text-white rounded-xl text-sm font-bold font-manrope hover:bg-orange-700 disabled:opacity-50 transition-all"
+              >
+                {savingPin ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                {savingPin ? "Saving…" : "Change PIN"}
+              </button>
+            </div>
+
+            {/* Manual Job Completion Permission */}
+            <div className="space-y-3 col-span-1 md:col-span-2 pt-4 border-t border-black/[0.03]">
+              <div className="flex items-center gap-2 mb-1">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <p className="font-manrope font-bold text-sm text-[#134235]">Manual Job Completion Permission</p>
+              </div>
+              <div className="flex items-center justify-between bg-emerald-50/50 border border-emerald-100 rounded-xl p-4">
+                <p className="text-xs text-on-surface-variant max-w-[80%]">
+                  Allow this user to view pending jobs, claim them (preventing agents from executing them), and manually submit completion statuses and transaction IDs.
+                </p>
+                <button
+                  onClick={handleToggleManualJobs}
+                  disabled={savingManualJobPermission}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${user.canManuallyCompleteJobs ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${user.canManuallyCompleteJobs ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Tabs + tables ───────────────────────────────────────────────── */}
@@ -442,6 +694,49 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
         note={deductNote} setNote={setDeductNote}
         submitting={submitting} onSubmit={handleDeductBalance}
       />
+
+      {/* ── Set Credit Limit modal ────────────────────────────────────────── */}
+      {showCreditLimit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingCredit && setShowCreditLimit(false)} />
+          <div className="relative bg-white rounded-2xl border border-black/5 premium-shadow w-full max-w-sm">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-black/[0.03]">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-orange-50">
+                  <Landmark className="w-5 h-5 text-orange-600" />
+                </div>
+                <h3 className="font-manrope font-bold text-[#134235] text-lg">Set Credit Limit</h3>
+              </div>
+              <button onClick={() => setShowCreditLimit(false)} disabled={savingCredit} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-xl transition-colors disabled:opacity-50">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="px-4 py-3 bg-orange-50 border border-orange-200/60 rounded-xl text-xs text-orange-700 font-manrope font-semibold">
+                Users can spend up to this credit limit even when their balance is zero. Negative balance will be shown in red.
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">Credit Limit (BDT)</label>
+                <input
+                  type="number" min="0" value={creditLimitInput}
+                  onChange={e => setCreditLimitInput(e.target.value)}
+                  placeholder="e.g. 1000"
+                  className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all"
+                />
+                <p className="mt-1.5 text-xs text-on-surface-variant">Set to 0 to remove credit.</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setShowCreditLimit(false)} disabled={savingCredit}
+                  className="flex-1 px-4 py-3 text-sm font-bold font-manrope border border-outline-variant rounded-xl hover:bg-surface-container transition-colors disabled:opacity-50">Cancel</button>
+                <button onClick={handleSetCreditLimit} disabled={savingCredit}
+                  className="flex-1 px-4 py-3 text-sm font-bold font-manrope text-white bg-orange-500 hover:bg-orange-600 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  {savingCredit ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : "Save Limit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

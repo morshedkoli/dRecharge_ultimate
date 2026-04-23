@@ -35,6 +35,7 @@ function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [icon, setIcon] = useState("");
+  const [recipientLength, setRecipientLength] = useState(11);
   const [saving, setSaving] = useState(false);
 
   if (!open) return null;
@@ -48,7 +49,7 @@ function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose
       const result = await createService({
         name: name.trim(), description: description.trim(),
         categoryId: categoryId || undefined, isActive: false,
-        pin: "", simSlot: 1,
+        pin: "", simSlot: 1, recipientLength,
         successSmsFormat: "", smsTimeout: 30, icon: icon.trim(),
       });
       toast.success("Service created — now configure its USSD template");
@@ -82,6 +83,14 @@ function NewServiceModal({ open, onClose, categories }: { open: boolean; onClose
             </label>
             <input value={name} onChange={(e) => setName(e.target.value)} required
               placeholder="e.g. bKash Send Money"
+              className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">
+              Recipient Number Length <span className="text-red-500">*</span>
+            </label>
+            <input type="number" min={1} value={recipientLength} onChange={(e) => setRecipientLength(Number(e.target.value))} required
               className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
           </div>
 

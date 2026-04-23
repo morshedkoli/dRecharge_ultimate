@@ -49,3 +49,21 @@ export async function withAdminSession(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
+export async function withUserSession(
+  request: NextRequest,
+  handler: (session: SessionPayload) => Promise<Response>
+): Promise<Response> {
+  const { NextResponse } = require("next/server");
+  try {
+    const session = await getSession(request);
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return await handler(session);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Server error";
+    console.error(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+// forced-update

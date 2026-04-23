@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useModalEffect } from "@/lib/hooks/useModalEffect";
 import {
   Globe, Phone, ArrowRight, CheckCircle2, Loader2, ShieldCheck, X
 } from "lucide-react";
@@ -15,6 +16,7 @@ export function SetupWizard() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
 
+  const containerRef = useModalEffect(open);
   const [domain, setDomain] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [saving, setSaving] = useState(false);
@@ -79,7 +81,7 @@ export function SetupWizard() {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div ref={containerRef} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
 
         {/* Header */}
         <div className="bg-gradient-to-br from-[#134235] to-[#1B6B4D] px-8 pt-8 pb-10 text-white">
@@ -97,7 +99,7 @@ export function SetupWizard() {
             </div>
             <div>
               <h2 className="text-xl font-extrabold tracking-tight">
-                {isFirstSetup ? "Welcome to dRecharge" : "Site Settings"}
+                {isFirstSetup ? `Welcome to ${settings?.appName || "dRecharge"}` : "Site Settings"}
               </h2>
               <p className="text-white/70 text-xs mt-0.5">
                 {isFirstSetup

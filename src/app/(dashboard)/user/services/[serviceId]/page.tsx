@@ -74,7 +74,8 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
   const balance = profile?.walletBalance || 0;
   const amount = parseFloat(amountStr) || 0;
   const isOverBalance = amount > balance;
-  const isValid = recipient.length >= 10 && amount > 0 && !isOverBalance;
+  const requiredRecipientLength = service.recipientLength || 11;
+  const isValid = recipient.length === requiredRecipientLength && amount > 0 && !isOverBalance;
   const effectivePin = profile?.pin?.trim() || "1234";
   const requiredPinLength = effectivePin.length;
 
@@ -166,6 +167,12 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                     className="w-full pl-12 pr-4 py-3.5 bg-surface-container border border-black/5 rounded-2xl text-[15px] font-medium focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all placeholder:text-on-surface-variant/40" 
                   />
                 </div>
+                {recipient.length > 0 && recipient.length !== requiredRecipientLength && (
+                  <p className="text-amber-600 text-xs mt-2 flex items-center font-bold font-manrope">
+                    <Info className="w-3.5 h-3.5 mr-1" />
+                    Number must be exactly {requiredRecipientLength} digits.
+                  </p>
+                )}
               </div>
               
               <div>

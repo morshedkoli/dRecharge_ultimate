@@ -15,6 +15,20 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
 
+    // Auto-recover stuck jobs: if a job has been processing for >5 minutes, reset it to queued
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    await ExecutionJob.updateMany(
+      {
+        status: "processing",
+        locked: true,
+        lockedAt: { $lt: fiveMinutesAgo },
+      },
+      {
+        $set: { status: "queued", locked: false },
+        $unset: { lockedAt: 1, lockedByDevice: 1 },
+      }
+    );
+
     // Only dispatch jobs whose service is assigned to this device
     const assignedServices: string[] = agentSession.device.assignedServices ?? [];
     if (assignedServices.length === 0) {
@@ -23,6 +37,7 @@ export async function GET(request: NextRequest) {
 
     const job = await ExecutionJob.findOne({
       status: "queued",
+      locked: { $ne: true },
       serviceId: { $in: assignedServices },
     })
       .sort({ queuedAt: 1, createdAt: 1 })

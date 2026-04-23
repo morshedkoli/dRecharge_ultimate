@@ -4,20 +4,24 @@ export type UserStatus = "active" | "suspended";
 
 export interface AppUser {
   uid: string;
-  email: string;
+  username: string;
+  email?: string;
   displayName: string;
   role: UserRole;
   walletBalance: number;
+  creditLimit: number;
   walletLocked: boolean;
   status: UserStatus;
   createdAt: Date | string;
   lastLoginAt: Date | string;
   phoneNumber?: string;
   pin?: string;
+  parentId?: string;
+  canManuallyCompleteJobs?: boolean;
 }
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
-export type TxType = "send" | "topup" | "deduct" | "refund";
+export type TxType = "send" | "topup" | "deduct" | "refund" | "credit";
 export type TxStatus = "pending" | "processing" | "waiting" | "complete" | "failed" | "cancelled";
 
 export interface Transaction {
@@ -60,6 +64,8 @@ export interface ExecutionJob {
   txId: string;
   userId: string;
   serviceId: string;
+  serviceName?: string;
+  serviceIcon?: string;
   recipientNumber: string;
   amount: number;
   ussdSteps?: UssdStep[];      // structured steps with placeholders resolved
@@ -127,6 +133,7 @@ export interface Service {
   ussdSteps: UssdStep[];               // structured step array (source of truth)
   pin: string;
   simSlot: number;
+  recipientLength?: number;
   successSmsFormat: string;
   failureSmsTemplates: SmsFailureTemplate[]; // multi-failure templates (source of truth)
   smsTimeout: number;

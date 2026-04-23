@@ -50,6 +50,11 @@ export async function POST(request: NextRequest) {
     if (!service) return NextResponse.json({ error: "Service not found" }, { status: 404 });
     if (!service.isActive) return NextResponse.json({ error: "Service is currently inactive" }, { status: 400 });
 
+    const requiredRecipientLength = service.recipientLength || 11;
+    if (recipientNumber.length !== requiredRecipientLength) {
+      return NextResponse.json({ error: `Recipient number must be exactly ${requiredRecipientLength} digits` }, { status: 400 });
+    }
+
     const dbSession = await mongoose.startSession();
     let txId = "";
     let jobId = "";
@@ -59,7 +64,7 @@ export async function POST(request: NextRequest) {
         const user = await User.findOneAndUpdate(
           { _id: uid, walletBalance: { $gte: amount } },
           { $inc: { walletBalance: -amount } },
-          { new: true, session: dbSession },
+          { returnDocument: "after", session: dbSession },
         );
         if (!user) {
           const existingUser = await User.findById(uid).session(dbSession);

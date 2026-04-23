@@ -1,6 +1,7 @@
 "use client";
 import { useSubscription, type SubscriptionStatus } from "@/lib/hooks/useSubscription";
 import { AlertTriangle, ExternalLink, Loader2, RefreshCw, ShieldOff } from "lucide-react";
+import { useSiteSettings } from "@/lib/hooks/useSiteSettings";
 
 // ── Warning banner — rendered inside <main> ───────────────────────────────────
 export function SubscriptionWarningBanner() {
@@ -59,22 +60,24 @@ function BlockedScreen({ status, onRefresh, refreshing }: {
   refreshing: boolean;
 }) {
   const isUntracked = status.state === "untracked";
+  const { settings } = useSiteSettings();
+  const appName = settings?.appName || "dRecharge";
 
   type StateCfg = { title: string; description: string; iconBg: string; iconColor: string; cardBorder: string };
   const config: Record<string, StateCfg> = {
     expired: {
       title: "Subscription Expired",
-      description: `Your dRecharge licence for {domain} has expired. All transaction processing is suspended until renewed.`,
+      description: `Your ${appName} licence for {domain} has expired. All transaction processing is suspended until renewed.`,
       iconBg: "bg-red-50", iconColor: "text-red-500", cardBorder: "border-red-100",
     },
     inactive: {
       title: "No Active Subscription",
-      description: `Domain {domain} is registered but has no active subscription. Purchase a licence to use dRecharge.`,
+      description: `Domain {domain} is registered but has no active subscription. Purchase a licence to use ${appName}.`,
       iconBg: "bg-orange-50", iconColor: "text-orange-500", cardBorder: "border-orange-100",
     },
     untracked: {
       title: "Domain Not Registered",
-      description: `Domain {domain} is not tracked in the dRecharge licence system. Contact your administrator to register this domain before using the platform.`,
+      description: `Domain {domain} is not tracked in the ${appName} licence system. Contact your administrator to register this domain before using the platform.`,
       iconBg: "bg-gray-100", iconColor: "text-gray-500", cardBorder: "border-gray-200",
     },
   };
@@ -143,7 +146,7 @@ function BlockedScreen({ status, onRefresh, refreshing }: {
               <div className="flex items-start gap-3 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-left">
                 <AlertTriangle className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
                 <p className="text-xs text-gray-600 font-manrope leading-relaxed">
-                  This domain is not registered. Contact your <strong className="text-gray-800">dRecharge administrator</strong> to register{" "}
+                  This domain is not registered. Contact your <strong className="text-gray-800">{appName} administrator</strong> to register{" "}
                   <span className="font-mono font-semibold text-gray-700">{status.domain || "this domain"}</span>{" "}
                   and activate a subscription.
                 </p>

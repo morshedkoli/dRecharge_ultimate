@@ -9,13 +9,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { email, password } = body;
+    const identifier = String(email || "").trim().toLowerCase();
 
-    if (!email || !password) {
-      return NextResponse.json({ error: "Email and password required" }, { status: 400 });
+    if (!identifier || !password) {
+      return NextResponse.json({ error: "Username/Email and password required" }, { status: 400 });
     }
 
     await connectDB();
-    const user = await User.findOne({ email: email.toLowerCase().trim() }).lean();
+    const user = await User.findOne({
+      $or: [{ email: identifier }, { username: identifier }]
+    }).lean();
 
     if (!user) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
@@ -35,7 +38,7 @@ export async function POST(request: NextRequest) {
 
     const token = await signSessionToken({
       sub: user._id as string,
-      email: user.email,
+      email: user.email || user.username || "",
       role: user.role,
       displayName: user.displayName,
     });
@@ -81,6 +84,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       user: {
         uid: user._id,
+        username: user.username,
         email: user.email,
         displayName: user.displayName,
         role: user.role,

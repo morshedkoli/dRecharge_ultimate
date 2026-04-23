@@ -136,7 +136,7 @@ export async function notifyTransactionWaiting(userId: string, amount: number, r
       type: "tx_waiting",
       title: "Transaction waiting for admin review",
       body: `${fmt(amount)} recharge to ${mask(recipientNumber)} needs manual review.${reason ? ` Reason: ${reason}` : ""}`,
-      link: "/admin/queue",
+      link: "/admin/history",
     }),
   ]);
 }

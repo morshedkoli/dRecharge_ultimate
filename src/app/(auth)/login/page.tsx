@@ -2,6 +2,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { useSiteSettings } from "@/lib/hooks/useSiteSettings";
 import {
   Zap, Lock, Mail, Shield, User, Eye, EyeOff,
   ArrowRight, Loader2, CheckCircle,
@@ -19,8 +20,9 @@ const FEATURES = [
 function LoginPageContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
+  const { settings } = useSiteSettings();
 
-  const [email,       setEmail]       = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password,    setPassword]    = useState("");
   const [loading,     setLoading]     = useState(false);
   const [showPass,    setShowPass]    = useState(false);
@@ -33,7 +35,7 @@ function LoginPageContent() {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ email: emailVal, password: passVal }),
+      body: JSON.stringify({ email: emailVal, password: passVal }), // Backend expects `email` property for the identifier
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Login failed");
@@ -51,7 +53,7 @@ function LoginPageContent() {
     e.preventDefault();
     setLoading(true);
     try {
-      await signInAndRedirect(email, password);
+      await signInAndRedirect(identifier, password);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -107,11 +109,17 @@ function LoginPageContent() {
 
         {/* Logo */}
         <div className="relative flex items-center gap-3">
-          <div className="w-11 h-11 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10 backdrop-blur-sm">
-            <Zap className="w-5 h-5 text-white" strokeWidth={2.5} />
-          </div>
+          {settings?.logoUrl ? (
+            <div className="w-11 h-11 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10 backdrop-blur-sm p-1">
+              <img src={settings.logoUrl} alt="Logo" className="w-full h-full object-contain" />
+            </div>
+          ) : (
+            <div className="w-11 h-11 bg-white/10 rounded-2xl flex items-center justify-center border border-white/10 backdrop-blur-sm">
+              <Zap className="w-5 h-5 text-white" strokeWidth={2.5} />
+            </div>
+          )}
           <div>
-            <span className="text-white text-xl font-extrabold font-manrope tracking-tight">dRecharge</span>
+            <span className="text-white text-xl font-extrabold font-manrope tracking-tight">{settings?.appName || "dRecharge"}</span>
             <p className="text-white/40 text-[9px] uppercase tracking-[0.25em] font-bold">Admin Portal</p>
           </div>
         </div>
@@ -140,7 +148,7 @@ function LoginPageContent() {
         </div>
 
         <div className="relative text-white/20 text-xs font-manrope">
-          © 2026 dRecharge. All rights reserved.
+          © {new Date().getFullYear()} {settings?.appName || "dRecharge"}. All rights reserved.
         </div>
       </div>
 
@@ -150,11 +158,15 @@ function LoginPageContent() {
 
           {/* Mobile logo */}
           <div className="flex items-center gap-3 lg:hidden mb-2">
-            <div className="w-10 h-10 bg-[#134235] rounded-xl flex items-center justify-center shadow-md shadow-[#134235]/20">
-              <Zap className="w-5 h-5 text-white" strokeWidth={2.5} />
-            </div>
+            {settings?.logoUrl ? (
+              <img src={settings.logoUrl} alt="Logo" className="w-10 h-10 object-contain" />
+            ) : (
+              <div className="w-10 h-10 bg-[#134235] rounded-xl flex items-center justify-center shadow-md shadow-[#134235]/20">
+                <Zap className="w-5 h-5 text-white" strokeWidth={2.5} />
+              </div>
+            )}
             <div>
-              <span className="text-[#134235] text-lg font-extrabold font-manrope">dRecharge</span>
+              <span className="text-[#134235] text-lg font-extrabold font-manrope">{settings?.appName || "dRecharge"}</span>
               <p className="text-on-surface-variant/50 text-[9px] uppercase tracking-widest font-bold">Admin</p>
             </div>
           </div>
@@ -220,7 +232,7 @@ function LoginPageContent() {
             </div>
             <div className="relative flex justify-center">
               <span className="bg-[#F4F6F5] px-4 text-[11px] text-on-surface-variant/50 font-manrope font-bold uppercase tracking-widest">
-                or sign in with email
+                or sign in below
               </span>
             </div>
           </div>
@@ -229,18 +241,18 @@ function LoginPageContent() {
           <form onSubmit={handleEmailLogin} className="space-y-4">
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-[0.18em] text-on-surface-variant/60 font-manrope mb-2">
-                Email
+                Username or Email
               </label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/50" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant/50" />
                 <input
                   id="email-input"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   required
                   disabled={isAnyLoading}
-                  placeholder="you@example.com"
+                  placeholder="username or you@example.com"
                   className="w-full pl-10 pr-4 py-3 bg-white border border-black/[0.08] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#2D5A4C]/20 focus:border-[#2D5A4C]/30 placeholder:text-on-surface-variant/30 transition-all disabled:opacity-60"
                   suppressHydrationWarning
                 />
@@ -286,9 +298,9 @@ function LoginPageContent() {
             </button>
           </form>
 
-          <p className="text-center text-[11px] text-on-surface-variant/40 font-manrope">
-            Secure admin access · dRecharge © 2026
-          </p>
+          <div className="mt-8 text-center text-xs font-semibold text-on-surface-variant/50 tracking-wider uppercase font-manrope">
+            Secure admin access · {settings?.appName || "dRecharge"} © {new Date().getFullYear()}
+          </div>
         </div>
       </div>
     </div>

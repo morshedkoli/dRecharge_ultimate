@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         lockedByDevice: agentSession.deviceId,
         status: "processing",
       },
-      { new: true }
+      { returnDocument: "after" }
     );
 
     if (!job) {

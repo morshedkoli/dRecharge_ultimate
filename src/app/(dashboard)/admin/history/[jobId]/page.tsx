@@ -79,7 +79,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
   useEffect(() => {
     let mounted = true;
-    fetch(`/api/admin/queue/${jobId}`)
+    fetch(`/api/admin/history/${jobId}`)
       .then(r => r.json())
       .then(d => { if (mounted && d.job) setJob(d.job); })
       .catch(console.error);
@@ -106,11 +106,11 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
       {/* ── Back nav ─────────────────────────────────────────────────────── */}
       <Link
-        href="/admin/queue"
+        href="/admin/history"
         className="inline-flex items-center gap-2 text-sm text-on-surface-variant hover:text-on-surface font-manrope font-semibold transition-colors group"
       >
         <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-        Back to Queue
+        Back to History
       </Link>
 
       {/* ── Hero card ─────────────────────────────────────────────────────── */}

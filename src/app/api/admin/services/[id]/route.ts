@@ -31,7 +31,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const body = await request.json();
     const {
       name, icon, description, isActive, categoryId,
-      ussdSteps, pin, simSlot, successSmsFormat,
+      ussdSteps, pin, simSlot, recipientLength, successSmsFormat,
       failureSmsTemplates, smsTimeout,
     } = body;
 
@@ -47,13 +47,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         ussdSteps: normalizeStructuredUssdSteps(ussdSteps),
         pin,
         simSlot,
+        recipientLength,
         successSmsFormat,
         failureSmsTemplates: Array.isArray(failureSmsTemplates) ? failureSmsTemplates : [],
         smsTimeout,
         updatedBy: session.sub,
         updatedAt: new Date(),
       },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!service) return NextResponse.json({ error: "Not found" }, { status: 404 });
     await writeLog({ uid: session.sub, action: "SERVICE_UPDATED", entityId: id, meta: { name } });

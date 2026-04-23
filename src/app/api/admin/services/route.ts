@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       name, icon, description, isActive, categoryId,
-      ussdSteps, pin, simSlot, successSmsFormat,
+      ussdSteps, pin, simSlot, recipientLength, successSmsFormat,
       failureSmsTemplates, smsTimeout,
     } = body;
 
@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
       ussdSteps: normalizeStructuredUssdSteps(ussdSteps),
       pin: pin || "",
       simSlot: simSlot || 1,
+      recipientLength: recipientLength || 11,
       successSmsFormat: successSmsFormat || "",
       failureSmsTemplates: Array.isArray(failureSmsTemplates) ? failureSmsTemplates : [],
       smsTimeout: smsTimeout || 30,

@@ -24,11 +24,13 @@ export interface IExecutionJob extends Document<string> {
   locked: boolean;
   lockedAt?: Date;
   lockedByDevice?: string;
+  lockedByUser?: string;
   attempt: number;
   rawSms?: string;
   parsedResult?: {
     success: boolean;
     txRef?: string;
+    senderNumber?: string;
     amount?: number;
     reason?: string;
   };
@@ -73,6 +75,7 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     locked: { type: Boolean, default: false },
     lockedAt: { type: Date },
     lockedByDevice: { type: String },
+    lockedByUser: { type: String },
     attempt: { type: Number, default: 0 },
     rawSms: { type: String },
     parsedResult: { type: Schema.Types.Mixed },

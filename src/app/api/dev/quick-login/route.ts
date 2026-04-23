@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       },
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
       }
     );
 

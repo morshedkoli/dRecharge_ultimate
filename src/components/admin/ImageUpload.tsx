@@ -23,22 +23,21 @@ interface ImageUploadProps {
 
 async function uploadToImgBB(file: File): Promise<string> {
   const form = new FormData();
-  form.append("key", IMGBB_API_KEY);
   form.append("image", file);
   form.append("name", file.name);
 
-  const res = await fetch("https://api.imgbb.com/1/upload", {
+  const res = await fetch("/api/admin/upload", {
     method: "POST",
     body: form,
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? `ImgBB upload failed (${res.status})`);
+    throw new Error(err?.error ?? `Upload failed (${res.status})`);
   }
 
   const data = await res.json();
-  return data?.data?.url as string;
+  return data.url;
 }
 
 export function ImageUpload({
@@ -204,7 +203,7 @@ export function ImageUpload({
         <input
           type="text"
           value={value}
-          onChange={(e) => { onChange(e.target.value); setImgErr(false); }}
+          onChange={(e) => { onChange(e.target.value); setImgErr(false); setError(null); }}
           placeholder="Or paste an image URL / emoji  e.g. 🏦"
           className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-700 bg-white"
         />

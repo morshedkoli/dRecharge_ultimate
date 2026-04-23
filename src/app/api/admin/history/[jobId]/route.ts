@@ -10,7 +10,7 @@ import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
 
-// GET /api/admin/queue/[jobId]
+// GET /api/admin/history/[jobId]
 export async function GET(request: NextRequest, { params }: Params) {
   return withAdminSession(request, async () => {
     const { jobId } = await params;
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   });
 }
 
-// DELETE /api/admin/queue/[jobId] — admin cancel job (refunds wallet)
+// DELETE /api/admin/history/[jobId] — admin cancel job (refunds wallet)
 export async function DELETE(request: NextRequest, { params }: Params) {
   return withAdminSession(request, async (session) => {
     const { jobId } = await params;
@@ -80,11 +80,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   });
 }
 
-// PATCH /api/admin/queue/[jobId] — simulate result
+// PATCH /api/admin/history/[jobId] — admin complete / fail job
 export async function PATCH(request: NextRequest, { params }: Params) {
   return withAdminSession(request, async (session) => {
     const { jobId } = await params;
-    const { txId, isSuccess } = await request.json();
+    const { txId, isSuccess, txRef, senderNumber, note } = await request.json();
 
     await connectDB();
     const dbSession = await mongoose.startSession();
@@ -96,12 +96,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
         job.status = isSuccess ? "done" : "failed";
         job.locked = false;
-        job.parsedResult = { success: isSuccess, reason: isSuccess ? undefined : "Admin simulated failure" };
+        job.parsedResult = {
+          success: isSuccess,
+          txRef: txRef || undefined,
+          senderNumber: senderNumber || undefined,
+          reason: isSuccess
+            ? (note || undefined)
+            : (note || "Admin marked as failed"),
+        };
         job.completedAt = new Date();
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";
-        if (!isSuccess) (tx as any).failureReason = "Admin simulated failure";
+        if (!isSuccess) (tx as any).failureReason = note || "Admin marked as failed";
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 
@@ -113,7 +120,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       await dbSession.endSession();
     }
 
-    await writeLog({ uid: session.sub, action: isSuccess ? "TX_COMPLETED" : "TX_FAILED", entityId: txId, meta: { jobId, simulated: true } });
+    await writeLog({
+      uid: session.sub,
+      action: isSuccess ? "TX_COMPLETED" : "TX_FAILED",
+      entityId: txId,
+      meta: { jobId, adminCompleted: true, txRef, senderNumber, note },
+    });
     return NextResponse.json({ success: true });
   });
 }

@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
-export type TxType = "send" | "topup" | "deduct" | "refund";
+export type TxType = "send" | "topup" | "deduct" | "refund" | "credit";
 export type TxStatus = "pending" | "processing" | "waiting" | "complete" | "failed";
 
 export interface ITransaction extends Document<string> {
@@ -23,7 +23,7 @@ const TransactionSchema = new Schema<ITransaction>(
   {
     _id: { type: String, required: true },
     userId: { type: String, required: true, index: true },
-    type: { type: String, enum: ["send", "topup", "deduct", "refund"], required: true },
+    type: { type: String, enum: ["send", "topup", "deduct", "refund", "credit"], required: true },
     serviceId: { type: String },
     recipientNumber: { type: String },
     amount: { type: Number, required: true },

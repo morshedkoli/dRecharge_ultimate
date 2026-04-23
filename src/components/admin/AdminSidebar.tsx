@@ -1,16 +1,24 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   LayoutDashboard, Users, ListOrdered, Inbox,
   Terminal, Smartphone, ScrollText, BarChart3, ShieldAlert, Tag,
-  Zap, X, LogOut, ChevronLeft, ChevronRight,
+  Zap, X, LogOut, ChevronLeft, ChevronRight, Bell, ListChecks, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAdminStats } from "@/lib/hooks/admin/useAdminStats";
+import { useSiteSettings } from "@/lib/hooks/useSiteSettings";
+
+import {
+  Sidebar,
+  SidebarHeader,
+  SidebarContent,
+  SidebarFooter,
+  SidebarItem,
+} from "@/components/ui/Sidebar";
 
 /* ── Navigation groups ─────────────────────────────────────────────────── */
 const NAV_GROUPS = [
@@ -23,9 +31,9 @@ const NAV_GROUPS = [
   {
     label: "Operations",
     items: [
-      { href: "/admin/balance-requests", label: "Balance Requests", icon: Inbox,       badge: "pendingRequests" as const },
-      { href: "/admin/queue",            label: "Exec Queue",       icon: ListOrdered, badge: "jobsInQueue"      as const },
-      { href: "/admin/analytics",        label: "Analytics",        icon: BarChart3 },
+      { href: "/admin/balance-requests", label: "Requests",  icon: Inbox,        badge: "pendingRequests" as const },
+      { href: "/admin/history",          label: "History",   icon: ListOrdered },
+      { href: "/admin/analytics",        label: "Analytics", icon: BarChart3 },
     ],
   },
   {
@@ -35,18 +43,20 @@ const NAV_GROUPS = [
       { href: "/admin/categories", label: "Categories", icon: Tag },
       { href: "/admin/services",   label: "Services",   icon: Terminal },
       { href: "/admin/devices",    label: "Devices",    icon: Smartphone,  badge: "activeDevices" as const },
+      { href: "/admin/logs",       label: "Audit Logs", icon: ShieldAlert },
+      { href: "/admin/settings",   label: "Settings",   icon: Settings },
     ],
   },
   {
     label: "System",
     items: [
-      { href: "/admin/logs",   label: "Audit Logs",  icon: ScrollText },
-      { href: "/admin/admins", label: "Staff Roles", icon: ShieldAlert },
+      { href: "/admin/logs",   label: "Logs",  icon: ScrollText },
+
+      { href: "/admin/notice", label: "Notices", icon: Bell },
     ],
   },
 ] as const;
 
-/* ── Types ─────────────────────────────────────────────────────────────── */
 interface AdminSidebarProps {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -54,68 +64,6 @@ interface AdminSidebarProps {
   onToggleCollapse?: () => void;
 }
 
-/* ── Single nav item ────────────────────────────────────────────────────── */
-function NavItem({
-  href, label, icon: Icon, count, collapsed, active, onClick,
-}: {
-  href: string; label: string; icon: React.ElementType;
-  count?: number | null; collapsed: boolean;
-  active: boolean; onClick?: () => void;
-}) {
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className={cn(
-        "group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-manrope font-semibold transition-all duration-150",
-        active
-          ? "bg-white text-[#134235] shadow-card"
-          : "text-on-surface-variant hover:bg-white/70 hover:text-[#134235]",
-        collapsed && "justify-center px-2.5",
-      )}
-    >
-      {/* Active indicator bar */}
-      {active && !collapsed && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-r-full" />
-      )}
-
-      <Icon
-        className={cn(
-          "w-[18px] h-[18px] shrink-0 transition-colors",
-          active ? "text-primary" : "text-on-surface-variant group-hover:text-[#134235]",
-        )}
-      />
-
-      {!collapsed && (
-        <>
-          <span className="flex-1 leading-none tracking-tight truncate">{label}</span>
-          {count != null && count > 0 && (
-            <span className={cn(
-              "text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center tabular-nums",
-              active ? "bg-primary/10 text-primary" : "bg-outline-variant/40 text-on-surface-variant",
-            )}>
-              {count > 99 ? "99+" : count}
-            </span>
-          )}
-        </>
-      )}
-
-      {/* Collapsed tooltip */}
-      {collapsed && (
-        <span className="sidebar-collapsed-tooltip">
-          {label}{count != null && count > 0 ? ` (${count})` : ""}
-        </span>
-      )}
-
-      {/* Collapsed badge dot */}
-      {collapsed && count != null && count > 0 && (
-        <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary" />
-      )}
-    </Link>
-  );
-}
-
-/* ── Sidebar body ────────────────────────────────────────────────────────── */
 function SidebarBody({
   collapsed,
   onToggleCollapse,
@@ -127,6 +75,7 @@ function SidebarBody({
 }) {
   const pathname   = usePathname();
   const { stats }  = useAdminStats();
+  const { settings } = useSiteSettings();
   const { user }   = useAuth();
   const router     = useRouter();
 
@@ -144,138 +93,94 @@ function SidebarBody({
   };
 
   const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? "AD";
-  const userName     = user?.email?.split("@")[0] ?? "Admin";
 
   return (
-    <aside
-      className={cn(
-        "flex flex-col h-full bg-white transition-[width] duration-200 ease-in-out overflow-hidden shrink-0",
-        "shadow-[1px_0_0_rgba(0,0,0,0.06),4px_0_20px_rgba(0,0,0,0.04)]",
-        collapsed ? "w-[68px]" : "w-64",
-      )}
-    >
-      {/* ── Logo ─────────────────────────────────────────────────────────── */}
-      <div className={cn(
-        "flex items-center shrink-0 border-b border-black/[0.05] h-16",
-        collapsed ? "justify-center px-3" : "px-5 gap-3",
-      )}>
-        <div className="w-8 h-8 bg-[#134235] rounded-[10px] flex items-center justify-center shrink-0 shadow-sm">
-          <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0 flex-1">
-            <h1 className="font-manrope font-extrabold text-[#134235] text-[15px] leading-tight truncate">
-              dRecharge
-            </h1>
-            <p className="text-[9px] uppercase tracking-[0.22em] text-on-surface-variant/50 font-bold">
-              Admin Panel
-            </p>
+    <Sidebar className={cn("transition-all duration-200", collapsed ? "w-[68px]" : "w-64")}>
+      <SidebarHeader>
+        <div className={cn("flex w-full items-center", collapsed ? "justify-center" : "justify-between")}>
+          <div className="flex items-center gap-3">
+            {settings?.logoUrl ? (
+              <img src={settings.logoUrl} alt="Logo" className="h-8 w-8 object-contain" />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <Zap className="h-4 w-4" />
+              </div>
+            )}
+            {!collapsed && (
+              <span className="font-headline text-lg font-bold text-[#134235]">{settings?.appName || "dRecharge"}</span>
+            )}
           </div>
-        )}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="ml-auto p-1.5 rounded-lg text-on-surface-variant hover:bg-[#F4F6F5] transition-colors lg:hidden"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+          {onClose && (
+            <button onClick={onClose} className="lg:hidden">
+              <X className="h-4 w-4 text-on-surface-variant" />
+            </button>
+          )}
+        </div>
+      </SidebarHeader>
 
-      {/* ── Navigation ───────────────────────────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto scrollbar-thin px-2.5 py-4 space-y-4">
+      <SidebarContent>
         {NAV_GROUPS.map((group, gi) => (
-          <div key={gi}>
-            {/* Section label */}
-            {group.label && !collapsed && (
-              <p className="text-[9px] font-extrabold uppercase tracking-[0.2em] text-on-surface-variant/40 px-3 mb-2 font-manrope">
+          <div key={gi} className="mb-2">
+            {!collapsed && group.label && (
+              <div className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-on-surface-variant/50">
                 {group.label}
-              </p>
+              </div>
             )}
-            {group.label && collapsed && gi > 0 && (
-              <div className="border-t border-black/[0.05] mx-1 mb-3" />
-            )}
-
-            <div className="space-y-0.5">
-              {group.items.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(item.href + "/");
-                const count  = "badge" in item ? (badgeMap[item.badge] ?? null) : null;
-                return (
-                  <NavItem
-                    key={item.href}
-                    href={item.href}
-                    label={item.label}
-                    icon={item.icon}
-                    count={count}
-                    collapsed={collapsed}
-                    active={active}
-                    onClick={onClose}
-                  />
-                );
-              })}
-            </div>
+            {group.label && collapsed && gi > 0 && <div className="mx-2 mb-2 border-t border-outline-variant/30" />}
+            
+            {group.items.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + "/");
+              const count = "badge" in item ? badgeMap[item.badge] : null;
+              
+              return (
+                <SidebarItem
+                  key={item.href}
+                  href={item.href}
+                  active={active}
+                  icon={item.icon}
+                  className={cn(collapsed && "justify-center")}
+                  onClick={onClose}
+                >
+                  {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && count != null && count > 0 && (
+                    <span className="ml-auto rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                  {collapsed && count != null && count > 0 && (
+                    <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-primary" />
+                  )}
+                </SidebarItem>
+              );
+            })}
           </div>
         ))}
-      </nav>
+      </SidebarContent>
 
-      {/* ── Footer ───────────────────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-black/[0.05] px-2.5 py-3 space-y-0.5">
-        {/* User profile */}
-        {!collapsed ? (
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 bg-[#F4F6F5]">
-            <div className="w-8 h-8 rounded-[8px] bg-[#134235] flex items-center justify-center text-white text-[11px] font-bold font-manrope shrink-0">
-              {userInitials}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-bold text-[#134235] font-manrope truncate leading-tight">{userName}</p>
-              <p className="text-[9px] text-on-surface-variant/50 uppercase tracking-[0.18em] font-bold mt-0.5">Administrator</p>
-            </div>
-          </div>
-        ) : (
-          <div className="group relative flex justify-center py-1.5 mb-1">
-            <div className="w-8 h-8 rounded-[8px] bg-[#134235] flex items-center justify-center text-white text-[11px] font-bold font-manrope">
-              {userInitials}
-            </div>
-            <span className="sidebar-collapsed-tooltip">{userName} — Admin</span>
-          </div>
-        )}
-
-        {/* Sign out */}
-        <button
+      <SidebarFooter>
+        <SidebarItem
           onClick={handleSignOut}
-          className={cn(
-            "group relative flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-manrope font-semibold",
-            "text-on-surface-variant hover:bg-red-50 hover:text-red-600 transition-all",
-            collapsed && "justify-center px-2.5",
-          )}
+          icon={LogOut}
+          className={cn("text-red-600 hover:bg-red-50 hover:text-red-700", collapsed && "justify-center")}
         >
-          <LogOut className="w-[17px] h-[17px] shrink-0" />
-          {!collapsed && <span>Sign Out</span>}
-          {collapsed && <span className="sidebar-collapsed-tooltip">Sign Out</span>}
-        </button>
-      </div>
-
-      {/* ── Collapse toggle ───────────────────────────────────────────────── */}
-      {onToggleCollapse && (
-        <button
-          onClick={onToggleCollapse}
-          className={cn(
-            "hidden lg:flex shrink-0 items-center justify-center gap-1.5 w-full py-2.5 border-t border-black/[0.05]",
-            "text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/40 font-manrope",
-            "hover:bg-[#F4F6F5] hover:text-on-surface-variant/70 transition-all",
-          )}
-        >
-          {collapsed
-            ? <ChevronRight className="w-3.5 h-3.5" />
-            : <><ChevronLeft className="w-3.5 h-3.5" /><span>Collapse</span></>
-          }
-        </button>
-      )}
-    </aside>
+          {!collapsed && "Sign Out"}
+        </SidebarItem>
+        
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-md py-2 text-xs font-semibold text-on-surface-variant/50 transition-colors hover:bg-surface-container"
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : (
+              <><ChevronLeft className="h-4 w-4" /> Collapse</>
+            )}
+          </button>
+        )}
+      </SidebarFooter>
+    </Sidebar>
   );
 }
 
-/* ── Export ─────────────────────────────────────────────────────────────── */
 export function AdminSidebar({
   mobileOpen = false,
   onMobileClose,
@@ -284,19 +189,14 @@ export function AdminSidebar({
 }: AdminSidebarProps) {
   return (
     <>
-      {/* Desktop */}
-      <div className="hidden lg:flex h-full">
+      <div className="hidden h-full lg:block">
         <SidebarBody collapsed={collapsed} onToggleCollapse={onToggleCollapse} />
       </div>
 
-      {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
-            onClick={onMobileClose}
-          />
-          <div className="relative z-10 h-full animate-slide-in-left">
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onMobileClose} />
+          <div className="relative z-10 h-full w-64 bg-surface">
             <SidebarBody collapsed={false} onClose={onMobileClose} />
           </div>
         </div>

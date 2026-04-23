@@ -1467,71 +1467,25 @@ class _DashboardTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final registered = config != null;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+    return Column(
       children: [
-        // ── Status hero ────────────────────────────────────────────────
-        _StatusHeroCard(
-          status: status,
-          currentJobId: currentJobId,
-          lastError: lastError,
-          processing: processing,
-          registered: registered,
-          allReady: allReady,
-          isPoweredOn: isPoweredOn,
+        // ── Top licence banner ─────────────────────────────────────────
+        _LicenseBanner(info: subscriptionInfo),
+
+        // ── Scrollable body ────────────────────────────────────────────
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            children: [
+              // ── Licence card ──────────────────────────────────────────
+              _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
+              const SizedBox(height: 14),
+
+              // ── Recent activity ───────────────────────────────────────
+              _RecentActivityPreview(logs: logs),
+            ],
+          ),
         ),
-        const SizedBox(height: 12),
-
-        // ── Quick actions row ──────────────────────────────────────────
-        if (registered) ...[
-          _QuickActionsRow(
-            isPoweredOn: isPoweredOn,
-            processing: processing,
-            allReady: allReady,
-            onTogglePower: onTogglePower,
-            onRunNow: onRunNow,
-          ),
-          const SizedBox(height: 12),
-        ],
-
-        // ── Alerts ────────────────────────────────────────────────────
-        if (!allReady) ...[
-          _AlertBanner(
-            icon: Icons.warning_amber_rounded,
-            color: const Color(0xFFB45309),
-            bg: const Color(0xFFFFFBEB),
-            border: const Color(0xFFFDE68A),
-            message: 'Missing permissions — tap to fix',
-            onTap: onOpenSettings,
-          ),
-          const SizedBox(height: 8),
-        ],
-        if (!isPoweredOn) ...[
-          _AlertBanner(
-            icon: Icons.power_off_rounded,
-            color: const Color(0xFFE65100),
-            bg: const Color(0xFFFFF8E1),
-            border: const Color(0xFFFFE082),
-            message: 'Agent paused — tap to turn on',
-            onTap: onTogglePower,
-          ),
-          const SizedBox(height: 8),
-        ],
-
-        // ── Subscription ───────────────────────────────────────────────
-        _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
-        const SizedBox(height: 12),
-
-        // ── Device info ────────────────────────────────────────────────
-        if (registered) ...[
-          _DeviceInfoCard(config: config!),
-          const SizedBox(height: 12),
-        ],
-
-        // ── Recent activity preview ────────────────────────────────────
-        _RecentActivityPreview(logs: logs),
       ],
     );
   }
@@ -2241,7 +2195,103 @@ class _DeviceInfoCell extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _SubscriptionCard
+// _LicenseBanner — logo image banner at the top of the home page
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LicenseBanner extends StatelessWidget {
+  const _LicenseBanner({this.info});
+  final SubscriptionInfo? info;
+
+  @override
+  Widget build(BuildContext context) {
+    // While loading show nothing
+    if (info == null) return const SizedBox.shrink();
+
+    final String state    = info!.state;
+    final bool isBlocked  = state == 'expired' || state == 'inactive' || state == 'untracked';
+    final bool isExpiring = info!.isExpiring;
+    final String? logoUrl = info!.logoFullUrl;
+
+    // ── Logo image banner (primary) ──────────────────────────────────────────
+    if (logoUrl != null) {
+      // Status overlay colour on top of image
+      final Color? overlayColor = isBlocked
+          ? const Color(0xCCDC2626)   // red translucent
+          : isExpiring
+          ? const Color(0xCCD97706)   // amber translucent
+          : null;                     // no overlay when active
+
+      return Stack(
+        children: [
+          // — Logo image —
+          SizedBox(
+            width: double.infinity,
+            height: 80,
+            child: Image.network(
+              logoUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              loadingBuilder: (ctx, child, progress) {
+                if (progress == null) return child;
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+
+          // — Coloured status overlay (only for blocked / expiring) —
+          if (overlayColor != null)
+            Positioned.fill(
+              child: Container(color: overlayColor),
+            ),
+
+          // — Status message strip at bottom of banner —
+          if (isBlocked || isExpiring)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                color: Colors.black.withOpacity(0.45),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                child: Text(
+                  _statusMessage(),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    // ── Else: no logo URL found, return nothing ──────────────────────────────
+    return const SizedBox.shrink();
+  }
+
+  String _statusMessage() {
+    final state = info!.state;
+    if (info!.isExpiring) {
+      return info!.daysUntilExpiry != null
+          ? 'Expiring in ${info!.daysUntilExpiry}d — renew soon'
+          : 'Subscription expiring soon';
+    }
+    return switch (state) {
+      'expired'   => 'Subscription expired — renew to resume jobs',
+      'inactive'  => 'No active subscription — jobs are suspended',
+      'untracked' => 'Domain not registered — contact support',
+      _           => 'Licence issue detected',
+    };
+  }
+
+
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _SubscriptionCard — compact: status + expiry progress bar + reload
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SubscriptionCard extends StatelessWidget {
@@ -2253,73 +2303,57 @@ class _SubscriptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    // Loading / not yet fetched
+    // Loading skeleton
     if (info == null) {
-      return Card(
-        elevation: 0,
-        color: cs.surfaceContainerLow,
-        shape: RoundedRectangleBorder(
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow,
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: cs.outlineVariant),
+          border: Border.all(color: cs.outlineVariant),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          child: Row(
-            children: [
-              Icon(Icons.shield_outlined, size: 18, color: cs.outline),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Checking licence…',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: cs.outline),
-                ),
+        child: Row(
+          children: [
+            Icon(Icons.shield_outlined, size: 18, color: cs.outline),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Checking licence…',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: cs.outline),
               ),
-              _ReloadButton(onReload: onReload),
-            ],
-          ),
+            ),
+            _ReloadButton(onReload: onReload),
+          ],
         ),
       );
     }
 
-    final String state     = info!.state;
-    final bool isActive    = state == 'active';
-    final bool isExpiring  = info!.isExpiring;
-    final bool isExpired   = state == 'expired';
-    final bool isInactive  = state == 'inactive';
-    final bool isUntracked = state == 'untracked';
-    final bool isBlocked   = isExpired || isInactive || isUntracked;
+    final String state    = info!.state;
+    final bool isActive   = state == 'active';
+    final bool isExpiring = info!.isExpiring;
+    final bool isBlocked  = state == 'expired' || state == 'inactive' || state == 'untracked';
 
     final Color statusColor = isBlocked
-        ? const Color(0xFFDC2626)   // red-600
+        ? const Color(0xFFDC2626)
         : isExpiring
-        ? const Color(0xFFD97706)   // amber-600
-        : const Color(0xFF1B6B4D);  // brand green
-
-    final IconData statusIcon = isBlocked
-        ? Icons.error_outline_rounded
-        : Icons.shield_outlined;
+        ? const Color(0xFFD97706)
+        : const Color(0xFF1B6B4D);
 
     final String statusLabel = switch (state) {
-      'active'    => isExpiring ? 'Expiring' : 'Active',
+      'active'    => isExpiring ? 'Expiring Soon' : 'Active',
       'expired'   => 'Expired',
       'inactive'  => 'Inactive',
       'untracked' => 'Unregistered',
       _           => 'Unknown',
     };
 
-    // Progress bar fraction (0–365d mapped to 0–1)
-    final double barFraction = info!.daysUntilExpiry != null && isActive
+    // Expiry progress bar (days remaining / 365)
+    final double barFraction = (isActive || isExpiring) && info!.daysUntilExpiry != null
         ? (info!.daysUntilExpiry! / 365.0).clamp(0.0, 1.0)
         : 0.0;
-
-    final Color cardBorderColor = isBlocked
-        ? const Color(0xFFFECACA)   // red-200
-        : isExpiring
-        ? const Color(0xFFFDE68A)   // amber-200
-        : cs.outlineVariant;
 
     final Color cardBg = isBlocked
         ? const Color(0xFFFFF5F5)
@@ -2327,199 +2361,114 @@ class _SubscriptionCard extends StatelessWidget {
         ? const Color(0xFFFFFBEB)
         : cs.surfaceContainerLow;
 
-    return Card(
-      elevation: 0,
-      color: cardBg,
-      shape: RoundedRectangleBorder(
+    final Color cardBorder = isBlocked
+        ? const Color(0xFFFECACA)
+        : isExpiring
+        ? const Color(0xFFFDE68A)
+        : cs.outlineVariant;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: cardBg,
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: cardBorderColor),
+        border: Border.all(color: cardBorder),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Header row ──────────────────────────────────────────
-            Row(
-              children: [
-                Icon(statusIcon, size: 16, color: statusColor),
-                const SizedBox(width: 6),
-                Text(
-                  'Licence',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: cs.outline,
-                    letterSpacing: 0.8,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Top row: label + status badge + reload ────────────────────
+          Row(
+            children: [
+              Icon(
+                isBlocked ? Icons.error_outline_rounded : Icons.shield_outlined,
+                size: 16,
+                color: statusColor,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Licence',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: statusColor.withOpacity(0.7),
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const Spacer(),
+              // Status badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: statusColor.withOpacity(0.3)),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
                   ),
                 ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: statusColor.withOpacity(0.3)),
-                  ),
-                  child: Text(
-                    statusLabel,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _ReloadButton(onReload: onReload),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              _ReloadButton(onReload: onReload),
+            ],
+          ),
+
+          // ── Expiry label + days ───────────────────────────────────────
+          if (info!.expiresAt != null) ...[
             const SizedBox(height: 10),
-
-            // ── Domain ───────────────────────────────────────────────
-            Row(
-              children: [
-                Icon(
-                  Icons.language_rounded,
-                  size: 14,
-                  color: cs.onSurfaceVariant,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    info!.domain.isNotEmpty ? info!.domain : 'Unknown domain',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: cs.onSurface,
-                      fontFamily: 'monospace',
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // ── Tracked / subscribed flags ───────────────────────────
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                _StatusDot(on: info!.tracked,    label: 'Tracked'),
-                const SizedBox(width: 12),
-                _StatusDot(on: info!.subscribed, label: 'Subscribed'),
-                const SizedBox(width: 12),
-                _StatusDot(on: !info!.expired,   label: 'Valid'),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // ── Expiry date row (always shown) ───────────────────────
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   isBlocked ? 'Expired on' : 'Expires on',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: cs.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
-                Row(
-                  children: [
-                    Text(
-                      info!.expiresAt != null
-                          ? _formatDate(info!.expiresAt!)
-                          : '—',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: info!.expiresAt != null
-                            ? statusColor
-                            : cs.onSurfaceVariant,
-                      ),
-                    ),
-                    if (!isBlocked && info!.daysUntilExpiry != null) ...[
-                      const SizedBox(width: 6),
-                      Text(
-                        '(${info!.daysUntilExpiry}d left)',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ],
+                Text(
+                  _formatDate(info!.expiresAt!),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: statusColor,
+                  ),
                 ),
               ],
             ),
+          ],
+
+          // ── Progress bar ──────────────────────────────────────────────
+          if (barFraction > 0) ...[
             const SizedBox(height: 8),
-
-            // ── Progress bar (only when active with known expiry) ────
-            if (info!.expiresAt != null && barFraction > 0) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: barFraction,
-                  minHeight: 5,
-                  backgroundColor: cs.outlineVariant.withOpacity(0.4),
-                  valueColor: AlwaysStoppedAnimation<Color>(statusColor),
-                ),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: barFraction,
+                minHeight: 6,
+                backgroundColor: cs.outlineVariant.withOpacity(0.35),
+                valueColor: AlwaysStoppedAnimation<Color>(statusColor),
               ),
-              const SizedBox(height: 8),
-            ],
-
-            // ── CTA ─────────────────────────────────────────────────
-            if (isBlocked || isExpiring) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: Icon(Icons.open_in_new_rounded, size: 14, color: statusColor),
-                  label: Text(
-                    switch (state) {
-                      'expired'   => 'Renew Now — Jobs Suspended',
-                      'inactive'  => 'Get Subscription',
-                      'untracked' => 'Register Domain',
-                      _           => 'Renew Subscription',
-                    },
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: statusColor.withOpacity(0.4)),
-                    backgroundColor: statusColor.withOpacity(0.06),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  onPressed: () async {
-                    final uri = Uri.parse('https://drecharge.com');
-                    // Use url_launcher if available; ignore errors otherwise
-                    try {
-                      await _launchUrl(uri);
-                    } catch (_) {}
-                  },
-                ),
-              ),
-            ],
-
-            // ── Last checked ─────────────────────────────────────────
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                'Checked ${_relativeTime(info!.checkedAt)}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: cs.onSurfaceVariant.withOpacity(0.5),
-                  fontSize: 10,
-                ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              info!.daysUntilExpiry != null
+                  ? '${info!.daysUntilExpiry} days remaining'
+                  : '',
+              style: TextStyle(
+                fontSize: 10,
+                color: statusColor.withOpacity(0.75),
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -2532,17 +2481,7 @@ class _SubscriptionCard extends StatelessWidget {
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
-  static String _relativeTime(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
-
   static Future<void> _launchUrl(Uri uri) async {
-    // Avoid adding url_launcher dependency — open via Android intent channel
-    // This is a best-effort helper; silently fails if not supported.
     const platform = MethodChannel('drecharge_agent/native');
     try {
       await platform.invokeMethod('openUrl', {'url': uri.toString()});

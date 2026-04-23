@@ -17,9 +17,10 @@ const config: Config = {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: "#2D5A4C",
-          dim: "#1E3D33",
-          foreground: "hsl(var(--primary-foreground))"
+          DEFAULT: "#134235", // Deep green
+          dim: "#0D2B21",     // Darker shade
+          foreground: "#FFFFFF",
+          muted: "#EBF3EE",   // Muted green for backgrounds
         },
         "on-primary": "#FFFFFF",
         surface: "#F9F9F8",
@@ -41,6 +42,12 @@ const config: Config = {
         label: ["var(--font-manrope)", "sans-serif"],
         manrope: ["var(--font-manrope)", "sans-serif"],
         inter: ["var(--font-inter)", "sans-serif"],
+      },
+      fontSize: {
+        sm: ["14px", "20px"],
+        base: ["16px", "24px"],
+        lg: ["20px", "28px"],
+        xl: ["24px", "32px"],
       },
       borderRadius: { lg: "var(--radius)", md: "calc(var(--radius) - 2px)", sm: "calc(var(--radius) - 4px)", xl: "1rem", "2xl": "1.5rem" },
       keyframes: {

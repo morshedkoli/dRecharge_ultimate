@@ -334,6 +334,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
   const [ussdSteps, setUssdSteps] = useState<UssdStep[]>([]);
   const [pin, setPin] = useState("");
   const [simSlot, setSimSlot] = useState(1);
+  const [recipientLength, setRecipientLength] = useState(11);
   const [smsTimeout, setSmsTimeout] = useState(30);
   const [successSmsFormat, setSuccessSmsFormat] = useState("");
   const [failureSmsTemplates, setFailureSmsTemplates] = useState<SmsFailureTemplate[]>([]);
@@ -362,6 +363,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
         setUssdSteps(steps);
         setPin(s.pin || "");
         setSimSlot(s.simSlot || 1);
+        setRecipientLength(s.recipientLength || 11);
         setSmsTimeout(s.smsTimeout || 30);
         setSuccessSmsFormat(s.successSmsFormat || "");
         setFailureSmsTemplates(s.failureSmsTemplates && s.failureSmsTemplates.length > 0
@@ -404,7 +406,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
         serviceId, name: name.trim(), icon: icon.trim(), description: description.trim(),
         isActive, categoryId: categoryId || undefined,
         ussdSteps,
-        pin: pin.trim(), simSlot,
+        pin: pin.trim(), simSlot, recipientLength,
         successSmsFormat: successSmsFormat.trim(),
         failureSmsTemplates: failureSmsTemplates.filter(ft => ft.template.trim()),
         smsTimeout,
@@ -606,6 +608,12 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
                 <option value={1}>SIM 1</option>
                 <option value={2}>SIM 2</option>
               </select>
+            </div>
+            <div>
+              <FieldLabel>Recipient Length</FieldLabel>
+              <input type="number" min={1} value={recipientLength}
+                onChange={(e) => { setRecipientLength(parseInt(e.target.value) || 11); mark(); }}
+                className={inputCls} />
             </div>
             <div>
               <FieldLabel>SMS Timeout (sec)</FieldLabel>

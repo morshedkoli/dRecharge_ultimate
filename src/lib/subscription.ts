@@ -35,6 +35,8 @@ export interface SubscriptionStatus {
   daysUntilExpiry: number | null;
   domain: string;
   checkedAt: string;
+  appName?: string | null;
+  logoUrl?: string | null;
 }
 
 // Module-level in-memory cache (warm-function fast path in serverless)
@@ -122,6 +124,8 @@ function buildStatus(domain: string, entry: any, checkedAt: string): Subscriptio
     daysUntilExpiry: typeof rawDays === "number" ? rawDays : null,
     domain: entry?.domain ?? domain,
     checkedAt,
+    appName: entry?.appName ?? null,
+    logoUrl: entry?.logoUrl ?? null,
   };
 }
 
@@ -163,6 +167,8 @@ async function loadFromDb(): Promise<SubscriptionStatus | null> {
       daysUntilExpiry: cached.daysUntilExpiry,
       domain: cached.domain,
       checkedAt: cached.checkedAt,
+      appName: cached.appName ?? null,
+      logoUrl: cached.logoUrl ?? null,
     };
   } catch {
     return null;
@@ -175,7 +181,7 @@ async function saveToDb(status: SubscriptionStatus): Promise<void> {
     await SubscriptionCache.findByIdAndUpdate(
       CACHE_KEY,
       { ...status, _id: CACHE_KEY, cachedAt: new Date() },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
   } catch (err) {
     console.error("[subscription] DB cache write failed:", err);
@@ -206,6 +212,8 @@ export async function checkSubscription(): Promise<SubscriptionStatus> {
       daysUntilExpiry: null,
       domain,
       checkedAt: new Date().toISOString(),
+      appName: null,
+      logoUrl: null,
     };
   }
 
@@ -243,6 +251,8 @@ export async function checkSubscription(): Promise<SubscriptionStatus> {
       daysUntilExpiry: null,
       domain,
       checkedAt: new Date().toISOString(),
+      appName: null,
+      logoUrl: null,
     };
   }
 }

@@ -1,33 +1,49 @@
 "use client";
+
 import { useState } from "react";
+import Link from "next/link";
 import { useUsers } from "@/lib/hooks/admin/useUsers";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
 import { createUserAccount } from "@/lib/functions";
 import { relativeTime, getInitials } from "@/lib/utils";
 import { UserRole, UserStatus } from "@/types";
-import Link from "next/link";
 import { toast } from "sonner";
-import { Search, UserPlus, X, Users, ArrowRight } from "lucide-react";
+import { Search, UserPlus, Users, MoreVertical } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/Table";
+import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription } from "@/components/ui/Modal";
+import { Card, CardContent } from "@/components/ui/Card";
 
 function RegisterUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [saving, setSaving] = useState(false);
-
-  if (!open) return null;
+  const [successData, setSuccessData] = useState<{ displayName: string; username: string; email: string; pass: string; pin: string } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
     setSaving(true);
+    
+    const genPass = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-2).toUpperCase();
+    const genPin = Math.floor(1000 + Math.random() * 9000).toString();
+
     try {
-      const result = await createUserAccount({ displayName, email, password, phoneNumber: phoneNumber || undefined });
-      toast.success(`User created (${result.uid.slice(0, 10)}...)`);
-      setDisplayName(""); setEmail(""); setPassword(""); setPhoneNumber("");
-      onClose();
+      await createUserAccount({ 
+        displayName, 
+        username,
+        email: email || undefined, 
+        password: genPass, 
+        pin: genPin,
+        phoneNumber: phoneNumber || undefined 
+      });
+      toast.success("User created successfully");
+      
+      setSuccessData({ displayName, username, email, pass: genPass, pin: genPin });
       onSuccess();
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to create user");
@@ -36,64 +52,79 @@ function RegisterUserDialog({ open, onClose, onSuccess }: { open: boolean; onClo
     }
   }
 
+  function handleClose() {
+    setDisplayName(""); setUsername(""); setEmail(""); setPhoneNumber(""); setSuccessData(null);
+    onClose();
+  }
+
+  function handleCopy() {
+    if (!successData) return;
+    const text = `Registration Successful\nName: ${successData.displayName}\nUsername: ${successData.username}\nEmail: ${successData.email || "N/A"}\nPassword: ${successData.pass}\nPIN: ${successData.pin}`;
+    navigator.clipboard.writeText(text);
+    toast.success("Credentials copied to clipboard!");
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !saving && onClose()} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-black/5 bg-white p-8 premium-shadow">
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="font-headline text-xl font-bold text-[#134235]">Register New User</h2>
-            <p className="mt-1 text-sm text-on-surface-variant">Create a Firebase Auth account with dashboard profile.</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={saving}
-            className="rounded-xl p-2 text-on-surface-variant hover:bg-surface-container transition-colors">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope">Full Name</label>
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required
-              className="w-full rounded-xl border border-outline-variant bg-surface px-4 py-3 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-transparent transition-all"
-              placeholder="e.g. Md. Rahim Uddin" />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
-                className="w-full rounded-xl border border-outline-variant bg-surface px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-transparent transition-all"
-                placeholder="user@example.com" />
+    <Modal open={open} onOpenChange={(val) => !val && !saving && handleClose()}>
+      <ModalContent className="sm:max-w-md">
+        {successData ? (
+          <>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <UserPlus className="h-6 w-6" />
             </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6}
-                className="w-full rounded-xl border border-outline-variant bg-surface px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-transparent transition-all"
-                placeholder="Min. 6 characters" />
+            <ModalHeader className="text-center">
+              <ModalTitle>User Created!</ModalTitle>
+              <ModalDescription>Copy credentials and share securely.</ModalDescription>
+            </ModalHeader>
+            <div className="my-4 space-y-3 rounded-lg border border-outline-variant bg-surface p-4 text-sm">
+              <div className="flex justify-between"><span className="text-on-surface-variant">Name:</span> <span className="font-semibold">{successData.displayName}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">Username:</span> <span className="font-mono font-bold text-primary">{successData.username}</span></div>
+              {successData.email && <div className="flex justify-between"><span className="text-on-surface-variant">Email:</span> <span>{successData.email}</span></div>}
+              <div className="flex justify-between"><span className="text-on-surface-variant">Password:</span> <span className="font-mono text-orange-600">{successData.pass}</span></div>
+              <div className="flex justify-between"><span className="text-on-surface-variant">PIN:</span> <span className="font-mono text-violet-600">{successData.pin}</span></div>
             </div>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope">Phone <span className="text-outline font-normal normal-case tracking-normal">optional</span></label>
-            <input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)}
-              className="w-full rounded-xl border border-outline-variant bg-surface px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-transparent transition-all"
-              placeholder="+8801XXXXXXXXX" />
-          </div>
-          <div className="rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-xs text-primary font-manrope font-medium">
-            New accounts start as regular users with ৳0 balance and active status.
-          </div>
-          <div className="flex justify-end gap-3 pt-1">
-            <button type="button" onClick={onClose} disabled={saving}
-              className="rounded-xl border border-outline-variant px-5 py-2.5 text-sm font-semibold text-on-surface hover:bg-surface-container disabled:opacity-50 transition-all">
-              Cancel
-            </button>
-            <button type="submit" disabled={saving}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-on-primary hover:opacity-90 disabled:opacity-50 shadow-lg shadow-primary/20 transition-all">
-              <UserPlus className="h-4 w-4" />
-              {saving ? "Creating..." : "Create User"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={handleClose}>Done</Button>
+              <Button className="flex-1" onClick={handleCopy}>Copy All</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <ModalHeader>
+              <ModalTitle>Register New User</ModalTitle>
+              <ModalDescription>Credentials will be generated automatically.</ModalDescription>
+            </ModalHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-on-surface-variant">Full Name</label>
+                <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required placeholder="Md. Rahim Uddin" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-on-surface-variant">Username</label>
+                  <Input value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} required placeholder="username" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-on-surface-variant">Email (Optional)</label>
+                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@example.com" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-on-surface-variant">Phone (Optional)</label>
+                <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+8801XXXXXXXXX" />
+              </div>
+              <div className="rounded border border-primary/20 bg-primary/5 p-2 text-xs text-primary">
+                Password and PIN will be auto-generated.
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" type="button" onClick={handleClose} disabled={saving}>Cancel</Button>
+                <Button type="submit" disabled={saving}>{saving ? "Creating..." : "Create User"}</Button>
+              </div>
+            </form>
+          </>
+        )}
+      </ModalContent>
+    </Modal>
   );
 }
 
@@ -105,116 +136,104 @@ export default function UsersPage() {
   const { users, loading, refetch } = useUsers({ search, role, status });
 
   return (
-    <div className="p-6 sm:p-10 max-w-7xl mx-auto space-y-8 pb-12">
-      {/* Page header */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-headline text-4xl font-extrabold tracking-tight text-on-surface mb-2">Users</h1>
-          <p className="text-on-surface-variant font-body text-lg">Manage all registered accounts and access control.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-[#134235]">Users</h1>
+          <p className="text-sm text-on-surface-variant">Manage all registered accounts and access control.</p>
         </div>
-        <button type="button" onClick={() => setRegisterOpen(true)}
-          className="bg-primary text-on-primary px-6 py-3.5 rounded-xl font-bold font-manrope flex items-center gap-2 shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
-          <UserPlus className="h-5 w-5" />
-          Register New User
-        </button>
-      </section>
+        <Button onClick={() => setRegisterOpen(true)}>
+          <UserPlus className="mr-2 h-4 w-4" /> Register User
+        </Button>
+      </div>
 
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email…"
-            className="w-full pl-11 pr-4 py-2.5 border border-outline-variant bg-white rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-transparent transition-all placeholder:text-on-surface-variant/60" />
+      <div className="flex flex-wrap gap-3">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+          <Input 
+            value={search} onChange={(e) => setSearch(e.target.value)} 
+            placeholder="Search by name or email…" 
+            className="pl-9" 
+          />
         </div>
-        <select value={role} onChange={(e) => setRole(e.target.value as UserRole | "all")}
-          className="border border-outline-variant rounded-xl px-4 py-2.5 text-sm font-manrope font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white text-on-surface">
+        <select value={role} onChange={(e) => setRole(e.target.value as UserRole | "all")} className="h-10 rounded-md border border-outline-variant bg-surface px-3 text-sm focus:border-primary focus:outline-none">
           <option value="all">All Roles</option>
           <option value="user">User</option>
           <option value="admin">Admin</option>
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value as UserStatus | "all")}
-          className="border border-outline-variant rounded-xl px-4 py-2.5 text-sm font-manrope font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 bg-white text-on-surface">
+        <select value={status} onChange={(e) => setStatus(e.target.value as UserStatus | "all")} className="h-10 rounded-md border border-outline-variant bg-surface px-3 text-sm focus:border-primary focus:outline-none">
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="suspended">Suspended</option>
         </select>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-black/5 overflow-hidden premium-shadow">
-        <div className="px-8 py-6 border-b border-black/[0.03] flex items-center justify-between">
-          <h4 className="font-headline text-xl font-bold text-[#134235]">
-            {loading ? "Loading..." : `${users.length} Account${users.length !== 1 ? "s" : ""}`}
-          </h4>
-          <div className="flex items-center gap-2 text-on-surface-variant">
-            <Users className="w-4 h-4" />
-            <span className="text-xs font-bold uppercase tracking-widest font-manrope">Directory</span>
-          </div>
+      <Card>
+        <div className="flex items-center justify-between border-b border-outline-variant/30 px-4 py-3">
+          <h4 className="font-semibold">{loading ? "Loading..." : `${users.length} Account${users.length !== 1 ? "s" : ""}`}</h4>
+          <Users className="h-4 w-4 text-on-surface-variant" />
         </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[640px]">
-            <thead>
-              <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-                <th className="px-8 py-4">User</th>
-                <th className="px-8 py-4">Role</th>
-                <th className="px-8 py-4">Wallet</th>
-                <th className="px-8 py-4">Status</th>
-                <th className="px-8 py-4 hidden sm:table-cell">Last Login</th>
-                <th className="px-8 py-4" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-black/[0.03]">
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>User</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Wallet</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="hidden sm:table-cell">Last Login</TableHead>
+                <TableHead className="w-[50px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loading && Array(5).fill(0).map((_, i) => (
-                <tr key={i}>
-                  <td colSpan={6} className="px-8 py-5">
-                    <div className="h-4 bg-surface-container rounded-lg animate-pulse" />
-                  </td>
-                </tr>
+                <TableRow key={i}>
+                  <TableCell colSpan={6} className="h-14"><div className="h-4 animate-pulse rounded bg-surface-container" /></TableCell>
+                </TableRow>
               ))}
+              {!loading && users.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-24 text-center text-on-surface-variant">No users found</TableCell>
+                </TableRow>
+              )}
               {!loading && users.map((u) => (
-                <tr key={u.uid} className="group hover:bg-surface-container/20 transition-colors">
-                  <td className="px-8 py-5">
+                <TableRow key={u.uid}>
+                  <TableCell>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary text-sm font-bold flex items-center justify-center shrink-0 font-manrope">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-primary/10 text-xs font-bold text-primary">
                         {getInitials(u.displayName || u.email)}
                       </div>
-                      <div>
-                        <p className="font-bold text-on-surface font-manrope">{u.displayName}</p>
-                        <p className="text-on-surface-variant text-xs">{u.email}</p>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{u.displayName}</p>
+                        <p className="truncate text-xs text-on-surface-variant">{u.email}</p>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-8 py-5">
-                    <span className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider font-manrope ${
-                      u.role === "admin" || u.role === "super_admin"
-                        ? "bg-red-50 text-red-700"
-                        : "bg-surface-container text-on-surface-variant"
-                    }`}>
+                  </TableCell>
+                  <TableCell>
+                    <span className={`rounded bg-surface-container px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${u.role === "admin" ? "bg-red-50 text-red-700" : "text-on-surface-variant"}`}>
                       {u.role}
                     </span>
-                  </td>
-                  <td className="px-8 py-5 font-bold text-[#134235] font-inter">
+                  </TableCell>
+                  <TableCell className="font-semibold text-[#134235]">
                     <WalletAmount amount={u.walletBalance} />
-                  </td>
-                  <td className="px-8 py-5"><StatusBadge status={u.status} /></td>
-                  <td className="px-8 py-5 text-on-surface-variant text-sm hidden sm:table-cell">{relativeTime(u.lastLoginAt)}</td>
-                  <td className="px-8 py-5">
-                    <Link href={`/admin/users/${u.uid}`}
-                      className="inline-flex items-center gap-1 text-primary text-xs font-bold font-manrope hover:underline">
-                      View <ArrowRight className="w-3 h-3" />
-                    </Link>
-                  </td>
-                </tr>
+                  </TableCell>
+                  <TableCell><StatusBadge status={u.status} /></TableCell>
+                  <TableCell className="hidden text-xs text-on-surface-variant sm:table-cell">{relativeTime(u.lastLoginAt)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-on-surface-variant" asChild>
+                        <Link href={`/admin/users/${u.uid}`}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-        {!loading && users.length === 0 && (
-          <p className="text-center text-on-surface-variant py-16 text-sm font-manrope">No users found</p>
-        )}
-      </div>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <RegisterUserDialog open={registerOpen} onClose={() => setRegisterOpen(false)} onSuccess={refetch} />
     </div>

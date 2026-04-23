@@ -11,6 +11,8 @@ export interface ISubscriptionCache extends Document<string> {
   daysUntilExpiry: number | null;
   checkedAt: string;
   cachedAt: Date;
+  appName?: string | null;
+  logoUrl?: string | null;
 }
 
 const SubscriptionCacheSchema = new Schema<ISubscriptionCache>({
@@ -24,6 +26,8 @@ const SubscriptionCacheSchema = new Schema<ISubscriptionCache>({
   daysUntilExpiry: { type: Number, default: null },
   checkedAt: { type: String, required: true },
   cachedAt: { type: Date, required: true },
+  appName: { type: String, default: null },
+  logoUrl: { type: String, default: null },
 });
 
 const SubscriptionCache: Model<ISubscriptionCache> =

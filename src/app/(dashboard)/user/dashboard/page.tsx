@@ -1,16 +1,21 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { Service } from "@/types";
+import { Service, ServiceCategory } from "@/types";
 import { useProfile } from "@/lib/hooks/user/useProfile";
-import { Wallet, Zap, Clock, ArrowRight, ShieldCheck, Plus, X } from "lucide-react";
+import { Wallet, Zap, ArrowRight, Plus, X, Tag, Megaphone } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { submitBalanceRequest } from "@/lib/functions";
 
 export default function UserDashboardPage() {
   const { profile, loading: profileLoading } = useProfile();
+  const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [noticeText, setNoticeText] = useState("");
+  const [bannerUrls, setBannerUrls] = useState<string[]>([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [addFundsAmount, setAddFundsAmount] = useState("");
   const [addFundsMedium, setAddFundsMedium] = useState("bKash");
@@ -31,21 +36,37 @@ export default function UserDashboardPage() {
     } finally { setAddFundsLoading(false); }
   }
 
-  const fetchServices = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const res = await fetch("/api/services", { credentials: "include" });
-      const data = await res.json();
-      const list: Service[] = data.services || [];
+      const [catRes, svcRes, setRes] = await Promise.all([
+        fetch("/api/categories", { credentials: "include" }),
+        fetch("/api/services", { credentials: "include" }),
+        fetch("/api/settings", { credentials: "include" }),
+      ]);
+      const [catData, svcData, setData] = await Promise.all([catRes.json(), svcRes.json(), setRes.json()]);
+      setCategories(catData.categories || []);
+      const list: Service[] = svcData.services || [];
       list.sort((a, b) => a.name.localeCompare(b.name));
       setServices(list);
+      setNoticeText(setData.noticeText || "");
+      setBannerUrls(setData.bannerUrls || []);
     } catch (err) {
-      console.error("Services fetch error:", err);
+      console.error("Dashboard data fetch error:", err);
     } finally {
       setLoadingServices(false);
     }
   }, []);
 
-  useEffect(() => { fetchServices(); }, [fetchServices]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Auto-slide effect for banner carousel
+  useEffect(() => {
+    if (bannerUrls.length <= 1) return;
+    const timer = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % bannerUrls.length);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [bannerUrls.length]);
 
   if (profileLoading) {
     return (
@@ -55,55 +76,130 @@ export default function UserDashboardPage() {
     );
   }
 
+  const getGroupedServices = () => {
+    const grouped: Record<string, Service[]> = {};
+    const uncategorized: Service[] = [];
+    services.forEach((svc) => {
+      if (svc.categoryId && categories.some(c => c.id === svc.categoryId)) {
+        if (!grouped[svc.categoryId]) grouped[svc.categoryId] = [];
+        grouped[svc.categoryId].push(svc);
+      } else {
+        uncategorized.push(svc);
+      }
+    });
+    return { grouped, uncategorized };
+  };
+
+  const { grouped, uncategorized } = getGroupedServices();
+  const activeCategories = categories.filter(cat => (grouped[cat.id] || []).length > 0);
+  const currentCategory = categories.find(c => c.id === selectedCategoryId);
+  const isUncategorizedSelected = selectedCategoryId === "uncategorized";
+
+  const RenderServiceList = ({ svcList }: { svcList: Service[] }) => {
+    if (svcList.length === 0) return null;
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mt-6">
+        {svcList.map((svc) => (
+          <Link key={svc.id} href={`/user/services/${svc.id}`}
+            className="group relative bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow card-hover transition-all duration-200 aspect-[3/4] flex flex-col">
+            <div className="flex-1 relative overflow-hidden">
+              {svc.icon ? (
+                <img
+                  src={svc.icon}
+                  alt={svc.name}
+                  className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-br from-[#E8F1EE] to-[#C5DDD5] flex items-center justify-center">
+                  <Zap className="w-12 h-12 text-primary/50 group-hover:text-primary transition-colors duration-200" />
+                </div>
+              )}
+            </div>
+            <div className="h-10 flex items-center justify-center px-2 bg-white border-t border-black/[0.05]">
+              <p className="font-manrope font-bold text-[#134235] text-[11px] text-center leading-tight group-hover:text-primary transition-colors line-clamp-1 w-full">{svc.name}</p>
+            </div>
+          </Link>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="p-6 sm:p-10 max-w-6xl mx-auto space-y-10 pb-12">
-      {/* Welcome Banner */}
-      <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes marquee {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+        .animate-marquee { display: inline-block; white-space: nowrap; animation: marquee 25s linear infinite; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}} />
+
+      {/* Marquee Notice */}
+      {noticeText && (
+        <div className="overflow-hidden bg-[#E8F1EE] text-[#134235] border border-primary/20 py-2.5 px-4 rounded-xl flex items-center shadow-sm">
+          <Megaphone className="w-5 h-5 shrink-0 mr-3 text-primary" />
+          <div className="flex-1 overflow-hidden relative">
+            <div className="animate-marquee font-manrope font-semibold text-sm tracking-wide">
+              {noticeText}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Banner Carousel */}
+      {bannerUrls.length > 0 && (
+        <section className="relative overflow-hidden rounded-2xl premium-shadow border border-black/5 aspect-[21/9] bg-surface-container">
+          <div 
+            className="flex transition-transform duration-700 ease-in-out h-full"
+            style={{ transform: `translateX(-${currentSlide * 100}%)` }}
+          >
+            {bannerUrls.map((url, idx) => (
+              <div key={idx} className="w-full shrink-0 h-full relative">
+                <img src={url} alt={`Banner ${idx}`} className="w-full h-full object-cover" />
+              </div>
+            ))}
+          </div>
+          
+          {/* Pagination dots */}
+          {bannerUrls.length > 1 && (
+            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-2 z-10">
+              {bannerUrls.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentSlide(idx)}
+                  className={`h-2 rounded-full transition-all ${
+                    idx === currentSlide ? "bg-white w-6 opacity-100 shadow-[0_0_10px_rgba(0,0,0,0.5)]" : "bg-white/60 hover:bg-white/90 w-2 opacity-60 shadow-[0_0_4px_rgba(0,0,0,0.5)]"
+                  }`}
+                  aria-label={`Go to slide ${idx + 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Welcome Banner & Minimal Wallet */}
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white border border-black/5 rounded-2xl p-6 sm:p-8 premium-shadow">
         <div>
-          <h1 className="font-headline text-4xl font-extrabold tracking-tight text-on-surface mb-2">
+          <h1 className="font-headline text-3xl font-extrabold tracking-tight text-[#134235] mb-2">
             Welcome, {profile?.displayName?.split(" ")[0] || "User"}
           </h1>
-          <p className="text-on-surface-variant font-body text-lg">Manage services, view your wallet, and track activity.</p>
+          <p className="text-on-surface-variant font-body text-base">Select a service to send money or top up your account.</p>
         </div>
-        <button onClick={() => setAddFundsOpen(true)}
-          className="bg-primary text-on-primary px-6 py-3.5 rounded-xl font-bold font-manrope flex items-center gap-2 shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
-          <Plus className="w-5 h-5" /> Add Funds
-        </button>
-      </section>
-
-      {/* Wallet + Stats */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white border border-black/5 rounded-2xl p-8 premium-shadow card-hover transition-all duration-300">
-          <div className="flex items-center justify-between mb-6">
-            <div className="p-3 bg-[#E8F1EE] rounded-xl">
-              <Wallet className="w-6 h-6 text-primary" />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="bg-[#E8F1EE] px-5 py-3 rounded-xl border border-primary/20 flex flex-col justify-center min-w-[160px]">
+            <p className="text-primary text-[10px] font-bold uppercase tracking-widest font-manrope mb-0.5">Available Balance</p>
+            <div className="flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-primary" />
+              <span className="font-headline text-2xl font-extrabold text-[#134235]">৳{profile?.walletBalance?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) || "0.00"}</span>
             </div>
-            <span className="text-[11px] font-bold text-primary px-3 py-1 bg-primary/10 rounded-full tracking-tight font-manrope">Balance</span>
           </div>
-          <p className="text-on-surface-variant text-xs font-bold uppercase tracking-widest mb-1 font-manrope">Available Balance</p>
-          <h3 className="font-headline text-3xl font-extrabold text-[#134235]">৳{profile?.walletBalance?.toLocaleString() || "0"}</h3>
-        </div>
-
-        <div className="bg-white border border-black/5 rounded-2xl p-8 premium-shadow card-hover transition-all duration-300">
-          <div className="flex items-center justify-between mb-6">
-            <div className="p-3 bg-[#E8F1EE] rounded-xl">
-              <ShieldCheck className="w-6 h-6 text-primary" />
-            </div>
-            <span className="text-[11px] font-bold text-primary px-3 py-1 bg-[#E8F1EE] rounded-full tracking-tight font-manrope uppercase">{profile?.status || "Active"}</span>
-          </div>
-          <p className="text-on-surface-variant text-xs font-bold uppercase tracking-widest mb-1 font-manrope">Account Status</p>
-          <h3 className="font-headline text-3xl font-extrabold text-[#134235] capitalize">{profile?.status || "Active"}</h3>
-        </div>
-
-        <div className="bg-white border border-black/5 rounded-2xl p-8 premium-shadow card-hover transition-all duration-300">
-          <div className="flex items-center justify-between mb-6">
-            <div className="p-3 bg-surface-container rounded-xl">
-              <Clock className="w-6 h-6 text-on-surface-variant" />
-            </div>
-            <span className="text-[11px] font-bold text-on-surface-variant px-3 py-1 bg-surface-container rounded-full tracking-tight font-manrope capitalize">{profile?.role || "User"}</span>
-          </div>
-          <p className="text-on-surface-variant text-xs font-bold uppercase tracking-widest mb-1 font-manrope">Account Role</p>
-          <h3 className="font-headline text-3xl font-extrabold text-[#134235] capitalize">{profile?.role || "User"}</h3>
+          <button onClick={() => setAddFundsOpen(true)}
+            className="bg-primary text-on-primary px-5 py-4 sm:py-3.5 rounded-xl font-bold font-manrope flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
+            <Plus className="w-5 h-5" /> Add Funds
+          </button>
         </div>
       </section>
 
@@ -122,7 +218,7 @@ export default function UserDashboardPage() {
         {loadingServices ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="aspect-[3/4] bg-white rounded-2xl border border-black/5 animate-pulse" />
+              <div key={i} className="aspect-[5/4] bg-white rounded-2xl border border-black/5 animate-pulse" />
             ))}
           </div>
         ) : services.length === 0 ? (
@@ -133,31 +229,91 @@ export default function UserDashboardPage() {
             <p className="text-on-surface-variant text-sm font-manrope font-semibold">No services are currently active.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {services.map((svc) => (
-              <Link key={svc.id} href={`/user/services/${svc.id}`}
-                className="group relative bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow card-hover transition-all duration-200 aspect-[3/4] flex flex-col">
-                {/* Full-bleed logo — fills entire card */}
-                <div className="flex-1 relative overflow-hidden">
-                  {svc.icon ? (
-                    <img
-                      src={svc.icon}
-                      alt={svc.name}
-                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 bg-gradient-to-br from-[#E8F1EE] to-[#C5DDD5] flex items-center justify-center">
-                      <Zap className="w-12 h-12 text-primary/50 group-hover:text-primary transition-colors duration-200" />
+          <>
+            {selectedCategoryId === null ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {activeCategories.map((cat) => {
+                  const count = (grouped[cat.id] || []).length;
+                  const isUrl = cat.logo?.startsWith("http://") || cat.logo?.startsWith("https://");
+                  return (
+                    <button key={cat.id} onClick={() => setSelectedCategoryId(cat.id)}
+                      className="group relative bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow card-hover transition-all duration-200 aspect-[5/4] flex flex-col text-left">
+                      <div className="flex-1 flex flex-col items-center justify-center p-4">
+                        {cat.logo ? (
+                          <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center overflow-hidden mb-3">
+                             {isUrl ? (
+                               <img src={cat.logo} alt={cat.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                             ) : (
+                               <span className="text-2xl">{cat.logo}</span>
+                             )}
+                          </div>
+                        ) : (
+                          <div className="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center mb-3">
+                            <Tag className="w-6 h-6 text-on-surface-variant group-hover:text-primary transition-colors" />
+                          </div>
+                        )}
+                        <h3 className="font-headline font-bold text-[#134235] text-sm text-center leading-tight group-hover:text-primary transition-colors">{cat.name}</h3>
+                        <p className="text-xs text-on-surface-variant mt-1">{count} service{count !== 1 ? 's' : ''}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+                {uncategorized.length > 0 && (
+                  <button onClick={() => setSelectedCategoryId("uncategorized")}
+                    className="group relative bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow card-hover transition-all duration-200 aspect-[5/4] flex flex-col text-left">
+                    <div className="flex-1 flex flex-col items-center justify-center p-4">
+                      <div className="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center mb-3">
+                        <Zap className="w-6 h-6 text-on-surface-variant group-hover:text-primary transition-colors" />
+                      </div>
+                      <h3 className="font-headline font-bold text-[#134235] text-sm text-center leading-tight group-hover:text-primary transition-colors">Uncategorized</h3>
+                      <p className="text-xs text-on-surface-variant mt-1">{uncategorized.length} service{uncategorized.length !== 1 ? 's' : ''}</p>
                     </div>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div>
+                <button 
+                  onClick={() => setSelectedCategoryId(null)}
+                  className="flex items-center gap-2 text-sm font-semibold text-primary mb-6 hover:text-primary/80 transition-colors"
+                 >
+                  <span>&larr;</span> Back to Categories
+                </button>
+                <div className="flex items-center gap-3 mb-5 pb-3 border-b border-outline-variant/30">
+                  {isUncategorizedSelected ? (
+                    <>
+                      <div className="w-10 h-10 rounded-xl bg-surface-container flex items-center justify-center">
+                        <Zap className="w-5 h-5 text-on-surface-variant" />
+                      </div>
+                      <h2 className="font-headline text-2xl font-bold text-[#134235]">Uncategorized Services</h2>
+                    </>
+                  ) : currentCategory && (
+                    <>
+                      {currentCategory.logo ? (
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden shrink-0">
+                          {currentCategory.logo.startsWith("http") ? (
+                            <img src={currentCategory.logo} alt={currentCategory.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-lg">{currentCategory.logo}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-surface-container flex items-center justify-center">
+                          <Tag className="w-5 h-5 text-on-surface-variant" />
+                        </div>
+                      )}
+                      <h2 className="font-headline text-2xl font-bold text-[#134235]">{currentCategory.name}</h2>
+                    </>
                   )}
                 </div>
-                {/* Name strip — frosted glass bottom bar */}
-                <div className="h-10 flex items-center justify-center px-2 bg-white border-t border-black/[0.05]">
-                  <p className="font-manrope font-bold text-[#134235] text-[11px] text-center leading-tight group-hover:text-primary transition-colors line-clamp-1 w-full">{svc.name}</p>
-                </div>
-              </Link>
-            ))}
-          </div>
+                {isUncategorizedSelected ? (
+                  <RenderServiceList svcList={uncategorized} />
+                ) : currentCategory ? (
+                  <RenderServiceList svcList={grouped[currentCategory.id] || []} />
+                ) : null}
+              </div>
+            )}
+          </>
         )}
       </section>
 

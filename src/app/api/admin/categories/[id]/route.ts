@@ -15,7 +15,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const cat = await ServiceCategory.findByIdAndUpdate(
       id,
       { name: name.trim(), logo: logo?.trim() || "" },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!cat) return NextResponse.json({ error: "Not found" }, { status: 404 });
     await writeLog({ uid: session.sub, action: "CATEGORY_UPDATED", entityId: id, meta: { name } });

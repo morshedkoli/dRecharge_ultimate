@@ -5,9 +5,10 @@ import { useAgentDevices } from "@/lib/hooks/admin/useAgentDevices";
 import { DeviceStatusDot } from "@/components/admin/DeviceStatusDot";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
 import { revokeDevice, toggleDevicePower, getDeviceInfo, updateDeviceServices } from "@/lib/functions";
-import { fullDateTime, relativeTime } from "@/lib/utils";
 import { toast } from "sonner";
 import { DeviceInfoData, Service } from "@/types";
+import { useSiteSettings } from "@/lib/hooks/useSiteSettings";
+import { fullDateTime, relativeTime } from "@/lib/utils";
 import { Smartphone, Plus, Copy, Link as LinkIcon, QrCode as QrCodeIcon, Power, ChevronDown, ChevronUp, RefreshCw, Cpu, Battery, Wifi, HardDrive, Layers, Check, Save } from "lucide-react";
 
 function AgentQrCode({ payload, size = 220 }: { payload: string; size?: number }) {
@@ -293,6 +294,7 @@ function ServiceAssignmentPanel({
 
 export default function DevicesPage() {
   const { devices, loading, refetch, silentRefetch } = useAgentDevices();
+  const { settings } = useSiteSettings();
   const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set());
   const [powerTogglingIds, setPowerTogglingIds] = useState<Set<string>>(new Set());
   const [expandedInfoIds, setExpandedInfoIds] = useState<Set<string>>(new Set());
@@ -451,62 +453,7 @@ export default function DevicesPage() {
         </div>
       </section>
 
-      <div className="bg-white border border-black/5 rounded-2xl p-8 premium-shadow space-y-5">
-        <div className="flex items-start gap-3">
-          <div className="p-3 bg-[#E8F1EE] rounded-xl">
-            <LinkIcon className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h2 className="font-headline text-2xl font-bold text-[#134235] mb-1">Agent Endpoint</h2>
-            <p className="text-on-surface-variant">
-              Every deployed admin server exposes its own agent API endpoint. Install the Android app, enter this base URL first, then register with a token.
-            </p>
-          </div>
-        </div>
 
-        {endpointLoading ? (
-          <div className="h-24 rounded-xl bg-surface-container/50 animate-pulse" />
-        ) : (
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-2">
-                Base URL — enter this in the Android app
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 font-mono text-sm bg-surface-container border border-outline-variant rounded-xl px-4 py-3 text-on-surface break-all">
-                  {agentBaseUrl}
-                </div>
-                <button onClick={() => copyEndpoint("base")}
-                  className="flex items-center gap-2 px-4 py-3 border border-outline-variant rounded-xl text-sm font-bold font-manrope hover:bg-surface-container text-on-surface transition-all">
-                  <Copy className="w-4 h-4" />
-                  {copiedEndpoint == "base" ? "Copied!" : "Copy"}
-                </button>
-              </div>
-              {agentBaseUrl.includes("localhost") && (
-                <p className="mt-2 text-xs text-amber-700 font-manrope">
-                  <strong>Local dev:</strong> Android emulators cannot reach <code className="font-mono">localhost</code> — use <code className="font-mono">http://10.0.2.2:3000</code> in the emulator, or your machine&apos;s LAN IP for a real device.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-2">
-                Connection test URL
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 font-mono text-sm bg-surface-container border border-outline-variant rounded-xl px-4 py-3 text-on-surface break-all">
-                  {bootstrapUrl}
-                </div>
-                <button onClick={() => copyEndpoint("bootstrap")}
-                  className="flex items-center gap-2 px-4 py-3 border border-outline-variant rounded-xl text-sm font-bold font-manrope hover:bg-surface-container text-on-surface transition-all">
-                  <Copy className="w-4 h-4" />
-                  {copiedEndpoint == "bootstrap" ? "Copied!" : "Copy"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Device cards */}
       {loading && (
@@ -611,7 +558,7 @@ export default function DevicesPage() {
                 {device.currentJob && (
                   <div className="flex justify-between">
                     <span>Current job</span>
-                    <Link href={`/admin/queue/${device.currentJob}`}
+                    <Link href={`/admin/history/${device.currentJob}`}
                       className="text-primary hover:underline font-mono font-bold">
                       {device.currentJob.slice(0, 10)}…
                     </Link>
@@ -711,7 +658,7 @@ export default function DevicesPage() {
       <div className="bg-white border border-black/5 rounded-2xl p-8 premium-shadow">
         <h2 className="font-headline text-2xl font-bold text-[#134235] mb-2">Register New Device</h2>
         <p className="text-on-surface-variant mb-6">
-          Install the dRecharge Agent APK on an Android device, then scan the QR code below to
+          Install the {settings?.appName || "dRecharge"} Agent APK on an Android device, then scan the QR code below to
           register instantly — no manual token entry needed.
         </p>
 
@@ -720,7 +667,7 @@ export default function DevicesPage() {
         </div>
 
         <ol className="space-y-2.5 text-sm text-on-surface-variant mb-6 list-decimal list-inside">
-          <li>Install the dRecharge Agent APK on your Android device</li>
+          <li>Install the {settings?.appName || "dRecharge"} Agent APK on your Android device</li>
           <li>Open the app and tap <span className="font-bold text-on-surface">Scan QR Code</span></li>
           <li>Generate a token using the button below</li>
           <li>Point the camera at the QR code — the app registers automatically</li>
@@ -773,7 +720,7 @@ export default function DevicesPage() {
                 <div className="bg-[#E8F1EE] border border-[#134235]/10 rounded-xl p-4 text-sm text-[#134235] space-y-1.5">
                   <p className="font-bold font-manrope">How to connect:</p>
                   <ol className="list-decimal list-inside space-y-1 text-[#134235]/80">
-                    <li>Open the dRecharge Agent app</li>
+                    <li>Open the {settings?.appName || "dRecharge"} Agent app</li>
                     <li>Tap <span className="font-bold">Scan QR Code</span> (on any setup step)</li>
                     <li>Point at the QR code above</li>
                     <li>App auto-fills server URL + token and <strong>registers immediately</strong></li>

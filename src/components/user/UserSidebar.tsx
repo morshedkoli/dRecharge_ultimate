@@ -1,22 +1,25 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/lib/hooks/useAuth";
 import { useRouter } from "next/navigation";
+import { useSiteSettings } from "@/lib/hooks/useSiteSettings";
+import { useAuth } from "@/lib/hooks/useAuth";
 import { toast } from "sonner";
-import { LayoutDashboard, Zap, History, X, User, HelpCircle, LogOut } from "lucide-react";
+import { LayoutDashboard, Zap, History, X, User, Users, HelpCircle, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Dashboard", href: "/user/dashboard", icon: LayoutDashboard },
   { name: "Services", href: "/user/services", icon: Zap },
   { name: "History", href: "/user/history", icon: History },
+  { name: "My Users", href: "/user/subusers", icon: Users },
   { name: "Profile", href: "/user/profile", icon: User },
 ];
 
 export function UserSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { settings } = useSiteSettings();
   const router = useRouter();
 
   async function handleLogout() {
@@ -30,11 +33,15 @@ export function UserSidebar({ open, onClose }: { open: boolean; onClose: () => v
     <aside className="w-64 shrink-0 bg-surface-container h-full flex flex-col py-8 px-6">
       {/* Logo */}
       <div className="mb-10 flex items-center gap-3">
-        <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-on-primary shadow-sm">
-          <Zap className="w-5 h-5" />
-        </div>
+        {settings?.logoUrl ? (
+          <img src={settings.logoUrl} alt="Logo" className="w-10 h-10 object-contain" />
+        ) : (
+          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-on-primary shadow-sm">
+            <Zap className="w-5 h-5" />
+          </div>
+        )}
         <div>
-          <h1 className="font-manrope font-bold text-lg text-[#134235] leading-tight">dRecharge</h1>
+          <h1 className="font-manrope font-bold text-lg text-[#134235] leading-tight truncate max-w-[150px]">{settings?.appName || "dRecharge"}</h1>
           <p className="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">User Portal</p>
         </div>
       </div>

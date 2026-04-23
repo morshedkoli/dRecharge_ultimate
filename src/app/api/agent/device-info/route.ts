@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         simCarrier: String(body?.simCarrier || "").trim(),
         syncedAt: new Date(),
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: "after" }
     );
 
     return NextResponse.json({ success: true });

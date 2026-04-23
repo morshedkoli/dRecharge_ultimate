@@ -19,6 +19,12 @@ export async function GET(req: NextRequest) {
         setupComplete: settings.setupComplete,
         domain: settings.domain,
         phoneNumber: settings.phoneNumber,
+        noticeText: settings.noticeText || "",
+        isNoticeEnabled: settings.isNoticeEnabled ?? true,
+        bannerUrls: settings.bannerUrls || [],
+        appName: settings.appName || "PayChat",
+        logoUrl: settings.logoUrl || "/logo.png",
+        primaryColor: settings.primaryColor || "#134235",
         updatedAt: settings.updatedAt,
       });
     } catch (err) {
@@ -39,6 +45,12 @@ export async function POST(req: NextRequest) {
         .replace(/\/.*$/, "")
         .replace(/:\d+$/, "");
       const phoneNumber = String(body.phoneNumber ?? "").trim();
+      const noticeText = String(body.noticeText ?? "").trim();
+      const isNoticeEnabled = body.isNoticeEnabled ?? true;
+      const bannerUrls = Array.isArray(body.bannerUrls) ? body.bannerUrls.map((s: any) => String(s).trim()) : [];
+      const appName = String(body.appName ?? "PayChat").trim();
+      const logoUrl = String(body.logoUrl ?? "/logo.png").trim();
+      const primaryColor = String(body.primaryColor ?? "#134235").trim();
 
       if (!domain) {
         return NextResponse.json({ error: "Domain is required" }, { status: 400 });
@@ -50,8 +62,8 @@ export async function POST(req: NextRequest) {
       await connectDB();
       await SiteSettings.findByIdAndUpdate(
         "site_settings",
-        { domain, phoneNumber, setupComplete: true, _id: "site_settings" },
-        { upsert: true, new: true }
+        { domain, phoneNumber, setupComplete: true, noticeText, isNoticeEnabled, bannerUrls, appName, logoUrl, primaryColor, _id: "site_settings" },
+        { upsert: true, returnDocument: "after" }
       );
 
       // Bust subscription cache so the new domain is checked immediately

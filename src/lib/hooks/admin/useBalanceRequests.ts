@@ -11,7 +11,7 @@ export function useBalanceRequests(statusFilter: "pending" | "processed" = "pend
     try {
       const res = await fetch("/api/admin/balance-requests", { credentials: "include" });
       const data = await res.json();
-      let list: BalanceRequest[] = data.requests || [];
+      let list: BalanceRequest[] = (data.requests || []).map((r: any) => ({ ...r, id: r._id || r.id }));
 
       if (statusFilter === "pending") {
         list = list.filter(r => r.status === "pending");

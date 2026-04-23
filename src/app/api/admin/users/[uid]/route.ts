@@ -116,6 +116,116 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return NextResponse.json({ success: true });
     }
 
+    // ── Set credit limit ────────────────────────────────────────────────────
+    if (action === "setCreditLimit") {
+      const limit = Number(body.limit);
+      if (isNaN(limit) || limit < 0) {
+        return NextResponse.json({ error: "Credit limit must be a non-negative number" }, { status: 400 });
+      }
+      user.creditLimit = limit;
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "CREDIT_LIMIT_SET",
+        entityId: uid,
+        meta: { targetUid: uid, creditLimit: limit },
+      });
+      return NextResponse.json({ success: true, creditLimit: limit });
+    }
+
+    // ── Admin change name ───────────────────────────────────────────────────
+    if (action === "changeName") {
+      const newName = String(body.displayName || "").trim();
+      if (!newName) {
+        return NextResponse.json({ error: "Display name cannot be empty" }, { status: 400 });
+      }
+      const oldName = user.displayName;
+      user.displayName = newName;
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "ADMIN_NAME_CHANGED",
+        entityId: uid,
+        meta: { targetUid: uid, oldName, newName },
+      });
+      return NextResponse.json({ success: true, displayName: newName });
+    }
+
+    // ── Admin change email ──────────────────────────────────────────────────
+    if (action === "changeEmail") {
+      const newEmail = String(body.email || "").trim().toLowerCase();
+      if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+        return NextResponse.json({ error: "Valid email required" }, { status: 400 });
+      }
+      // Check for duplicate
+      const existing = await User.findOne({ email: newEmail, _id: { $ne: uid } }).lean();
+      if (existing) {
+        return NextResponse.json({ error: "Email already in use by another account" }, { status: 409 });
+      }
+      const oldEmail = user.email;
+      user.email = newEmail;
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "ADMIN_EMAIL_CHANGED",
+        entityId: uid,
+        severity: "warn",
+        meta: { targetUid: uid, oldEmail, newEmail },
+      });
+      return NextResponse.json({ success: true, email: newEmail });
+    }
+
+    // ── Admin change password ───────────────────────────────────────────────
+    if (action === "adminChangePassword") {
+      const newPassword = String(body.newPassword || "");
+      if (newPassword.length < 6) {
+        return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
+      }
+      user.passwordHash = await hashPassword(newPassword);
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "ADMIN_PASSWORD_CHANGED",
+        entityId: uid,
+        severity: "warn",
+        meta: { targetUid: uid },
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Admin change PIN ────────────────────────────────────────────────────
+    if (action === "adminChangePin") {
+      const newPin = String(body.pin || "");
+      if (!/^\d{4,6}$/.test(newPin)) {
+        return NextResponse.json({ error: "PIN must be 4–6 digits" }, { status: 400 });
+      }
+      user.pin = newPin;
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "ADMIN_PIN_CHANGED",
+        entityId: uid,
+        severity: "warn",
+        meta: { targetUid: uid },
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Admin set manual job completion permission ──────────────────────────
+    if (action === "setCanManuallyCompleteJobs") {
+      const allowed = Boolean(body.canManuallyCompleteJobs);
+      user.canManuallyCompleteJobs = allowed;
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "MANUAL_JOB_PERMISSION_CHANGED",
+        entityId: uid,
+        severity: "warn",
+        meta: { targetUid: uid, allowed },
+      });
+      return NextResponse.json({ success: true, canManuallyCompleteJobs: allowed });
+    }
+
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   });
 }
@@ -147,12 +257,14 @@ export async function GET(request: NextRequest, { params }: Params) {
         displayName: user.displayName,
         role: user.role,
         walletBalance: user.walletBalance,
+        creditLimit: user.creditLimit ?? 0,
         walletLocked: user.walletLocked,
         status: user.status,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
         phoneNumber: user.phoneNumber,
-        pin: user.pin
+        pin: user.pin,
+        canManuallyCompleteJobs: user.canManuallyCompleteJobs || false,
       },
       transactions: transactions.map(t => ({ id: t._id, ...t })),
       requests: requests.map(r => ({ id: r._id, ...r }))

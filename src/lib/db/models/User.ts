@@ -5,10 +5,12 @@ export type UserStatus = "active" | "suspended";
 
 export interface IUser extends Document<string> {
   _id: string;
-  email: string;
+  username?: string;
+  email?: string;
   displayName: string;
   role: UserRole;
   walletBalance: number;
+  creditLimit: number;
   walletLocked: boolean;
   status: UserStatus;
   passwordHash: string;
@@ -16,12 +18,15 @@ export interface IUser extends Document<string> {
   lastLoginAt: Date;
   phoneNumber?: string;
   pin?: string;
+  parentId?: string;
+  canManuallyCompleteJobs?: boolean;
 }
 
 const UserSchema = new Schema<IUser>(
   {
     _id: { type: String, required: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    username: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
+    email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
     displayName: { type: String, required: true, trim: true },
     role: {
       type: String,
@@ -29,19 +34,21 @@ const UserSchema = new Schema<IUser>(
       default: "user",
     },
     walletBalance: { type: Number, default: 0 },
+    creditLimit: { type: Number, default: 0 },
     walletLocked: { type: Boolean, default: false },
     status: { type: String, enum: ["active", "suspended"], default: "active" },
     passwordHash: { type: String, required: true },
     lastLoginAt: { type: Date, default: Date.now },
     phoneNumber: { type: String, default: null },
     pin: { type: String },
+    parentId: { type: String, index: true },
+    canManuallyCompleteJobs: { type: Boolean, default: false },
   },
   {
     timestamps: { createdAt: "createdAt", updatedAt: false },
   }
 );
 
-UserSchema.index({ email: 1 });
 UserSchema.index({ role: 1 });
 UserSchema.index({ status: 1 });
 

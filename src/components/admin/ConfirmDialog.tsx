@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useModalEffect } from "@/lib/hooks/useModalEffect";
 
 interface Props {
   title: string;
@@ -14,6 +15,7 @@ export function ConfirmDialog({ title, description, confirmLabel, confirmVariant
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useModalEffect(open);
 
   async function handleConfirm() {
     setLoading(true);
@@ -35,7 +37,7 @@ export function ConfirmDialog({ title, description, confirmLabel, confirmVariant
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => !loading && setOpen(false)} />
-          <div className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
+          <div ref={containerRef} className="relative bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">{title}</h2>
             <p className="text-sm text-gray-600 mb-6">{description}</p>
             {error && (

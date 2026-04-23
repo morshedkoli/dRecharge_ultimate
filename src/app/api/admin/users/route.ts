@@ -37,15 +37,23 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/users — create user
 export async function POST(request: NextRequest) {
   return withAdminSession(request, async (session) => {
-    const { email, password, displayName, phoneNumber } = await request.json();
+    const { email, password, displayName, phoneNumber, username, pin } = await request.json();
     const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedUsername = String(username || "").trim().toLowerCase();
     const normalizedPassword = String(password || "");
     const normalizedName = String(displayName || "").trim();
     const normalizedPhone = String(phoneNumber || "").trim();
+    const normalizedPin = String(pin || "").trim();
 
-    if (!normalizedEmail || !normalizedPassword || !normalizedName) {
+    if (!normalizedName || !normalizedPassword) {
       return NextResponse.json(
-        { error: "email, password, and displayName are required" },
+        { error: "displayName and password are required" },
+        { status: 400 }
+      );
+    }
+    if (!normalizedEmail && !normalizedUsername) {
+      return NextResponse.json(
+        { error: "Either email or username must be provided" },
         { status: 400 }
       );
     }
@@ -55,12 +63,23 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (normalizedPin && !/^\d{4,6}$/.test(normalizedPin)) {
+      return NextResponse.json(
+        { error: "PIN must be 4–6 digits" },
+        { status: 400 }
+      );
+    }
 
     await connectDB();
 
-    const existing = await User.findOne({ email: normalizedEmail }).lean();
-    if (existing) {
-      return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+    if (normalizedEmail) {
+      const existingEmail = await User.findOne({ email: normalizedEmail }).lean();
+      if (existingEmail) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+    }
+    
+    if (normalizedUsername) {
+      const existingUsername = await User.findOne({ username: normalizedUsername }).lean();
+      if (existingUsername) return NextResponse.json({ error: "Username already in use" }, { status: 409 });
     }
 
     const uid = nanoid(28);
@@ -68,16 +87,19 @@ export async function POST(request: NextRequest) {
 
     await User.create({
       _id: uid,
-      email: normalizedEmail,
+      username: normalizedUsername || undefined,
+      email: normalizedEmail || undefined,
       displayName: normalizedName,
       role: "user",
       walletBalance: 0,
+      creditLimit: 0,
       walletLocked: false,
       status: "active",
       passwordHash,
       createdAt: new Date(),
       lastLoginAt: new Date(),
       phoneNumber: normalizedPhone || undefined,
+      pin: normalizedPin || undefined,
     });
 
     await writeLog({

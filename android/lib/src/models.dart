@@ -10,6 +10,8 @@ class SubscriptionInfo {
     required this.daysUntilExpiry,
     required this.domain,
     required this.checkedAt,
+    this.appName,
+    this.logoUrl,
   });
 
   final String state; // "active" | "expired" | "inactive" | "untracked" | "unknown"
@@ -20,9 +22,19 @@ class SubscriptionInfo {
   final int? daysUntilExpiry;
   final String domain;
   final DateTime checkedAt;
+  final String? appName;
+  /// Relative path from API — prepend "https://drecharge.com" before using.
+  final String? logoUrl;
 
   bool get isActive   => state == 'active';
   bool get isExpiring => state == 'active' && daysUntilExpiry != null && daysUntilExpiry! <= 14;
+
+  /// Full absolute URL for the logo, or null if unavailable.
+  String? get logoFullUrl {
+    if (logoUrl == null || logoUrl!.isEmpty) return null;
+    if (logoUrl!.startsWith('http')) return logoUrl;
+    return 'https://drecharge.com$logoUrl';
+  }
 
   factory SubscriptionInfo.fromMap(Map<String, dynamic> data) {
     return SubscriptionInfo(
@@ -40,6 +52,8 @@ class SubscriptionInfo {
       checkedAt: data['checkedAt'] != null
           ? DateTime.tryParse(data['checkedAt'].toString()) ?? DateTime.now()
           : DateTime.now(),
+      appName: data['appName']?.toString(),
+      logoUrl: data['logoUrl']?.toString(),
     );
   }
 }

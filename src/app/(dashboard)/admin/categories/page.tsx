@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useModalEffect } from "@/lib/hooks/useModalEffect";
 import { ServiceCategory } from "@/types";
 import { createCategory, updateCategory, deleteCategory } from "@/lib/functions";
 import { ImageUpload } from "@/components/admin/ImageUpload";
@@ -19,6 +20,7 @@ function CategoryModal({
   onCreated: (cat: ServiceCategory) => void;
   onUpdated: (cat: ServiceCategory) => void;
 }) {
+  const containerRef = useModalEffect(true); // always open when mounted
   const [name, setName] = useState(initial?.name ?? "");
   const [logo, setLogo] = useState(initial?.logo ?? "");
   const [saving, setSaving] = useState(false);
@@ -50,7 +52,7 @@ function CategoryModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !saving && onClose()} />
-      <div className="relative w-full max-w-lg bg-white rounded-2xl border border-black/5 premium-shadow p-8 max-h-[90vh] overflow-y-auto">
+      <div ref={containerRef} className="relative w-full max-w-lg bg-white rounded-2xl border border-black/5 premium-shadow p-8 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center gap-3 mb-6">
           <div className="p-3 bg-[#E8F1EE] rounded-xl">
             <Tag className="w-5 h-5 text-primary" />
@@ -200,62 +202,46 @@ export default function CategoriesPage() {
           </button>
         </div>
       ) : (
-        <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-                  <th className="px-8 py-4">Category</th>
-                  <th className="px-8 py-4">Logo</th>
-                  <th className="px-8 py-4">Services</th>
-                  <th className="px-8 py-4" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-black/[0.03]">
-                {categories.map((cat) => {
-                  const isUrl = cat.logo.startsWith("http://") || cat.logo.startsWith("https://");
-                  return (
-                    <tr key={cat.id} className="group hover:bg-surface-container/20 transition-colors">
-                      <td className="px-8 py-5">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 shrink-0 bg-primary/10 rounded-xl flex items-center justify-center overflow-hidden">
-                            {isUrl ? (
-                              <img src={cat.logo} alt={cat.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <span className="text-2xl leading-none">{cat.logo}</span>
-                            )}
-                          </div>
-                          <p className="font-bold text-on-surface font-manrope text-base">{cat.name}</p>
-                        </div>
-                      </td>
-                      <td className="px-8 py-5">
-                        <code className="text-xs bg-surface-container px-2.5 py-1 rounded-lg text-on-surface font-bold font-mono max-w-[200px] truncate block">
-                          {cat.logo}
-                        </code>
-                      </td>
-                      <td className="px-8 py-5">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-[#E8F1EE] text-primary px-3 py-1 rounded-full font-manrope uppercase tracking-wider">
-                          {svcCount[cat.id] ?? 0} service{(svcCount[cat.id] ?? 0) !== 1 ? "s" : ""}
-                        </span>
-                      </td>
-                      <td className="px-8 py-5">
-                        <div className="flex items-center gap-2 justify-end">
-                          <button onClick={() => openEdit(cat)}
-                            className="flex items-center gap-1 text-xs font-bold text-primary hover:underline font-manrope">
-                            <Pencil className="w-3 h-3" /> Edit
-                          </button>
-                          <button disabled={deletingId === cat.id} onClick={() => handleDelete(cat)}
-                            className="p-1.5 text-on-surface-variant hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {categories.map((cat) => {
+            const isUrl = cat.logo.startsWith("http://") || cat.logo.startsWith("https://");
+            return (
+              <div key={cat.id} className="bg-white border border-black/5 rounded-2xl p-6 flex flex-col premium-shadow card-hover transition-all duration-300">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-14 h-14 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center overflow-hidden">
+                    {isUrl ? (
+                      <img src={cat.logo} alt={cat.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-3xl leading-none">{cat.logo}</span>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => openEdit(cat)}
+                      className="p-2 text-primary hover:bg-primary/10 rounded-xl transition-colors" title="Edit">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                
+                <h3 className="font-headline font-bold text-[#134235] text-xl mb-1 truncate">{cat.name}</h3>
+                
+                <div className="space-y-4 flex-1 mt-3 text-sm">
+                  <div className="flex flex-col gap-1.5 border-b border-black/[0.03] pb-3">
+                    <span className="text-on-surface-variant text-xs font-bold uppercase tracking-widest font-manrope">Logo / Icon</span>
+                    <code className="text-[11px] bg-surface-container px-3 py-1.5 rounded-lg text-on-surface font-bold font-mono truncate max-w-full block">
+                      {cat.logo}
+                    </code>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-b border-black/[0.03] pb-3">
+                    <span className="text-on-surface-variant text-xs font-bold uppercase tracking-widest font-manrope">Linked Services</span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-[#E8F1EE] text-primary px-3 py-1 rounded-full font-manrope uppercase tracking-wider">
+                      {svcCount[cat.id] ?? 0} service{(svcCount[cat.id] ?? 0) !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

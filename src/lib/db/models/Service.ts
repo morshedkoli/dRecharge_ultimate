@@ -16,6 +16,7 @@ export interface IService extends Document<string> {
   }[];
   pin: string;
   simSlot: number;
+  recipientLength?: number;
   successSmsFormat: string;
   failureSmsTemplates: {              // multi-failure templates (source of truth)
     template: string;                 // SMS pattern to match
@@ -48,6 +49,7 @@ const ServiceSchema = new Schema<IService>(
     },
     pin: { type: String, default: "" },
     simSlot: { type: Number, default: 1 },
+    recipientLength: { type: Number, default: 11 },
     successSmsFormat: { type: String, default: "" },
     failureSmsTemplates: {
       type: [

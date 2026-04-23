@@ -1,29 +1,31 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { Menu, ChevronRight } from "lucide-react";
+import { Menu, ChevronRight, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { useSubscription } from "@/lib/hooks/useSubscription";
+
+import { Topbar, TopbarLeft, TopbarRight } from "@/components/ui/Topbar";
 
 /* ── Route metadata ─────────────────────────────────────────────────────── */
-const ROUTE_META: Record<string, { title: string; crumb?: string }> = {
+const ROUTE_META: Record<string, { title: string }> = {
   "/admin/overview":         { title: "Dashboard" },
-  "/admin/users":            { title: "Users",            crumb: "Management" },
-  "/admin/balance-requests": { title: "Balance Requests", crumb: "Operations" },
-  "/admin/queue":            { title: "Execution Queue",  crumb: "Operations" },
-  "/admin/analytics":        { title: "Analytics",        crumb: "Operations" },
-  "/admin/categories":       { title: "Categories",       crumb: "Management" },
-  "/admin/services":         { title: "Services",         crumb: "Management" },
-  "/admin/devices":          { title: "Devices",          crumb: "Management" },
-  "/admin/logs":             { title: "Audit Logs",       crumb: "System" },
-  "/admin/admins":           { title: "Staff & Roles",    crumb: "System" },
+  "/admin/users":            { title: "Users" },
+  "/admin/balance-requests": { title: "Requests" },
+  "/admin/queue":            { title: "Live Queue" },
+  "/admin/history":          { title: "History" },
+  "/admin/analytics":        { title: "Analytics" },
+  "/admin/categories":       { title: "Categories" },
+  "/admin/services":         { title: "Services" },
+  "/admin/devices":          { title: "Devices" },
+  "/admin/logs":             { title: "Audit Logs" },
 };
 
 function resolveRoute(pathname: string) {
   if (ROUTE_META[pathname]) return ROUTE_META[pathname];
-  // Dynamic sub-routes (e.g. /admin/users/uid)
   for (const [key, meta] of Object.entries(ROUTE_META)) {
     if (pathname.startsWith(key + "/")) {
-      return { title: meta.title, crumb: meta.crumb, sub: true };
+      return { title: meta.title };
     }
   }
   return { title: "Admin" };
@@ -35,62 +37,48 @@ interface AdminTopbarProps {
   collapsed?: boolean;
 }
 
-export function AdminTopbar({ onMenuClick, collapsed }: AdminTopbarProps) {
+export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { status: subStatus, loading: subLoading } = useSubscription();
   const route = resolveRoute(pathname);
   const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? "AD";
-  const userName = user?.email?.split("@")[0] ?? "Admin";
 
   return (
-    <header className="h-16 bg-white border-b border-black/[0.05] flex items-center justify-between px-5 lg:px-8 shrink-0 sticky top-0 z-30 gap-4">
-
-      {/* ── Left: mobile menu + breadcrumb ─────────────────────────────── */}
-      <div className="flex items-center gap-3 min-w-0 flex-1">
+    <Topbar>
+      <TopbarLeft>
         <button
           onClick={onMenuClick}
-          className="p-2 rounded-xl hover:bg-[#F4F6F5] text-on-surface-variant transition-colors lg:hidden shrink-0"
+          className="rounded-md p-1.5 text-on-surface-variant hover:bg-surface-container lg:hidden"
           aria-label="Open menu"
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="h-5 w-5" />
         </button>
+        <h2 className="font-headline text-lg font-bold tracking-tight text-[#134235]">
+          {route.title}
+        </h2>
+      </TopbarLeft>
 
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 min-w-0">
-          {route.crumb && (
-            <>
-              <span className="text-xs font-semibold text-on-surface-variant/50 font-manrope hidden sm:block truncate">
-                {route.crumb}
-              </span>
-              <ChevronRight className="w-3 h-3 text-on-surface-variant/30 shrink-0 hidden sm:block" />
-            </>
+      <TopbarRight>
+        <div className="hidden sm:flex items-center mr-2 bg-surface-container/50 px-3 py-1.5 rounded-full border border-black/5">
+          {subLoading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-on-surface-variant" />
+          ) : subStatus?.state === "active" ? (
+            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-[#134235]">
+              <ShieldCheck className="w-3.5 h-3.5" /> License Active
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-red-600">
+              <ShieldAlert className="w-3.5 h-3.5" /> License Issue
+            </div>
           )}
-          <h2 className="text-sm font-extrabold text-[#134235] font-manrope truncate tracking-tight">
-            {route.title}
-          </h2>
         </div>
-      </div>
-
-      {/* ── Right: notifications + user ────────────────────────────────── */}
-      <div className="flex items-center gap-2 shrink-0">
-
-        {/* Notification bell */}
         <NotificationBell variant="admin" />
-
-        {/* Divider */}
-        <div className="h-6 w-px bg-black/[0.06] mx-1" />
-
-        {/* User avatar + name */}
-        <div className="flex items-center gap-2.5 cursor-pointer group">
-          <div className="text-right hidden sm:block">
-            <p className="text-[13px] font-bold text-[#134235] font-manrope leading-tight">{userName}</p>
-            <p className="text-[9px] text-on-surface-variant/50 uppercase tracking-[0.18em] font-bold">Administrator</p>
-          </div>
-          <div className="w-8 h-8 rounded-[10px] bg-[#134235] flex items-center justify-center text-white font-bold text-[11px] shadow-sm ring-2 ring-transparent group-hover:ring-primary/20 transition-all">
-            {userInitials}
-          </div>
+        <div className="h-5 w-px bg-outline-variant/30" />
+        <div className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground hover:bg-primary-dim transition-colors">
+          {userInitials}
         </div>
-      </div>
-    </header>
+      </TopbarRight>
+    </Topbar>
   );
 }

@@ -27,8 +27,8 @@ export default function UserHistoryPage() {
       ]);
       const [txData, reqData, svcData] = await Promise.all([txRes.json(), reqRes.json(), svcRes.json()]);
 
-      setTransactions(txData.transactions || []);
-      setBalanceRequests(reqData.requests || []);
+      setTransactions((txData.transactions || []).map((t: any) => ({ ...t, id: t._id || t.id })));
+      setBalanceRequests((reqData.requests || []).map((r: any) => ({ ...r, id: r._id || r.id })));
 
       const map: Record<string, Service> = {};
       (svcData.services || []).forEach((s: Service) => { map[s.id] = s; });
