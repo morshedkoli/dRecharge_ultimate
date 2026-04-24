@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         job.lockedByDevice = undefined;
         job.lockedAt = undefined;
         job.simSlot = undefined;
-        job.attempts = 0; // reset attempts
+        job.attempt = 0; // reset attempts
         
         await job.save({ session: dbSession });
       });

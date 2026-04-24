@@ -81,6 +81,11 @@ class _AppShellState extends State<_AppShell> {
   Timer? _heartbeatTimer;
   Timer? _deviceInfoTimer;
   Timer? _subscriptionTimer;
+  Timer? _smsUploadTimer;
+
+  /// Unix-ms watermark: only SMS received AFTER this point will be uploaded.
+  /// Initialised to app-start time so we never re-upload old messages.
+  int _lastSmsUploadMs = DateTime.now().millisecondsSinceEpoch;
 
   @override
   void initState() {
@@ -94,6 +99,7 @@ class _AppShellState extends State<_AppShell> {
     _heartbeatTimer?.cancel();
     _deviceInfoTimer?.cancel();
     _subscriptionTimer?.cancel();
+    _smsUploadTimer?.cancel();
     _backendUrlController.dispose();
     _tokenController.dispose();
     _deviceNameController.dispose();
@@ -411,6 +417,7 @@ class _AppShellState extends State<_AppShell> {
     _heartbeatTimer?.cancel();
     _deviceInfoTimer?.cancel();
     _subscriptionTimer?.cancel();
+    _smsUploadTimer?.cancel();
 
     _pollTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -428,10 +435,48 @@ class _AppShellState extends State<_AppShell> {
       const Duration(hours: 1),
       (_) => unawaited(_refreshSubscription()),
     );
+    // Upload any new SMS to admin inbox every 60 s
+    _smsUploadTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => unawaited(_uploadRecentSms()),
+    );
 
     unawaited(_runQueueTick());
     unawaited(_sendHeartbeat());
     unawaited(BackendService.sendDeviceInfo());
+    // First upload runs after a short delay so the app is fully ready
+    Future.delayed(const Duration(seconds: 10), () => unawaited(_uploadRecentSms()));
+  }
+
+  /// Reads all SMS messages received since [_lastSmsUploadMs] and forwards
+  /// them to the admin SMS inbox. The watermark is advanced only on success
+  /// so that a transient network error does not silently drop messages.
+  Future<void> _uploadRecentSms() async {
+    if (_config == null) return; // not registered yet
+    try {
+      final since = _lastSmsUploadMs;
+      final messages = await _nativeBridge.readRecentSms(
+        sinceMs: since,
+        maxMessages: 200,
+      );
+      if (messages.isEmpty) return;
+
+      // Advance the watermark to the newest message's timestamp + 1 ms
+      // BEFORE the upload so that even if upload fails, we don't re-fetch
+      // the same batch indefinitely on every tick. If the server rejects
+      // the batch we still drop it (non-critical inbox feature).
+      final newest = messages
+          .map((m) => m.dateMs)
+          .reduce((a, b) => a > b ? a : b);
+      _lastSmsUploadMs = newest + 1;
+
+      final saved = await BackendService.sendSmsToInbox(messages);
+      if (saved > 0) {
+        _appendLog('SMS inbox: uploaded $saved message(s).');
+      }
+    } catch (e) {
+      debugPrint('[AgentApp] _uploadRecentSms error: $e');
+    }
   }
 
   Future<void> _sendHeartbeat({bool isPowerToggle = false}) async {
@@ -1362,6 +1407,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   PreferredSizeWidget _buildAppBar(ColorScheme cs) {
+    final appName = widget.subscriptionInfo?.appName ?? 'dRecharge';
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 0,
@@ -1382,20 +1428,20 @@ class _HomeScreenState extends State<HomeScreen> {
             child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
           ),
           const SizedBox(width: 10),
-          const Column(
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'dRecharge',
-                style: TextStyle(
+                appName,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                   color: Color(0xFF134235),
                   height: 1.1,
                 ),
               ),
-              Text(
+              const Text(
                 'Agent',
                 style: TextStyle(
                   fontSize: 10,
@@ -1423,6 +1469,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dashboard Tab — Home
@@ -2195,104 +2242,324 @@ class _DeviceInfoCell extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _LicenseBanner — logo image banner at the top of the home page
+// _LicenseBanner — full-width hero banner with logo + app name + status badge
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _LicenseBanner extends StatelessWidget {
+class _LicenseBanner extends StatefulWidget {
   const _LicenseBanner({this.info});
   final SubscriptionInfo? info;
 
   @override
+  State<_LicenseBanner> createState() => _LicenseBannerState();
+}
+
+class _LicenseBannerState extends State<_LicenseBanner>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _fadeCtrl;
+  late Animation<double> _fadeAnim;
+  bool _imageLoaded = false;
+  bool _imageError  = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeIn);
+  }
+
+  @override
+  void dispose() {
+    _fadeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onImageLoaded() {
+    if (!mounted || _imageLoaded) return;
+    setState(() => _imageLoaded = true);
+    _fadeCtrl.forward();
+  }
+
+  void _onImageError() {
+    if (!mounted) return;
+    setState(() => _imageError = true);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // While loading show nothing
-    if (info == null) return const SizedBox.shrink();
+    final info     = widget.info;
+    final String?  logoUrl  = info?.logoFullUrl;
+    final String   appName  = info?.appName ?? 'dRecharge';
 
-    final String state    = info!.state;
-    final bool isBlocked  = state == 'expired' || state == 'inactive' || state == 'untracked';
-    final bool isExpiring = info!.isExpiring;
-    final String? logoUrl = info!.logoFullUrl;
+    final bool isBlocked  = info != null &&
+        (info.state == 'expired' ||
+         info.state == 'inactive' ||
+         info.state == 'untracked');
+    final bool isExpiring = info?.isExpiring ?? false;
+    final bool isActive   = info?.state == 'active';
 
-    // ── Logo image banner (primary) ──────────────────────────────────────────
-    if (logoUrl != null) {
-      // Status overlay colour on top of image
-      final Color? overlayColor = isBlocked
-          ? const Color(0xCCDC2626)   // red translucent
-          : isExpiring
-          ? const Color(0xCCD97706)   // amber translucent
-          : null;                     // no overlay when active
+    // ── Gradient background ────────────────────────────────────────────────
+    final List<Color> gradientColors = isBlocked
+        ? [const Color(0xFF7F1D1D), const Color(0xFF991B1B)]
+        : isExpiring
+        ? [const Color(0xFF78350F), const Color(0xFF92400E)]
+        : [const Color(0xFF134235), const Color(0xFF1B6B4D)];
 
-      return Stack(
+    // ── Status badge ──────────────────────────────────────────────────────
+    final Color statusColor = isBlocked
+        ? const Color(0xFFDC2626)
+        : isExpiring
+        ? const Color(0xFFD97706)
+        : const Color(0xFF16A34A);
+
+    final String statusLabel = info == null
+        ? 'Loading…'
+        : isBlocked
+        ? _blockedLabel(info.state)
+        : isExpiring
+        ? 'Expiring in ${info.daysUntilExpiry ?? 0}d'
+        : 'Active';
+
+    final IconData statusIcon = isBlocked
+        ? Icons.error_outline_rounded
+        : isExpiring
+        ? Icons.warning_amber_rounded
+        : Icons.verified_rounded;
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradientColors,
+        ),
+      ),
+      child: Stack(
         children: [
-          // — Logo image —
-          SizedBox(
-            width: double.infinity,
-            height: 80,
-            child: Image.network(
-              logoUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-              loadingBuilder: (ctx, child, progress) {
-                if (progress == null) return child;
-                return const SizedBox.shrink();
-              },
-            ),
-          ),
-
-          // — Coloured status overlay (only for blocked / expiring) —
-          if (overlayColor != null)
-            Positioned.fill(
-              child: Container(color: overlayColor),
-            ),
-
-          // — Status message strip at bottom of banner —
-          if (isBlocked || isExpiring)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                color: Colors.black.withOpacity(0.45),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                child: Text(
-                  _statusMessage(),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
+          // ── Logo as full-bleed background image ─────────────────────────
+          if (logoUrl != null && !_imageError)
+            FadeTransition(
+              opacity: _fadeAnim,
+              child: SizedBox(
+                width: double.infinity,
+                height: 110,
+                child: Image.network(
+                  logoUrl,
+                  fit: BoxFit.cover,
+                  // Dark tint so text above is always readable
+                  color: Colors.black.withValues(alpha: 0.30),
+                  colorBlendMode: BlendMode.darken,
+                  frameBuilder: (ctx, child, frame, wasSync) {
+                    if (frame != null) {
+                      WidgetsBinding.instance
+                          .addPostFrameCallback((_) => _onImageLoaded());
+                    }
+                    return child;
+                  },
+                  errorBuilder: (_, __, ___) {
+                    WidgetsBinding.instance
+                        .addPostFrameCallback((_) => _onImageError());
+                    return const SizedBox.shrink();
+                  },
                 ),
               ),
             ),
+
+          // ── Shimmer while logo is loading ────────────────────────────────
+          if (logoUrl != null && !_imageLoaded && !_imageError)
+            Positioned.fill(
+              child: _ShimmerPulse(
+                baseColor:      Colors.white.withValues(alpha: 0.04),
+                highlightColor: Colors.white.withValues(alpha: 0.13),
+              ),
+            ),
+
+          // ── Foreground content ────────────────────────────────────────────
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Logo thumbnail / bolt fallback
+                  _LogoThumb(
+                    logoUrl: (!_imageError && _imageLoaded) ? logoUrl : null,
+                  ),
+                  const SizedBox(width: 12),
+
+                  // App name + sub-label
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          appName,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 0.1,
+                            height: 1.1,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const Text(
+                          'Agent',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white60,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Status pill
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: (isActive && !isExpiring)
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : statusColor.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.30),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusIcon, size: 11, color: Colors.white),
+                        const SizedBox(width: 4),
+                        Text(
+                          statusLabel,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
-      );
-    }
-
-    // ── Else: no logo URL found, return nothing ──────────────────────────────
-    return const SizedBox.shrink();
+      ),
+    );
   }
 
-  String _statusMessage() {
-    final state = info!.state;
-    if (info!.isExpiring) {
-      return info!.daysUntilExpiry != null
-          ? 'Expiring in ${info!.daysUntilExpiry}d — renew soon'
-          : 'Subscription expiring soon';
-    }
-    return switch (state) {
-      'expired'   => 'Subscription expired — renew to resume jobs',
-      'inactive'  => 'No active subscription — jobs are suspended',
-      'untracked' => 'Domain not registered — contact support',
-      _           => 'Licence issue detected',
-    };
-  }
-
-
+  String _blockedLabel(String state) => switch (state) {
+    'expired'   => 'Expired',
+    'inactive'  => 'Inactive',
+    'untracked' => 'Unregistered',
+    _           => 'Blocked',
+  };
 }
+
+// Small logo thumbnail used inside the banner content row
+class _LogoThumb extends StatelessWidget {
+  const _LogoThumb({this.logoUrl});
+  final String? logoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: logoUrl != null
+          ? Image.network(
+              logoUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const _BoltIcon(),
+            )
+          : const _BoltIcon(),
+    );
+  }
+}
+
+class _BoltIcon extends StatelessWidget {
+  const _BoltIcon();
+  @override
+  Widget build(BuildContext context) => const Icon(
+        Icons.bolt_rounded,
+        color: Colors.white,
+        size: 24,
+      );
+}
+
+// ── Shimmer pulse animation ───────────────────────────────────────────────────
+class _ShimmerPulse extends StatefulWidget {
+  const _ShimmerPulse({
+    required this.baseColor,
+    required this.highlightColor,
+  });
+  final Color baseColor;
+  final Color highlightColor;
+
+  @override
+  State<_ShimmerPulse> createState() => _ShimmerPulseState();
+}
+
+class _ShimmerPulseState extends State<_ShimmerPulse>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Container(
+        color: Color.lerp(
+          widget.baseColor,
+          widget.highlightColor,
+          Curves.easeInOut.transform(_ctrl.value),
+        ),
+      ),
+    );
+  }
+}
+
+
+
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _SubscriptionCard — compact: status + expiry progress bar + reload
 // ─────────────────────────────────────────────────────────────────────────────
+
 
 class _SubscriptionCard extends StatelessWidget {
   const _SubscriptionCard({this.info, required this.onReload});

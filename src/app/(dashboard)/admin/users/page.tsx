@@ -201,7 +201,7 @@ export default function UsersPage() {
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-primary/10 text-xs font-bold text-primary">
-                        {getInitials(u.displayName || u.email)}
+                        {getInitials(u.displayName || u.email || "")}
                       </div>
                       <div className="min-w-0">
                         <p className="truncate font-medium">{u.displayName}</p>

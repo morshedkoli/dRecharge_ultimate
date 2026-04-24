@@ -281,7 +281,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
           <div className="flex flex-col sm:flex-row sm:items-start gap-6">
             {/* Avatar */}
             <div className="w-20 h-20 rounded-2xl bg-primary/10 text-primary text-2xl font-extrabold font-manrope flex items-center justify-center shrink-0 border-2 border-primary/10">
-              {getInitials(user.displayName || user.email)}
+              {getInitials(user.displayName || user.email || "")}
             </div>
 
             {/* Info */}

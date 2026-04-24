@@ -9,6 +9,7 @@ interface SiteSettings {
   setupComplete: boolean;
   domain: string;
   phoneNumber: string;
+  appName?: string;
 }
 
 export function SetupWizard() {

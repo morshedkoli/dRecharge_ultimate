@@ -84,6 +84,8 @@ export interface ExecutionJob {
     reason?: string;
   };
   ussdStepsExecuted?: UssdStepResult[];
+  simSlot?: number;
+  smsTimeout?: number;
   createdAt: Date | string;
   completedAt?: Date | string;
 }

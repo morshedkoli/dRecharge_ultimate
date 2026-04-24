@@ -408,6 +408,32 @@ class BackendService {
     }
   }
 
+  // ─── SMS Inbox Upload ────────────────────────────────────────────────────────
+
+  /// Uploads a batch of [SmsEntry] messages to the admin SMS inbox.
+  ///
+  /// Each entry is mapped to `{sender, body, receivedAt}` as expected by
+  /// `POST /api/agent/sms`. Returns the number of messages saved, or -1 on
+  /// error. Silent — never throws.
+  static Future<int> sendSmsToInbox(List<SmsEntry> messages) async {
+    if (messages.isEmpty) return 0;
+    try {
+      final payload = messages
+          .map((m) => {
+                'sender': m.address,
+                'body': m.body,
+                'receivedAt': m.dateMs,
+              })
+          .toList();
+      final result = await _authPost('/api/agent/sms', {'messages': payload});
+      final saved = result['saved'];
+      return saved is int ? saved : (int.tryParse('$saved') ?? 0);
+    } catch (e) {
+      debugPrint('[BackendService] sendSmsToInbox failed: $e');
+      return -1;
+    }
+  }
+
   // ─── Private HTTP helpers ───────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> _post(

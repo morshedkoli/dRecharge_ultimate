@@ -56,8 +56,10 @@ export const adminChangePin = (uid: string, pin: string) =>
   });
 
 export async function createUserAccount(data: {
-  email: string;
+  username: string;
+  email?: string;
   password: string;
+  pin: string;
   displayName: string;
   phoneNumber?: string;
 }): Promise<{ success: boolean; uid: string }> {

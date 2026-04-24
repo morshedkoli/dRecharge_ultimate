@@ -168,7 +168,7 @@ export default function SubUsersPage() {
   const filteredUsers = users.filter(u => 
     search === "" || 
     u.displayName.toLowerCase().includes(search.toLowerCase()) || 
-    u.email.toLowerCase().includes(search.toLowerCase())
+    (u.email || "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (

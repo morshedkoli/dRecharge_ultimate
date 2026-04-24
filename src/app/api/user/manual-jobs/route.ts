@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       txId: raw.txId,
       serviceId: raw.serviceId,
       serviceName: srv?.name || raw.serviceId,
-      serviceIcon: srv?.logoUrl || null,
+      serviceIcon: srv?.icon || null,
       amount: raw.amount,
       // Mask recipient if not claimed by me
       recipientNumber: isClaimedByMe ? raw.recipientNumber : "Hidden until claimed",

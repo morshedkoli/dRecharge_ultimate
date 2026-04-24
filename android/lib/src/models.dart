@@ -32,8 +32,13 @@ class SubscriptionInfo {
   /// Full absolute URL for the logo, or null if unavailable.
   String? get logoFullUrl {
     if (logoUrl == null || logoUrl!.isEmpty) return null;
-    if (logoUrl!.startsWith('http')) return logoUrl;
-    return 'https://drecharge.com$logoUrl';
+    // Already an absolute URL — use as-is
+    if (logoUrl!.startsWith('http://') || logoUrl!.startsWith('https://')) {
+      return logoUrl;
+    }
+    // Relative path — prepend base, ensuring exactly one slash separator
+    final path = logoUrl!.startsWith('/') ? logoUrl! : '/$logoUrl';
+    return 'https://drecharge.com$path';
   }
 
   factory SubscriptionInfo.fromMap(Map<String, dynamic> data) {
