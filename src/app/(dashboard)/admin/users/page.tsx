@@ -6,15 +6,13 @@ import { useUsers } from "@/lib/hooks/admin/useUsers";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
 import { createUserAccount } from "@/lib/functions";
-import { relativeTime, getInitials } from "@/lib/utils";
+import { getInitials } from "@/lib/utils";
 import { UserRole, UserStatus } from "@/types";
 import { toast } from "sonner";
 import { Search, UserPlus, Users, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from "@/components/ui/Table";
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription } from "@/components/ui/Modal";
-import { Card, CardContent } from "@/components/ui/Card";
 
 function RegisterUserDialog({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [displayName, setDisplayName] = useState("");
@@ -168,72 +166,71 @@ export default function UsersPage() {
         </select>
       </div>
 
-      <Card>
-        <div className="flex items-center justify-between border-b border-outline-variant/30 px-4 py-3">
-          <h4 className="font-semibold">{loading ? "Loading..." : `${users.length} Account${users.length !== 1 ? "s" : ""}`}</h4>
-          <Users className="h-4 w-4 text-on-surface-variant" />
-        </div>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Wallet</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden sm:table-cell">Last Login</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading && Array(5).fill(0).map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell colSpan={6} className="h-14"><div className="h-4 animate-pulse rounded bg-surface-container" /></TableCell>
-                </TableRow>
-              ))}
-              {!loading && users.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-on-surface-variant">No users found</TableCell>
-                </TableRow>
+      <div className="mb-4 flex items-center justify-between">
+        <h4 className="font-semibold text-on-surface">{loading ? "Loading..." : `${users.length} Account${users.length !== 1 ? "s" : ""}`}</h4>
+        <Users className="h-4 w-4 text-on-surface-variant" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {loading && Array(6).fill(0).map((_, i) => (
+          <div key={i} className="h-[140px] rounded-2xl bg-white premium-shadow border border-black/5 animate-pulse" />
+        ))}
+        {!loading && users.length === 0 && (
+          <div className="col-span-full h-32 flex items-center justify-center rounded-2xl bg-white premium-shadow border border-black/5 text-on-surface-variant font-medium font-manrope">
+            No users found
+          </div>
+        )}
+        {!loading && users.map((u) => (
+          <Link 
+            key={u.uid} 
+            href={`/admin/users/${u.uid}`}
+            className="group block bg-white rounded-3xl premium-shadow border border-black/[0.04] p-6 hover:border-primary/20 transition-all hover:shadow-lg hover:-translate-y-0.5 relative overflow-hidden"
+          >
+            {u.role === "admin" && (
+              <div className="absolute top-0 right-0 w-12 h-12 bg-red-500/5 rotate-45 translate-x-6 -translate-y-6" />
+            )}
+            
+            <div className="flex justify-between items-start mb-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#E8F1EE] text-sm font-extrabold text-primary">
+                  {getInitials(u.displayName || u.email || "")}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-[#134235] font-manrope text-base group-hover:text-primary transition-colors">{u.displayName}</p>
+                  <p className="truncate text-xs text-primary/80 font-bold mb-0.5">@{u.username}</p>
+                  <p className="truncate text-[11px] text-on-surface-variant/80 font-medium">{u.email || u.phoneNumber || "No contact info"}</p>
+                </div>
+              </div>
+              <div className="shrink-0 mt-1"><StatusBadge status={u.status} /></div>
+            </div>
+            
+            <div className={`grid ${(u.creditLimit || 0) > 0 ? "grid-cols-3" : "grid-cols-2"} gap-2 text-sm mt-3 pt-4 border-t border-black/[0.04]`}>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-on-surface-variant/50 font-bold mb-0.5 font-manrope">Wallet</p>
+                <div className="font-extrabold text-[#134235] font-headline text-base"><WalletAmount amount={u.walletBalance} /></div>
+              </div>
+              {(u.creditLimit || 0) > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-on-surface-variant/50 font-bold mb-0.5 font-manrope">Credit</p>
+                  <div className="font-extrabold text-amber-600 font-headline text-base"><WalletAmount amount={u.creditLimit} /></div>
+                </div>
               )}
-              {!loading && users.map((u) => (
-                <TableRow key={u.uid}>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-primary/10 text-xs font-bold text-primary">
-                        {getInitials(u.displayName || u.email || "")}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{u.displayName}</p>
-                        <p className="truncate text-xs text-on-surface-variant">{u.email}</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`rounded bg-surface-container px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${u.role === "admin" ? "bg-red-50 text-red-700" : "text-on-surface-variant"}`}>
-                      {u.role}
-                    </span>
-                  </TableCell>
-                  <TableCell className="font-semibold text-[#134235]">
-                    <WalletAmount amount={u.walletBalance} />
-                  </TableCell>
-                  <TableCell><StatusBadge status={u.status} /></TableCell>
-                  <TableCell className="hidden text-xs text-on-surface-variant sm:table-cell">{relativeTime(u.lastLoginAt)}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end">
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-on-surface-variant" asChild>
-                        <Link href={`/admin/users/${u.uid}`}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              <div className="text-right flex flex-col items-end">
+                <p className="text-[10px] uppercase tracking-widest text-on-surface-variant/50 font-bold mb-1 font-manrope">Role</p>
+                <span className={`inline-block rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${u.role === "admin" ? "bg-red-50 text-red-600" : "bg-surface-container text-on-surface-variant"}`}>
+                  {u.role}
+                </span>
+              </div>
+            </div>
+            
+            <div className="absolute bottom-5 right-6 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
+              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <MoreVertical className="w-4 h-4" />
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
 
       <RegisterUserDialog open={registerOpen} onClose={() => setRegisterOpen(false)} onSuccess={refetch} />
     </div>

@@ -4,13 +4,13 @@ import { AppUser, Transaction, BalanceRequest } from "@/types";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
-import { suspendUser, activateUser, adminSetCreditLimit, adminChangeEmail, adminChangePassword, adminChangeName, adminChangePin } from "@/lib/functions";
+import { suspendUser, activateUser, adminSetCreditLimit, adminChangeEmail, adminChangePassword, adminChangeName, adminChangeUsername, adminChangePin } from "@/lib/functions";
 import { relativeTime, fullDateTime, getInitials, maskNumber } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   ArrowLeft, Lock, Plus, Minus, Wallet, Clock, CreditCard,
   ShieldCheck, ShieldOff, Loader2, X, Receipt, RefreshCw, User,
-  Landmark, Key, Mail, ChevronDown, ChevronUp
+  Landmark, Key, Mail, ChevronDown, ChevronUp, AtSign
 } from "lucide-react";
 import Link from "next/link";
 
@@ -39,14 +39,14 @@ function BalanceModal({
             </div>
             <h3 className="font-manrope font-bold text-[#134235] text-lg">{title}</h3>
           </div>
-          <button onClick={onClose} disabled={submitting} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-xl transition-colors disabled:opacity-50">
-            <X className="w-4 h-4" />
+          <button onClick={onClose} disabled={submitting} className="p-2 hover:bg-surface-container rounded-xl transition-colors">
+            <X className="w-4 h-4 text-on-surface-variant" />
           </button>
         </div>
         <div className="p-6 space-y-4">
           {warning && (
-            <div className="px-4 py-3 bg-amber-50 border border-amber-200/60 rounded-xl text-xs text-amber-700 font-manrope font-semibold flex items-start gap-2">
-              <span>⚠️</span><span>{warning}</span>
+            <div className="p-3 bg-red-50 text-red-700 text-xs rounded-xl font-medium border border-red-100">
+              {warning}
             </div>
           )}
           <div>
@@ -105,6 +105,8 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
   // Change name
   const [newName, setNewName] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [savingUsername, setSavingUsername] = useState(false);
   const [newPin, setNewPin] = useState("");
   const [savingPin, setSavingPin] = useState(false);
   // Manual Job Completion
@@ -229,6 +231,18 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
     finally { setSavingName(false); }
   }
 
+  async function handleChangeUsername() {
+    if (!newUsername.trim()) { toast.error("Enter a new username"); return; }
+    setSavingUsername(true);
+    try {
+      const result = await adminChangeUsername(uid, newUsername.trim());
+      setUser(u => u ? { ...u, username: result.username } : u);
+      toast.success("Username updated successfully");
+      setNewUsername("");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { setSavingUsername(false); }
+  }
+
   async function handleChangePin() {
     if (!/^\d{4,6}$/.test(newPin)) { toast.error("PIN must be 4–6 digits"); return; }
     setSavingPin(true);
@@ -300,8 +314,18 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
                   </span>
                 )}
               </div>
-              <p className="text-on-surface-variant">{user.email}</p>
-              {user.phoneNumber && <p className="text-sm text-on-surface-variant mt-0.5">{user.phoneNumber}</p>}
+
+              <div className="flex flex-wrap items-center gap-2.5 mt-1.5">
+                {user.username && <p className="text-primary font-bold text-sm bg-primary/10 px-2 py-0.5 rounded-md">@{user.username}</p>}
+                {(user.username && user.email) && <span className="w-1 h-1 rounded-full bg-black/20" />}
+                <p className="text-on-surface-variant text-sm font-medium">{user.email}</p>
+                {user.phoneNumber && (
+                  <>
+                    <span className="w-1 h-1 rounded-full bg-black/20" />
+                    <p className="text-sm text-on-surface-variant font-medium">{user.phoneNumber}</p>
+                  </>
+                )}
+              </div>
 
               <div className="flex flex-wrap gap-5 mt-4 text-sm text-on-surface-variant">
                 <span className="flex items-center gap-1.5">
@@ -451,6 +475,30 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
               >
                 {savingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
                 {savingName ? "Saving…" : "Update Name"}
+              </button>
+            </div>
+
+            {/* Change Username */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-1">
+                <AtSign className="w-4 h-4 text-cyan-500" />
+                <p className="font-manrope font-bold text-sm text-[#134235]">Change Username</p>
+              </div>
+              <p className="text-xs text-on-surface-variant">Current: <span className="font-semibold text-on-surface">@{user.username}</span></p>
+              <input
+                type="text"
+                value={newUsername}
+                onChange={e => setNewUsername(e.target.value)}
+                placeholder="New username"
+                className="w-full border border-outline-variant bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-300 transition-all"
+              />
+              <button
+                onClick={handleChangeUsername}
+                disabled={savingUsername || !newUsername.trim()}
+                className="flex items-center gap-2 px-5 py-2.5 bg-cyan-600 text-white rounded-xl text-sm font-bold font-manrope hover:bg-cyan-700 disabled:opacity-50 transition-all"
+              >
+                {savingUsername ? <Loader2 className="w-4 h-4 animate-spin" /> : <AtSign className="w-4 h-4" />}
+                {savingUsername ? "Saving…" : "Update Username"}
               </button>
             </div>
 

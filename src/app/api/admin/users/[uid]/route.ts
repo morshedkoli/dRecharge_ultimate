@@ -22,8 +22,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const body = await request.json();
   const { action } = body;
 
-  // Self-service actions (changePassword, setPin) — only for self
-  if (action === "changePassword" || action === "setPin") {
+  // Self-service actions — only for self
+  if (action === "changePassword" || action === "setPin" || action === "changeUsername") {
     const session = await getSession(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (session.sub !== uid) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -45,6 +45,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       user.pin = body.pin;
       await user.save();
       return NextResponse.json({ success: true });
+    }
+
+    if (action === "changeUsername") {
+      const newUsername = String(body.username || "").trim().toLowerCase();
+      if (!newUsername) return NextResponse.json({ error: "Username is required" }, { status: 400 });
+      if (!/^[a-z0-9_]{3,20}$/.test(newUsername)) {
+        return NextResponse.json({ error: "Username must be 3–20 characters: letters, numbers, underscores only" }, { status: 400 });
+      }
+      const existing = await User.findOne({ username: newUsername, _id: { $ne: uid } }).lean();
+      if (existing) return NextResponse.json({ error: "Username already taken" }, { status: 409 });
+      user.username = newUsername;
+      await user.save();
+      return NextResponse.json({ success: true, username: newUsername });
     }
   }
 
@@ -149,6 +162,29 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         meta: { targetUid: uid, oldName, newName },
       });
       return NextResponse.json({ success: true, displayName: newName });
+    }
+
+    // ── Admin change username ───────────────────────────────────────────────
+    if (action === "adminChangeUsername") {
+      const newUsername = String(body.username || "").trim();
+      if (!newUsername) {
+        return NextResponse.json({ error: "Username cannot be empty" }, { status: 400 });
+      }
+      // Check for duplicate username
+      const existing = await User.findOne({ username: newUsername, _id: { $ne: uid } }).lean();
+      if (existing) {
+        return NextResponse.json({ error: "Username already taken by another account" }, { status: 409 });
+      }
+      const oldUsername = user.username;
+      user.username = newUsername;
+      await user.save();
+      await writeLog({
+        uid: session.sub,
+        action: "ADMIN_USERNAME_CHANGED",
+        entityId: uid,
+        meta: { targetUid: uid, oldUsername, newUsername },
+      });
+      return NextResponse.json({ success: true, username: newUsername });
     }
 
     // ── Admin change email ──────────────────────────────────────────────────

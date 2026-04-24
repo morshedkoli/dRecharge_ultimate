@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   MessageSquare, Search, RefreshCw, Trash2, CheckCheck,
   Filter, ChevronLeft, ChevronRight, Smartphone, Circle,
-  X, Mail, MailOpen, Clock, AlertCircle,
+  X, Mail, MailOpen, Clock, AlertCircle, Copy, ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { relativeTime, fullDateTime } from "@/lib/utils";
@@ -99,8 +99,20 @@ function MessageDetail({
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="bg-surface-container/30 border border-black/[0.05] rounded-2xl p-5">
-          <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-body">
+        <div className="bg-surface-container/30 border border-black/[0.05] rounded-2xl p-5 relative group">
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(msg.body).then(
+                () => toast.success("Message copied to clipboard"),
+                () => toast.error("Failed to copy message")
+              );
+            }}
+            className="absolute top-3 right-3 p-2 rounded-lg bg-white border border-black/[0.05] text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-container premium-shadow"
+            title="Copy message"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+          <p className="text-sm text-on-surface leading-relaxed whitespace-pre-wrap font-body pr-8">
             {msg.body}
           </p>
         </div>
@@ -126,6 +138,7 @@ export default function SmsInboxPage() {
   const [messages, setMessages]     = useState<SmsMessage[]>([]);
   const [total, setTotal]           = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [devices, setDevices]       = useState<{deviceId: string, deviceName: string}[]>([]);
   const [loading, setLoading]       = useState(true);
   const [selected, setSelected]     = useState<SmsMessage | null>(null);
 
@@ -155,10 +168,12 @@ export default function SmsInboxPage() {
         messages: SmsMessage[];
         total: number;
         unreadCount: number;
+        devices?: {deviceId: string, deviceName: string}[];
       };
       setMessages(data.messages ?? []);
       setTotal(data.total ?? 0);
       setUnreadCount(data.unreadCount ?? 0);
+      if (data.devices) setDevices(data.devices);
     } catch {
       toast.error("Failed to load messages");
     } finally {
@@ -320,14 +335,20 @@ export default function SmsInboxPage() {
 
           {/* Device filter */}
           <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant" />
-            <input
-              type="text"
-              placeholder="Device ID…"
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-on-surface-variant pointer-events-none" />
+            <select
               value={filterDevice}
               onChange={(e) => { setFilterDevice(e.target.value); setPage(0); }}
-              className="pl-9 pr-4 py-2.5 text-sm border border-outline-variant rounded-xl bg-surface-container/30 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 placeholder:text-on-surface-variant/50 font-body w-44"
-            />
+              className="pl-9 pr-8 py-2.5 text-sm border border-outline-variant rounded-xl bg-surface-container/30 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 font-body w-48 appearance-none cursor-pointer"
+            >
+              <option value="">All Devices</option>
+              {devices.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.deviceName || d.deviceId.slice(0, 12) + "…"}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
           </div>
 
           {/* Unread toggle */}

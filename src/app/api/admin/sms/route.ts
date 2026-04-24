@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       filter.$or = [{ sender: re }, { body: re }];
     }
 
-    const [messages, total, unreadCount] = await Promise.all([
+    const [messages, total, unreadCount, uniqueDevices] = await Promise.all([
       SmsMessage.find(filter)
         .sort({ createdAt: -1 })
         .skip(page * limit)
@@ -41,6 +41,11 @@ export async function GET(request: NextRequest) {
         .lean(),
       SmsMessage.countDocuments(filter),
       SmsMessage.countDocuments({ isRead: false }),
+      SmsMessage.aggregate([
+        { $group: { _id: "$deviceId", deviceName: { $first: "$deviceName" } } },
+        { $project: { _id: 0, deviceId: "$_id", deviceName: 1 } },
+        { $sort: { deviceName: 1, deviceId: 1 } }
+      ])
     ]);
 
     const mapped = messages.map((m) => ({
@@ -54,7 +59,7 @@ export async function GET(request: NextRequest) {
       isRead:     m.isRead,
     }));
 
-    return NextResponse.json({ messages: mapped, total, unreadCount });
+    return NextResponse.json({ messages: mapped, total, unreadCount, devices: uniqueDevices });
   });
 }
 

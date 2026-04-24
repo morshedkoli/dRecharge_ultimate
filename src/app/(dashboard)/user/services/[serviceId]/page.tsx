@@ -2,6 +2,7 @@
 import { use, useEffect, useState, useCallback } from "react";
 import { Service } from "@/types";
 import { useProfile } from "@/lib/hooks/user/useProfile";
+import { useModalEffect } from "@/lib/hooks/useModalEffect";
 import { initiateTransaction } from "@/lib/functions";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -24,6 +25,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
 
   // Pin Modal states
   const [previewOpen, setPreviewOpen] = useState(false);
+  const containerRef = useModalEffect(previewOpen);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
 
@@ -254,7 +256,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
       {previewOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !submitting && setPreviewOpen(false)} />
-          <div className="relative bg-white rounded-3xl premium-shadow w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-black/5">
+          <div ref={containerRef} className="relative bg-white rounded-3xl premium-shadow w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-black/5">
             <div className="flex items-center justify-between px-6 py-5 border-b border-black/[0.04]">
               <div className="flex items-center gap-3">
                  <div className="p-2.5 bg-[#E8F1EE] rounded-xl text-primary"><Lock className="w-5 h-5"/></div>

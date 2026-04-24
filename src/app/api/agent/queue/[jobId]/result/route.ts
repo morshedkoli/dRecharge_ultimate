@@ -21,7 +21,8 @@ function buildRegex(format: string, recipientNumber: string, amount: number): Re
     .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .replace(/\\\{amount\\\}/g, `(?:${amount}\\.?0*|${amount})`)
     .replace(/\\\{trxId\\\}/g, "(?<trxId>\\w+)")
-    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)");
+    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
+    .replace(/\\\{[^\\}]+\\\}/g, ".*?");
   try { return new RegExp(escaped, "i"); } catch { return null; }
 }
 
@@ -113,15 +114,15 @@ export async function POST(request: NextRequest, { params }: Params) {
               failureReason = failureMatch.message;
               finalParsedResult.success = false;
               finalParsedResult.reason = failureMatch.message;
-            } else if (failureTemplates.length > 0 || successFormat) {
-              // SMS received but didn't match any pattern
+            } else if (successFormat) {
+              // Success template configured but SMS didn't match — needs manual review
               outcome = "waiting";
               isSuccess = false;
               failureReason = "Transaction could not be confirmed automatically — SMS did not match any success or failure template.";
               finalParsedResult.success = false;
               finalParsedResult.reason = failureReason;
             } else {
-              // No templates configured — trust the agent's reported result
+              // No success template — failure templates already checked above, trust agent's result
               isSuccess = clientResult?.success === true;
               outcome = isSuccess ? "done" : "waiting";
               if (!isSuccess) {

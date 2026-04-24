@@ -37,6 +37,12 @@ export const adminChangeName = (uid: string, displayName: string) =>
     body: JSON.stringify({ action: "changeName", displayName }),
   });
 
+export const adminChangeUsername = (uid: string, username: string) =>
+  apiFetch<{ success: boolean; username: string }>(`/api/admin/users/${uid}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "adminChangeUsername", username }),
+  });
+
 export const adminChangeEmail = (uid: string, email: string) =>
   apiFetch<{ success: boolean; email: string }>(`/api/admin/users/${uid}`, {
     method: "PATCH",
