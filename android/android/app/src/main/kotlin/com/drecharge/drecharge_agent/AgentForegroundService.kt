@@ -5,67 +5,381 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 class AgentForegroundService : Service() {
 
     companion object {
         const val CHANNEL_ID = "drecharge_agent_channel"
         const val NOTIFICATION_ID = 1001
+        private const val POLL_INTERVAL_MS = 15_000L
+        private const val HEARTBEAT_INTERVAL_MS = 30_000L
+        private const val SMS_POLL_INTERVAL_MS = 3_000L
+        private const val DEFAULT_BASE_URL = "http://10.0.2.2:3000"
     }
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var screenWakeLock: PowerManager.WakeLock? = null
+
+    // Key names mirror Flutter's backend_service.dart constants
+    private val kBaseUrl     = "agent_backend_base_url"
+    private val kIsPoweredOn = "agent_is_powered_on"
+    private val kJwtToken    = "agent_jwt_token"
+    private val kDeviceName  = "agent_device_name"
+    private val kSimProvider = "agent_sim_provider"
+
+    // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForeground(NOTIFICATION_ID, buildNotification("Waiting for jobs…"))
+        startPollLoop()
+        startHeartbeatLoop()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // START_STICKY: if killed by OS, restart without intent
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        scope.cancel()
+        releaseWake()
+        super.onDestroy()
+    }
+
+    // ─── Config ──────────────────────────────────────────────────────────────────
+
+    private data class AgentConfig(
+        val baseUrl: String,
+        val jwtToken: String?,
+        val isPoweredOn: Boolean,
+        val deviceName: String,
+        val simProvider: String,
+    )
+
+    private fun readConfig(): AgentConfig {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+        val baseUrl     = prefs.getString("flutter.$kBaseUrl",     null) ?: DEFAULT_BASE_URL
+        val isPoweredOn = prefs.getBoolean("flutter.$kIsPoweredOn", true)
+        val deviceName  = prefs.getString("flutter.$kDeviceName",  "") ?: ""
+        val simProvider = prefs.getString("flutter.$kSimProvider", "") ?: ""
+
+        val jwtToken: String? = try {
+            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+            val encPrefs = EncryptedSharedPreferences.create(
+                "FlutterSecureStorage",
+                masterKeyAlias,
+                applicationContext,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+            encPrefs.getString(kJwtToken, null)
+        } catch (_: Exception) { null }
+
+        return AgentConfig(
+            baseUrl     = baseUrl.trimEnd('/'),
+            jwtToken    = jwtToken,
+            isPoweredOn = isPoweredOn,
+            deviceName  = deviceName,
+            simProvider = simProvider,
+        )
+    }
+
+    // ─── Poll loop ───────────────────────────────────────────────────────────────
+
+    private fun startPollLoop() {
+        scope.launch {
+            while (isActive) {
+                try {
+                    val config = readConfig()
+                    if (config.isPoweredOn && !config.jwtToken.isNullOrBlank()) {
+                        processNextJob(config)
+                    }
+                } catch (_: Exception) {}
+                delay(POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun processNextJob(config: AgentConfig) {
+        val jobJson = fetchNextJob(config) ?: return
+
+        val jobId           = jobJson.optString("jobId").trim()
+        val txId            = jobJson.optString("txId").trim()
+        val serviceId       = jobJson.optString("serviceId")
+        val recipientNumber = jobJson.optString("recipientNumber")
+        val amount          = jobJson.optDouble("amount", 0.0)
+        val simSlot         = jobJson.optInt("simSlot", 1)
+        val smsTimeoutSec   = jobJson.optInt("smsTimeout", 30)
+
+        if (jobId.isBlank() || txId.isBlank()) return
+
+        val locked = lockJob(config, jobId)
+        if (!locked) return
+
+        updateNotification("Executing: $serviceId → $recipientNumber · ৳$amount")
+
+        val startMs = System.currentTimeMillis()
+        val steps   = parseUssdSteps(jobJson.optJSONArray("ussdSteps"))
+
+        acquireWake()
+
+        var rawSms         = ""
+        var ussdSuccess    = false
+        var ussdError      = ""
+        var executedSteps  : List<Map<String, Any>> = emptyList()
+
+        try {
+            val ussdResult = executeUssdSuspend(steps, simSlot)
+            executedSteps = ussdResult.executedSteps
+            ussdSuccess   = ussdResult.success
+            ussdError     = ussdResult.errorMessage ?: ""
+
+            val smsDeadlineMs = startMs + (smsTimeoutSec * 1_000L)
+            rawSms = waitForSms(smsDeadlineMs)
+        } catch (e: Exception) {
+            ussdError = e.message ?: "Execution error"
+        } finally {
+            releaseWake()
+        }
+
+        val parsedResult = JSONObject().apply {
+            put("success", ussdSuccess)
+            if (ussdError.isNotBlank()) put("reason", ussdError)
+        }
+
+        submitResult(config, jobId, txId, rawSms, parsedResult, executedSteps)
+        updateNotification("Waiting for jobs…")
+    }
+
+    // ─── USSD execution ──────────────────────────────────────────────────────────
+
+    private data class UssdExecResult(
+        val success: Boolean,
+        val errorMessage: String?,
+        val executedSteps: List<Map<String, Any>>,
+    )
+
+    private suspend fun executeUssdSuspend(steps: List<UssdStep>, simSlot: Int): UssdExecResult =
+        suspendCoroutine { cont ->
+            if (steps.isEmpty()) {
+                cont.resume(UssdExecResult(false, "No USSD steps configured", emptyList()))
+                return@suspendCoroutine
+            }
+            UssdAutomationManager.executeStepsWithCallback(
+                context        = applicationContext,
+                steps          = steps,
+                simSlot        = simSlot,
+                perStepDelayMs = 1200,
+                stepTimeoutMs  = 15_000,
+                callback       = object : UssdExecutionCallback {
+                    override fun onSuccess(executedSteps: List<Map<String, Any>>) {
+                        cont.resume(UssdExecResult(true, null, executedSteps))
+                    }
+                    override fun onError(code: String, message: String, executedSteps: List<Map<String, Any>>) {
+                        cont.resume(UssdExecResult(false, message, executedSteps))
+                    }
+                },
+            )
+        }
+
+    // ─── SMS wait ────────────────────────────────────────────────────────────────
+
+    private suspend fun waitForSms(deadlineMs: Long): String {
+        val sinceMs = System.currentTimeMillis() - 5_000L
+        while (System.currentTimeMillis() < deadlineMs) {
+            val messages = SmsReader.readRecentSms(applicationContext, sinceMs, 5)
+            if (messages.isNotEmpty()) return messages.first()["body"] as? String ?: ""
+            delay(SMS_POLL_INTERVAL_MS)
+        }
+        return ""
+    }
+
+    // ─── HTTP helpers ────────────────────────────────────────────────────────────
+
+    private fun fetchNextJob(config: AgentConfig): JSONObject? {
+        return httpGet("${config.baseUrl}/api/agent/queue", config.jwtToken)?.optJSONObject("job")
+    }
+
+    private fun lockJob(config: AgentConfig, jobId: String): Boolean {
+        return httpPost(
+            "${config.baseUrl}/api/agent/queue/$jobId/lock",
+            config.jwtToken,
+            JSONObject(),
+        )?.optBoolean("acquired", false) ?: false
+    }
+
+    private fun submitResult(
+        config: AgentConfig,
+        jobId: String,
+        txId: String,
+        rawSms: String,
+        parsedResult: JSONObject,
+        executedSteps: List<Map<String, Any>>,
+    ) {
+        val stepsArray = JSONArray()
+        executedSteps.forEach { stepsArray.put(JSONObject(it)) }
+        val body = JSONObject().apply {
+            put("txId", txId)
+            put("rawSms", rawSms)
+            put("parsedResult", parsedResult)
+            put("ussdStepsExecuted", stepsArray)
+        }
+        httpPost("${config.baseUrl}/api/agent/queue/$jobId/result", config.jwtToken, body)
+    }
+
+    private fun sendHeartbeat(config: AgentConfig) {
+        val body = JSONObject().apply {
+            put("isPoweredOn", config.isPoweredOn)
+            if (config.deviceName.isNotBlank()) put("name", config.deviceName)
+            if (config.simProvider.isNotBlank()) put("simProvider", config.simProvider)
+        }
+        httpPost("${config.baseUrl}/api/agent/heartbeat", config.jwtToken, body)
+    }
+
+    private fun httpGet(urlStr: String, token: String?): JSONObject? = try {
+        val conn = URL(urlStr).openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.setRequestProperty("Content-Type", "application/json")
+        if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
+        conn.connectTimeout = 10_000
+        conn.readTimeout    = 10_000
+        if (conn.responseCode in 200..299)
+            JSONObject(conn.inputStream.bufferedReader().readText())
+        else null
+    } catch (_: Exception) { null }
+
+    private fun httpPost(urlStr: String, token: String?, body: JSONObject): JSONObject? = try {
+        val conn = URL(urlStr).openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
+        conn.connectTimeout = 10_000
+        conn.readTimeout    = 10_000
+        OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+        if (conn.responseCode in 200..299)
+            JSONObject(conn.inputStream.bufferedReader().readText())
+        else null
+    } catch (_: Exception) { null }
+
+    // ─── USSD step parsing ───────────────────────────────────────────────────────
+
+    private fun parseUssdSteps(arr: JSONArray?): List<UssdStep> {
+        if (arr == null) return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+            UssdStep(
+                order  = obj.optInt("order", i),
+                type   = obj.optString("type", "input"),
+                label  = obj.optString("label", ""),
+                value  = obj.optString("value", ""),
+                waitMs = if (obj.has("waitMs")) obj.optInt("waitMs") else null,
+            )
+        }
+    }
+
+    // ─── Heartbeat loop ──────────────────────────────────────────────────────────
+
+    private fun startHeartbeatLoop() {
+        scope.launch {
+            while (isActive) {
+                try {
+                    val config = readConfig()
+                    if (!config.jwtToken.isNullOrBlank()) sendHeartbeat(config)
+                } catch (_: Exception) {}
+                delay(HEARTBEAT_INTERVAL_MS)
+            }
+        }
+    }
+
+    // ─── Wake lock ───────────────────────────────────────────────────────────────
+
+    @Suppress("DEPRECATION")
+    private fun acquireWake() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            screenWakeLock?.let { if (it.isHeld) it.release() }
+            val wl = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ON_AFTER_RELEASE,
+                "drecharge:bg_job",
+            )
+            wl.acquire(90_000L)
+            screenWakeLock = wl
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseWake() {
+        try {
+            screenWakeLock?.let { if (it.isHeld) it.release() }
+            screenWakeLock = null
+        } catch (_: Exception) {}
+    }
+
+    // ─── Notification ────────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "dRecharge Agent",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = "dRecharge agent running in background"
                 setShowBadge(false)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(status: String): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val pendingIntent = PendingIntent.getActivity(
+        val pi = PendingIntent.getActivity(
             this, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
-
         return builder
             .setContentTitle("dRecharge Agent")
-            .setContentText("Running — waiting for recharge jobs")
+            .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_menu_send)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(pi)
             .setOngoing(true)
             .build()
+    }
+
+    private fun updateNotification(status: String) {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(NOTIFICATION_ID, buildNotification(status))
     }
 }

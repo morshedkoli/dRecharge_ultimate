@@ -83,7 +83,7 @@ class MainActivity : FlutterActivity() {
         }
 
         UssdAutomationManager.executeSteps(
-            activity       = this,
+            context        = this,
             steps          = steps,
             simSlot        = simSlot,
             perStepDelayMs = perStepDelayMs,
@@ -104,12 +104,12 @@ class MainActivity : FlutterActivity() {
         }
 
         UssdAutomationManager.executeFlow(
-            activity = this,
-            flowSegments = flowSegments,
-            simSlot = simSlot,
+            context        = this,
+            flowSegments   = flowSegments,
+            simSlot        = simSlot,
             perStepDelayMs = perStepDelayMs,
-            stepTimeoutMs = stepTimeoutMs,
-            result = result,
+            stepTimeoutMs  = stepTimeoutMs,
+            result         = result,
         )
     }
 

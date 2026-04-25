@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, ListOrdered, Inbox,
   Terminal, Smartphone, ScrollText, BarChart3, ShieldAlert, Tag,
   Zap, X, LogOut, ChevronLeft, ChevronRight, Bell, ListChecks, Settings,
-  MessageSquare,
+  MessageSquare, Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAdminStats } from "@/lib/hooks/admin/useAdminStats";
@@ -32,6 +32,7 @@ const NAV_GROUPS = [
   {
     label: "Operations",
     items: [
+      { href: "/admin/recharge",         label: "Recharge",  icon: Send },
       { href: "/admin/balance-requests", label: "Requests",  icon: Inbox,        badge: "pendingRequests" as const },
       { href: "/admin/history",          label: "History",   icon: ListOrdered },
       { href: "/admin/analytics",        label: "Analytics", icon: BarChart3 },

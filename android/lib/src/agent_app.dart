@@ -552,7 +552,7 @@ class _AppShellState extends State<_AppShell> {
         _lastError = null;
       });
       _appendLog(
-        'Acquired job ${liveJob.jobId} for ${liveJob.recipientNumber}.',
+        '${liveJob.serviceId} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
       );
       await _sendHeartbeat();
 
@@ -565,9 +565,6 @@ class _AppShellState extends State<_AppShell> {
         );
         if (serviceConfig != null && serviceConfig.ussdSteps.isNotEmpty) {
           steps = serviceConfig.ussdSteps;
-          _appendLog(
-            'Job ${liveJob.jobId} had no embedded USSD steps; recovered ${steps.length} steps from service ${liveJob.serviceId}.',
-          );
         }
       }
       if (steps.isEmpty) {
@@ -580,20 +577,9 @@ class _AppShellState extends State<_AppShell> {
         return;
       }
 
-      final stepSummary = steps
-          .map(
-            (s) =>
-                '${s.order}:${s.type}(${s.value.length > 20 ? '${s.value.substring(0, 20)}…' : s.value})',
-          )
-          .join(' → ');
-      _appendLog(
-        'Executing ${steps.length} steps on SIM ${liveJob.simSlot}: $stepSummary',
-      );
-
       // Wake screen so USSD dialog is visible (no-op if screen already on)
       try {
         await _nativeBridge.wakeScreen();
-        _appendLog('Screen wake requested for job ${liveJob.jobId}.');
       } catch (_) {}
 
       final startedAtMs = DateTime.now().millisecondsSinceEpoch;
@@ -644,9 +630,9 @@ class _AppShellState extends State<_AppShell> {
       );
       await _nativeBridge.releaseWakeLock().catchError((_) {});
       _appendLog(
-        !matchResult.hasMatch
-            ? 'Job ${liveJob.jobId} reported without SMS.'
-            : 'Job ${liveJob.jobId} reported with SMS: ${matchResult.isSuccess ? 'Success' : 'Failed - ${matchResult.failureReason}'}.',
+        matchResult.isSuccess
+            ? '✓ ${liveJob.serviceId} → ${liveJob.recipientNumber} · ৳${liveJob.amount}'
+            : '✗ ${liveJob.serviceId} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
       );
       if (mounted) setState(() => _status = 'Last job reported');
     } catch (error) {
@@ -723,7 +709,7 @@ class _AppShellState extends State<_AppShell> {
       parsedResult: <String, dynamic>{'success': false, 'reason': reason},
       ussdStepsExecuted: stepsExecuted,
     );
-    _appendLog('Job ${job.jobId} failed: $reason');
+    _appendLog('✗ ${job.serviceId} → ${job.recipientNumber} · ৳${job.amount}');
   }
 
   void _appendLog(String message) {
@@ -2345,13 +2331,9 @@ class _LicenseBannerState extends State<_LicenseBanner>
               opacity: _fadeAnim,
               child: SizedBox(
                 width: double.infinity,
-                height: 110,
                 child: Image.network(
                   logoUrl,
-                  fit: BoxFit.cover,
-                  // Dark tint so text above is always readable
-                  color: Colors.black.withValues(alpha: 0.30),
-                  colorBlendMode: BlendMode.darken,
+                  fit: BoxFit.fitWidth,
                   frameBuilder: (ctx, child, frame, wasSync) {
                     if (frame != null) {
                       WidgetsBinding.instance
@@ -2385,41 +2367,7 @@ class _LicenseBannerState extends State<_LicenseBanner>
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Logo thumbnail / bolt fallback
-                  _LogoThumb(
-                    logoUrl: (!_imageError && _imageLoaded) ? logoUrl : null,
-                  ),
-                  const SizedBox(width: 12),
-
-                  // App name + sub-label
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          appName,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            letterSpacing: 0.1,
-                            height: 1.1,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const Text(
-                          'Agent',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white60,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  const Spacer(),
 
                   // Status pill
                   Container(
@@ -2898,32 +2846,16 @@ class _PowerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final onColor = const Color(0xFF1B6B4D);
-    final offColor = cs.outline;
+    final onColor  = const Color(0xFF22C55E);
+    final offColor = const Color(0xFFEF4444);
     return Tooltip(
       message: isPoweredOn ? 'Power OFF' : 'Power ON',
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          boxShadow: isPoweredOn
-              ? [
-                  BoxShadow(
-                    color: onColor.withValues(alpha: 0.35),
-                    blurRadius: 10,
-                    spreadRadius: 2,
-                  ),
-                ]
-              : null,
+      child: IconButton(
+        icon: Icon(
+          Icons.power_settings_new_rounded,
+          color: isPoweredOn ? onColor : offColor,
         ),
-        child: IconButton(
-          icon: Icon(
-            Icons.power_settings_new_rounded,
-            color: isPoweredOn ? onColor : offColor,
-          ),
-          onPressed: onToggle,
-        ),
+        onPressed: onToggle,
       ),
     );
   }
