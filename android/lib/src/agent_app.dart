@@ -56,7 +56,7 @@ class _AppShell extends StatefulWidget {
   State<_AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<_AppShell> {
+class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
   final _nativeBridge = NativeBridge();
   final _backendUrlController = TextEditingController();
   final _tokenController = TextEditingController();
@@ -71,6 +71,8 @@ class _AppShellState extends State<_AppShell> {
   bool _phonePermissionGranted = false;
   bool _smsPermissionGranted = false;
   bool _accessibilityEnabled = false;
+  bool _exactAlarmGranted = false;
+  bool _batteryOptGranted = false;
   bool _isPoweredOn = true;   // master power switch
   String _status = 'Idle';
   String? _currentJobId;
@@ -90,11 +92,20 @@ class _AppShellState extends State<_AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshCapabilities();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
     _deviceInfoTimer?.cancel();
@@ -154,16 +165,30 @@ class _AppShellState extends State<_AppShell> {
     final phoneStatus = await Permission.phone.status;
     final smsStatus = await Permission.sms.status;
     final accessibilityEnabled = await _nativeBridge.isAccessibilityEnabled();
+    final exactAlarm = await _nativeBridge.isExactAlarmGranted();
+    final batteryOpt = await Permission.ignoreBatteryOptimizations.isGranted;
     if (!mounted) return;
     setState(() {
       _phonePermissionGranted = phoneStatus.isGranted;
       _smsPermissionGranted = smsStatus.isGranted;
       _accessibilityEnabled = accessibilityEnabled;
+      _exactAlarmGranted = exactAlarm;
+      _batteryOptGranted = batteryOpt;
     });
   }
 
   Future<void> _requestPermissions() async {
-    await <Permission>[Permission.phone, Permission.sms].request();
+    await <Permission>[
+      Permission.phone,
+      Permission.sms,
+      Permission.notification,
+    ].request();
+    if (!await Permission.ignoreBatteryOptimizations.isGranted) {
+      await Permission.ignoreBatteryOptimizations.request();
+    }
+    if (!await _nativeBridge.isExactAlarmGranted()) {
+      await _nativeBridge.openExactAlarmSettings();
+    }
     await _refreshCapabilities();
   }
 
@@ -548,11 +573,11 @@ class _AppShellState extends State<_AppShell> {
       if (!mounted) return;
       setState(() {
         _currentJobId = liveJob.jobId;
-        _status = 'Processing ${liveJob.jobId}';
+        _status = 'Processing ${liveJob.serviceName.isNotEmpty ? liveJob.serviceName : 'Unknown Service'}';
         _lastError = null;
       });
       _appendLog(
-        '${liveJob.serviceId} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
+        '${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
       );
       await _sendHeartbeat();
 
@@ -631,8 +656,8 @@ class _AppShellState extends State<_AppShell> {
       await _nativeBridge.releaseWakeLock().catchError((_) {});
       _appendLog(
         matchResult.isSuccess
-            ? '✓ ${liveJob.serviceId} → ${liveJob.recipientNumber} · ৳${liveJob.amount}'
-            : '✗ ${liveJob.serviceId} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
+            ? '✓ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}'
+            : '✗ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
       );
       if (mounted) setState(() => _status = 'Last job reported');
     } catch (error) {
@@ -709,7 +734,7 @@ class _AppShellState extends State<_AppShell> {
       parsedResult: <String, dynamic>{'success': false, 'reason': reason},
       ussdStepsExecuted: stepsExecuted,
     );
-    _appendLog('✗ ${job.serviceId} → ${job.recipientNumber} · ৳${job.amount}');
+    _appendLog('✗ ${job.serviceName} → ${job.recipientNumber} · ৳${job.amount}');
   }
 
   void _appendLog(String message) {
@@ -768,10 +793,13 @@ class _AppShellState extends State<_AppShell> {
         phoneGranted: _phonePermissionGranted,
         smsGranted: _smsPermissionGranted,
         accessibilityEnabled: _accessibilityEnabled,
+        exactAlarmGranted: _exactAlarmGranted,
+        batteryOptGranted: _batteryOptGranted,
         onSaveUrl: _saveBackendUrl,
         onScanQr: _scanQrCode,
         onRequestPermissions: _requestPermissions,
         onOpenAccessibility: _nativeBridge.openAccessibilitySettings,
+        onOpenExactAlarmSettings: _nativeBridge.openExactAlarmSettings,
         onRegister: _registerDevice,
         lastError: _lastError,
         backendConfigured: _backendConfigured,
@@ -843,10 +871,13 @@ class SetupScreen extends StatefulWidget {
     required this.phoneGranted,
     required this.smsGranted,
     required this.accessibilityEnabled,
+    required this.exactAlarmGranted,
+    required this.batteryOptGranted,
     required this.onSaveUrl,
     required this.onScanQr,
     required this.onRequestPermissions,
     required this.onOpenAccessibility,
+    required this.onOpenExactAlarmSettings,
     required this.onRegister,
     required this.lastError,
     required this.backendConfigured,
@@ -864,10 +895,13 @@ class SetupScreen extends StatefulWidget {
   final bool phoneGranted;
   final bool smsGranted;
   final bool accessibilityEnabled;
+  final bool exactAlarmGranted;
+  final bool batteryOptGranted;
   final Future<void> Function() onSaveUrl;
   final Future<void> Function() onScanQr;
   final Future<void> Function() onRequestPermissions;
   final Future<void> Function() onOpenAccessibility;
+  final Future<void> Function() onOpenExactAlarmSettings;
   final Future<void> Function() onRegister;
   final String? lastError;
   final bool backendConfigured;
@@ -985,8 +1019,11 @@ class _SetupScreenState extends State<SetupScreen> {
                     phoneGranted: widget.phoneGranted,
                     smsGranted: widget.smsGranted,
                     accessibilityEnabled: widget.accessibilityEnabled,
+                    exactAlarmGranted: widget.exactAlarmGranted,
+                    batteryOptGranted: widget.batteryOptGranted,
                     onRequestPermissions: widget.onRequestPermissions,
                     onOpenAccessibility: widget.onOpenAccessibility,
+                    onOpenExactAlarmSettings: widget.onOpenExactAlarmSettings,
                     onNext: _goNext,
                   ),
                   // Step 2: Register (one-scan QR does URL + registration)
@@ -1017,16 +1054,22 @@ class _SetupPermissionsStep extends StatelessWidget {
     required this.phoneGranted,
     required this.smsGranted,
     required this.accessibilityEnabled,
+    required this.exactAlarmGranted,
+    required this.batteryOptGranted,
     required this.onRequestPermissions,
     required this.onOpenAccessibility,
+    required this.onOpenExactAlarmSettings,
     required this.onNext,
   });
 
   final bool phoneGranted;
   final bool smsGranted;
   final bool accessibilityEnabled;
+  final bool exactAlarmGranted;
+  final bool batteryOptGranted;
   final Future<void> Function() onRequestPermissions;
   final Future<void> Function() onOpenAccessibility;
+  final Future<void> Function() onOpenExactAlarmSettings;
   final VoidCallback onNext;
 
   bool get _allOk => phoneGranted && smsGranted && accessibilityEnabled;
@@ -1074,6 +1117,20 @@ class _SetupPermissionsStep extends StatelessWidget {
             subtitle: 'Auto-fill USSD dialogs',
             granted: accessibilityEnabled,
           ),
+          const SizedBox(height: 12),
+          _PermissionTile(
+            icon: Icons.alarm_rounded,
+            title: 'Exact Alarms',
+            subtitle: 'Keep background service alive (Android 12+)',
+            granted: exactAlarmGranted,
+          ),
+          const SizedBox(height: 12),
+          _PermissionTile(
+            icon: Icons.battery_charging_full_rounded,
+            title: 'Battery Optimization Exempt',
+            subtitle: 'Prevent OS from killing the agent',
+            granted: batteryOptGranted,
+          ),
           const Spacer(),
           if (!phoneGranted || !smsGranted)
             FilledButton.icon(
@@ -1085,17 +1142,49 @@ class _SetupPermissionsStep extends StatelessWidget {
               ),
             ),
           if (!accessibilityEnabled) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: onOpenAccessibility,
               icon: const Icon(Icons.accessibility_new),
               label: const Text('Open Accessibility Settings'),
               style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 52),
+                minimumSize: const Size(double.infinity, 48),
               ),
             ),
           ],
+          if (!exactAlarmGranted) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: onOpenExactAlarmSettings,
+              icon: const Icon(Icons.alarm_rounded),
+              label: const Text('Allow Exact Alarms (Android 12+)'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ],
+          if (!batteryOptGranted) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => NativeBridge().openBatterySettings(),
+              icon: const Icon(Icons.battery_charging_full_rounded),
+              label: const Text('Exclude from Battery Optimization'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => NativeBridge().openAppInfo(),
+            icon: const Icon(Icons.lock_open_rounded),
+            label: const Text('Allow Restricted Settings (Android 13+)'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 44),
+            ),
+          ),
           if (_allOk) ...[
+            const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: onNext,
               icon: const Icon(Icons.arrow_forward_rounded),
@@ -1394,64 +1483,74 @@ class _HomeScreenState extends State<HomeScreen> {
 
   PreferredSizeWidget _buildAppBar(ColorScheme cs) {
     final appName = widget.subscriptionInfo?.appName ?? 'dRecharge';
-    return AppBar(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      scrolledUnderElevation: 1,
-      title: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF1B6B4D), Color(0xFF134235)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(kToolbarHeight),
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF134235), Color(0xFF1B6B4D)],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+        ),
+        child: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          foregroundColor: Colors.white,
+          title: Row(
             children: [
-              Text(
-                appName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF134235),
-                  height: 1.1,
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
                 ),
+                child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
               ),
-              const Text(
-                'Agent',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFF6B9E89),
-                  letterSpacing: 0.5,
-                ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    appName,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      height: 1.1,
+                    ),
+                  ),
+                  Text(
+                    'Agent',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withValues(alpha: 0.70),
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
+          actions: [
+            _PowerButton(
+              isPoweredOn: widget.isPoweredOn,
+              onToggle: widget.onTogglePower,
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined, size: 20, color: Colors.white),
+              tooltip: 'Settings',
+              onPressed: widget.onOpenSettings,
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
       ),
-      actions: [
-        _PowerButton(
-          isPoweredOn: widget.isPoweredOn,
-          onToggle: widget.onTogglePower,
-        ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined, size: 20),
-          tooltip: 'Settings',
-          onPressed: widget.onOpenSettings,
-        ),
-        const SizedBox(width: 4),
-      ],
     );
   }
 }
@@ -2369,36 +2468,35 @@ class _LicenseBannerState extends State<_LicenseBanner>
                 children: [
                   const Spacer(),
 
-                  // Status pill
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: (isActive && !isExpiring)
-                          ? Colors.white.withValues(alpha: 0.18)
-                          : statusColor.withValues(alpha: 0.88),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.30),
+                  // Status pill — only shown for blocked / expiring states
+                  if (!isActive || isExpiring)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.88),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.30),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(statusIcon, size: 11, color: Colors.white),
+                          const SizedBox(width: 4),
+                          Text(
+                            statusLabel,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(statusIcon, size: 11, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Text(
-                          statusLabel,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -2846,16 +2944,43 @@ class _PowerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onColor  = const Color(0xFF22C55E);
-    final offColor = const Color(0xFFEF4444);
+    // ON → bright green pill; OFF → red pill — both readable on the green AppBar
+    final onColor  = const Color(0xFF4ADE80);  // lighter green — pops on dark green bg
+    final offColor = const Color(0xFFFCA5A5);  // light red — pops on dark green bg
     return Tooltip(
       message: isPoweredOn ? 'Power OFF' : 'Power ON',
-      child: IconButton(
-        icon: Icon(
-          Icons.power_settings_new_rounded,
-          color: isPoweredOn ? onColor : offColor,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
         ),
-        onPressed: onToggle,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onToggle,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.power_settings_new_rounded,
+                size: 15,
+                color: isPoweredOn ? onColor : offColor,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                isPoweredOn ? 'ON' : 'OFF',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: isPoweredOn ? onColor : offColor,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2974,6 +3099,35 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ),
                   ],
+
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 12),
+                  Text(
+                    'System Restrictions',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: cs.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => NativeBridge().openAppInfo(),
+                    icon: const Icon(Icons.lock_open_rounded, size: 18),
+                    label: const Text('Allow Restricted Settings (Android 13+)'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => NativeBridge().openBatterySettings(),
+                    icon: const Icon(Icons.battery_charging_full_rounded, size: 18),
+                    label: const Text('Exclude from Battery Saver'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                  ),
                 ],
               ),
             ),

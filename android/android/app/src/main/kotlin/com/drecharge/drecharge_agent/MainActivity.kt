@@ -1,12 +1,15 @@
 package com.drecharge.drecharge_agent
 
+import android.app.AlarmManager
 import android.app.KeyguardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -16,13 +19,19 @@ class MainActivity : FlutterActivity() {
     private val channelName = "drecharge_agent/native"
     private var screenWakeLock: PowerManager.WakeLock? = null
 
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        startAgentService()
+    }
+
     override fun onResume() {
         super.onResume()
+        // Re-ensure service is running when app comes to foreground
         startAgentService()
     }
 
     private fun startAgentService() {
-        val serviceIntent = Intent(this, AgentForegroundService::class.java)
+        val serviceIntent = AgentForegroundService.startIntent(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
         } else {
@@ -43,6 +52,27 @@ class MainActivity : FlutterActivity() {
                         UssdAutomationManager.openAccessibilitySettings(this)
                         result.success(null)
                     }
+                    "isExactAlarmGranted" -> {
+                        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                            am.canScheduleExactAlarms()
+                        } else {
+                            true // pre-Android 12: no restriction
+                        }
+                        result.success(granted)
+                    }
+                    "openExactAlarmSettings" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            try {
+                                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                    data = Uri.parse("package:$packageName")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                        result.success(null)
+                    }
                     "executeUssdSteps"  -> handleExecuteUssdSteps(call, result)
                     "executeUssdFlow"   -> handleExecuteUssdFlow(call, result)
                     "readRecentSms"     -> handleReadRecentSms(call, result)
@@ -50,6 +80,8 @@ class MainActivity : FlutterActivity() {
                     "wakeScreen"        -> handleWakeScreen(result)
                     "releaseWakeLock"   -> handleReleaseWakeLock(result)
                     "openUrl"           -> handleOpenUrl(call, result)
+                    "openAppInfo"       -> { handleOpenAppInfo(result) }
+                    "openBatterySettings" -> { handleOpenBatterySettings(result) }
                     else -> result.notImplemented()
                 }
             }
@@ -187,6 +219,32 @@ class MainActivity : FlutterActivity() {
             result.success(true)
         } catch (e: Exception) {
             result.error("open_url_error", e.message, null)
+        }
+    }
+
+    private fun handleOpenAppInfo(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("app_info_error", e.message, null)
+        }
+    }
+
+    private fun handleOpenBatterySettings(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(null)
+        } catch (e: Exception) {
+            // Fallback to app info if the specific battery settings activity is not found on some ROMs
+            handleOpenAppInfo(result)
         }
     }
 

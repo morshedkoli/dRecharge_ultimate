@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
         txId: job.txId,
         userId: job.userId,
         serviceId: job.serviceId,
+        serviceName: (service as { name?: string } | null)?.name || "Unknown Service",
         recipientNumber: job.recipientNumber,
         amount: job.amount,
         ussdSteps,

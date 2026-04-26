@@ -18,7 +18,9 @@
       "Bash(flutter clean *)",
       "Bash(flutter --version)",
       "Bash(flutter pub *)",
-      "Bash(flutter build *)"
+      "Bash(flutter build *)",
+      "mcp__plugin_claude-mem_mcp-search__smart_outline",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

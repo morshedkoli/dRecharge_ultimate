@@ -231,6 +231,7 @@ class ExecutionJob {
     required this.jobId,
     required this.txId,
     required this.serviceId,
+    required this.serviceName,
     required this.recipientNumber,
     required this.amount,
     required this.status,
@@ -247,6 +248,8 @@ class ExecutionJob {
   final String jobId;
   final String txId;
   final String serviceId;
+  /// Human-readable service name (e.g. "bkash send money"). Falls back to serviceId.
+  final String serviceName;
   final String recipientNumber;
   final num amount;
   final String status;
@@ -294,6 +297,10 @@ class ExecutionJob {
       jobId: (data['jobId'] ?? data['_id'] ?? '').toString(),
       txId: (data['txId'] ?? '').toString(),
       serviceId: (data['serviceId'] ?? '').toString(),
+      serviceName: (data['serviceName']?.toString().trim().isNotEmpty == true
+              ? data['serviceName'].toString().trim()
+              : null) ??
+          'Unknown Service',
       recipientNumber: (data['recipientNumber'] ?? '').toString(),
       amount: data['amount'] is num
           ? data['amount'] as num

@@ -1,5 +1,6 @@
 package com.drecharge.drecharge_agent
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -30,45 +31,106 @@ import kotlin.coroutines.suspendCoroutine
 class AgentForegroundService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "drecharge_agent_channel"
+        const val CHANNEL_ID      = "drecharge_agent_channel"
         const val NOTIFICATION_ID = 1001
-        private const val POLL_INTERVAL_MS = 15_000L
+        private const val POLL_INTERVAL_MS      = 15_000L
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
-        private const val SMS_POLL_INTERVAL_MS = 3_000L
-        private const val DEFAULT_BASE_URL = "http://10.0.2.2:3000"
+        private const val SMS_POLL_INTERVAL_MS  = 3_000L
+        private const val WATCHDOG_INTERVAL_MS  = 60_000L   // reschedule alarm every 60 s
+        private const val DEFAULT_BASE_URL      = "http://10.0.2.2:3000"
+
+        /** Restart intent — used by AlarmManager watchdog and BootReceiver. */
+        fun startIntent(context: Context) =
+            Intent(context, AgentForegroundService::class.java)
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // ─── Coroutine scope (cancelled on destroy, recreated on restart) ────────
+    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // ─── Wake locks ──────────────────────────────────────────────────────────
+    /** Partial CPU wake-lock held for the life of the service (never sleeps). */
+    private var cpuWakeLock: PowerManager.WakeLock? = null
+    /** Screen wake-lock acquired only during job execution. */
     private var screenWakeLock: PowerManager.WakeLock? = null
 
-    // Key names mirror Flutter's backend_service.dart constants
+    // ─── Key names mirror Flutter's backend_service.dart constants ────────────
     private val kBaseUrl     = "agent_backend_base_url"
     private val kIsPoweredOn = "agent_is_powered_on"
     private val kJwtToken    = "agent_jwt_token"
     private val kDeviceName  = "agent_device_name"
     private val kSimProvider = "agent_sim_provider"
 
-    // ─── Lifecycle ───────────────────────────────────────────────────────────────
+    // ─── Lifecycle ───────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Waiting for jobs…"))
-        startPollLoop()
-        startHeartbeatLoop()
+        startForeground(NOTIFICATION_ID, buildNotification("Agent running…"))
+        acquireCpuWake()
+        startLoops()
+        scheduleWatchdog()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    /**
+     * START_STICKY: if the OS kills the service, it will be restarted automatically.
+     * If called while already running (e.g. from watchdog / boot) we just reschedule
+     * the watchdog — loops are already running.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        scheduleWatchdog()        // keep alarm alive even after a restart
+        return START_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         scope.cancel()
-        releaseWake()
+        releaseCpuWake()
+        releaseScreenWake()
+        // Re-schedule immediately so the OS restarts us ASAP
+        scheduleWatchdog(delayMs = 5_000L)
         super.onDestroy()
     }
 
-    // ─── Config ──────────────────────────────────────────────────────────────────
+    // ─── Loop management ─────────────────────────────────────────────────────
+
+    private fun startLoops() {
+        // Cancel stale scope if this is a re-init
+        scope.cancel()
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        startPollLoop()
+        startHeartbeatLoop()
+    }
+
+    // ─── Watchdog alarm ──────────────────────────────────────────────────────
+
+    /**
+     * Schedules an AlarmManager alarm that fires every [delayMs] ms.
+     * On each alarm tick the BootReceiver starts/restarts this service.
+     * This survives process death and battery-saver states.
+     */
+    private fun scheduleWatchdog(delayMs: Long = WATCHDOG_INTERVAL_MS) {
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = PendingIntent.getBroadcast(
+            this,
+            0,
+            Intent(this, WatchdogReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val triggerAt = System.currentTimeMillis() + delayMs
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            }
+        } catch (_: SecurityException) {
+            // Some ROMs block setExactAndAllowWhileIdle without extra permission — fall back
+            am.set(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+        }
+    }
+
+    // ─── Config ──────────────────────────────────────────────────────────────
 
     private data class AgentConfig(
         val baseUrl: String,
@@ -106,7 +168,7 @@ class AgentForegroundService : Service() {
         )
     }
 
-    // ─── Poll loop ───────────────────────────────────────────────────────────────
+    // ─── Poll loop ───────────────────────────────────────────────────────────
 
     private fun startPollLoop() {
         scope.launch {
@@ -127,7 +189,7 @@ class AgentForegroundService : Service() {
 
         val jobId           = jobJson.optString("jobId").trim()
         val txId            = jobJson.optString("txId").trim()
-        val serviceId       = jobJson.optString("serviceId")
+        val serviceName     = jobJson.optString("serviceName").ifBlank { "Unknown Service" }
         val recipientNumber = jobJson.optString("recipientNumber")
         val amount          = jobJson.optDouble("amount", 0.0)
         val simSlot         = jobJson.optInt("simSlot", 1)
@@ -138,17 +200,17 @@ class AgentForegroundService : Service() {
         val locked = lockJob(config, jobId)
         if (!locked) return
 
-        updateNotification("Executing: $serviceId → $recipientNumber · ৳$amount")
+        updateNotification("▶ $serviceName → $recipientNumber · ৳$amount")
 
         val startMs = System.currentTimeMillis()
         val steps   = parseUssdSteps(jobJson.optJSONArray("ussdSteps"))
 
-        acquireWake()
+        acquireScreenWake()
 
-        var rawSms         = ""
-        var ussdSuccess    = false
-        var ussdError      = ""
-        var executedSteps  : List<Map<String, Any>> = emptyList()
+        var rawSms        = ""
+        var ussdSuccess   = false
+        var ussdError     = ""
+        var executedSteps : List<Map<String, Any>> = emptyList()
 
         try {
             val ussdResult = executeUssdSuspend(steps, simSlot)
@@ -161,7 +223,7 @@ class AgentForegroundService : Service() {
         } catch (e: Exception) {
             ussdError = e.message ?: "Execution error"
         } finally {
-            releaseWake()
+            releaseScreenWake()
         }
 
         val parsedResult = JSONObject().apply {
@@ -170,10 +232,10 @@ class AgentForegroundService : Service() {
         }
 
         submitResult(config, jobId, txId, rawSms, parsedResult, executedSteps)
-        updateNotification("Waiting for jobs…")
+        updateNotification("Agent running…")
     }
 
-    // ─── USSD execution ──────────────────────────────────────────────────────────
+    // ─── USSD execution ──────────────────────────────────────────────────────
 
     private data class UssdExecResult(
         val success: Boolean,
@@ -204,7 +266,7 @@ class AgentForegroundService : Service() {
             )
         }
 
-    // ─── SMS wait ────────────────────────────────────────────────────────────────
+    // ─── SMS wait ────────────────────────────────────────────────────────────
 
     private suspend fun waitForSms(deadlineMs: Long): String {
         val sinceMs = System.currentTimeMillis() - 5_000L
@@ -216,19 +278,14 @@ class AgentForegroundService : Service() {
         return ""
     }
 
-    // ─── HTTP helpers ────────────────────────────────────────────────────────────
+    // ─── HTTP helpers ────────────────────────────────────────────────────────
 
-    private fun fetchNextJob(config: AgentConfig): JSONObject? {
-        return httpGet("${config.baseUrl}/api/agent/queue", config.jwtToken)?.optJSONObject("job")
-    }
+    private fun fetchNextJob(config: AgentConfig): JSONObject? =
+        httpGet("${config.baseUrl}/api/agent/queue", config.jwtToken)?.optJSONObject("job")
 
-    private fun lockJob(config: AgentConfig, jobId: String): Boolean {
-        return httpPost(
-            "${config.baseUrl}/api/agent/queue/$jobId/lock",
-            config.jwtToken,
-            JSONObject(),
-        )?.optBoolean("acquired", false) ?: false
-    }
+    private fun lockJob(config: AgentConfig, jobId: String): Boolean =
+        httpPost("${config.baseUrl}/api/agent/queue/$jobId/lock", config.jwtToken, JSONObject())
+            ?.optBoolean("acquired", false) ?: false
 
     private fun submitResult(
         config: AgentConfig,
@@ -241,10 +298,10 @@ class AgentForegroundService : Service() {
         val stepsArray = JSONArray()
         executedSteps.forEach { stepsArray.put(JSONObject(it)) }
         val body = JSONObject().apply {
-            put("txId", txId)
-            put("rawSms", rawSms)
-            put("parsedResult", parsedResult)
-            put("ussdStepsExecuted", stepsArray)
+            put("txId",               txId)
+            put("rawSms",             rawSms)
+            put("parsedResult",       parsedResult)
+            put("ussdStepsExecuted",  stepsArray)
         }
         httpPost("${config.baseUrl}/api/agent/queue/$jobId/result", config.jwtToken, body)
     }
@@ -252,8 +309,8 @@ class AgentForegroundService : Service() {
     private fun sendHeartbeat(config: AgentConfig) {
         val body = JSONObject().apply {
             put("isPoweredOn", config.isPoweredOn)
-            if (config.deviceName.isNotBlank()) put("name", config.deviceName)
-            if (config.simProvider.isNotBlank()) put("simProvider", config.simProvider)
+            if (config.deviceName.isNotBlank())  put("name",        config.deviceName)
+            if (config.simProvider.isNotBlank())  put("simProvider", config.simProvider)
         }
         httpPost("${config.baseUrl}/api/agent/heartbeat", config.jwtToken, body)
     }
@@ -264,7 +321,7 @@ class AgentForegroundService : Service() {
         conn.setRequestProperty("Content-Type", "application/json")
         if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
         conn.connectTimeout = 10_000
-        conn.readTimeout    = 10_000
+        conn.readTimeout    = 15_000
         if (conn.responseCode in 200..299)
             JSONObject(conn.inputStream.bufferedReader().readText())
         else null
@@ -277,14 +334,14 @@ class AgentForegroundService : Service() {
         conn.setRequestProperty("Content-Type", "application/json")
         if (!token.isNullOrBlank()) conn.setRequestProperty("Authorization", "Bearer $token")
         conn.connectTimeout = 10_000
-        conn.readTimeout    = 10_000
+        conn.readTimeout    = 15_000
         OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
         if (conn.responseCode in 200..299)
             JSONObject(conn.inputStream.bufferedReader().readText())
         else null
     } catch (_: Exception) { null }
 
-    // ─── USSD step parsing ───────────────────────────────────────────────────────
+    // ─── USSD step parsing ───────────────────────────────────────────────────
 
     private fun parseUssdSteps(arr: JSONArray?): List<UssdStep> {
         if (arr == null) return emptyList()
@@ -300,7 +357,7 @@ class AgentForegroundService : Service() {
         }
     }
 
-    // ─── Heartbeat loop ──────────────────────────────────────────────────────────
+    // ─── Heartbeat loop ──────────────────────────────────────────────────────
 
     private fun startHeartbeatLoop() {
         scope.launch {
@@ -314,32 +371,44 @@ class AgentForegroundService : Service() {
         }
     }
 
-    // ─── Wake lock ───────────────────────────────────────────────────────────────
+    // ─── Wake locks ──────────────────────────────────────────────────────────
 
+    /** Partial wake lock — keeps the CPU awake so coroutines keep running. */
+    private fun acquireCpuWake() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            cpuWakeLock?.let { if (it.isHeld) it.release() }
+            cpuWakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "drecharge:cpu_keep_alive",
+            ).also { it.acquire() }   // no timeout — released in onDestroy
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseCpuWake() {
+        try { cpuWakeLock?.let { if (it.isHeld) it.release() }; cpuWakeLock = null } catch (_: Exception) {}
+    }
+
+    /** Screen wake lock — turns screen on during USSD execution. */
     @Suppress("DEPRECATION")
-    private fun acquireWake() {
+    private fun acquireScreenWake() {
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             screenWakeLock?.let { if (it.isHeld) it.release() }
-            val wl = pm.newWakeLock(
+            screenWakeLock = pm.newWakeLock(
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP  or
                 PowerManager.ON_AFTER_RELEASE,
                 "drecharge:bg_job",
-            )
-            wl.acquire(90_000L)
-            screenWakeLock = wl
+            ).also { it.acquire(90_000L) }
         } catch (_: Exception) {}
     }
 
-    private fun releaseWake() {
-        try {
-            screenWakeLock?.let { if (it.isHeld) it.release() }
-            screenWakeLock = null
-        } catch (_: Exception) {}
+    private fun releaseScreenWake() {
+        try { screenWakeLock?.let { if (it.isHeld) it.release() }; screenWakeLock = null } catch (_: Exception) {}
     }
 
-    // ─── Notification ────────────────────────────────────────────────────────────
+    // ─── Notification ────────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -378,7 +447,7 @@ class AgentForegroundService : Service() {
             .build()
     }
 
-    private fun updateNotification(status: String) {
+    fun updateNotification(status: String) {
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(NOTIFICATION_ID, buildNotification(status))
     }

@@ -63,4 +63,27 @@ class NativeBridge {
   Future<void> releaseWakeLock() async {
     await _channel.invokeMethod<void>('releaseWakeLock');
   }
+
+  /// Opens the Android App Info page where the user can tap
+  /// "Allow restricted settings" (Android 13+).
+  Future<void> openAppInfo() async {
+    await _channel.invokeMethod<void>('openAppInfo');
+  }
+
+  /// Opens the Battery Optimization exemption screen for this app.
+  Future<void> openBatterySettings() async {
+    await _channel.invokeMethod<void>('openBatterySettings');
+  }
+
+  /// Returns true if app can schedule exact alarms (Android 12+ only).
+  /// Always returns true on Android < 12.
+  Future<bool> isExactAlarmGranted() async {
+    final granted = await _channel.invokeMethod<bool>('isExactAlarmGranted');
+    return granted ?? true;
+  }
+
+  /// Opens the system screen to grant SCHEDULE_EXACT_ALARM (Android 12+).
+  Future<void> openExactAlarmSettings() async {
+    await _channel.invokeMethod<void>('openExactAlarmSettings');
+  }
 }
