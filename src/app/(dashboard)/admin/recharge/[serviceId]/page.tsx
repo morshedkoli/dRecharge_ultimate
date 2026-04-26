@@ -69,9 +69,11 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
 
   const balance = profile?.walletBalance || 0;
   const amount = parseFloat(amountStr) || 0;
-  const isOverBalance = amount > balance;
+  const isAdmin = ["admin", "super_admin", "support_admin"].includes(profile?.role || "");
+  const isOverBalance = isAdmin ? false : amount > balance;
   const requiredRecipientLength = service.recipientLength || 11;
-  const isValid = recipient.length === requiredRecipientLength && amount > 0 && !isOverBalance;
+  const isAmountValid = isAdmin ? amount >= 0 : amount > 0;
+  const isValid = recipient.length === requiredRecipientLength && isAmountValid && !isOverBalance;
   const effectivePin = profile?.pin?.trim() || "1234";
   const requiredPinLength = effectivePin.length;
 
@@ -179,11 +181,11 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
                   <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-on-surface-variant/50" />
                   <input
                     type="number"
-                    min="1"
+                    min={isAdmin ? "0" : "1"}
                     step="1"
                     value={amountStr}
                     onChange={(e) => setAmountStr(e.target.value)}
-                    required
+                    required={!isAdmin}
                     placeholder="0.00"
                     disabled={submitting}
                     className="w-full pl-12 pr-4 py-3.5 bg-surface-container border border-black/5 rounded-2xl text-[15px] font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all placeholder:text-on-surface-variant/40"

@@ -38,9 +38,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { serviceId, recipientNumber, amount } = await request.json();
-    if (!serviceId || !recipientNumber || !amount || amount <= 0) {
-      return NextResponse.json({ error: "serviceId, recipientNumber, amount required" }, { status: 400 });
+    const isAdmin = ["admin", "super_admin", "support_admin"].includes(session.role);
+    const { serviceId, recipientNumber, amount: reqAmount } = await request.json();
+    const amount = reqAmount || 0;
+
+    if (isAdmin) {
+      if (!serviceId || !recipientNumber) {
+        return NextResponse.json({ error: "serviceId, recipientNumber required" }, { status: 400 });
+      }
+    } else {
+      if (!serviceId || !recipientNumber || !amount || amount <= 0) {
+        return NextResponse.json({ error: "serviceId, recipientNumber, amount required" }, { status: 400 });
+      }
     }
 
     const uid = session.sub;
@@ -61,15 +70,17 @@ export async function POST(request: NextRequest) {
 
     try {
       await dbSession.withTransaction(async () => {
-        const user = await User.findOneAndUpdate(
-          { _id: uid, walletBalance: { $gte: amount } },
-          { $inc: { walletBalance: -amount } },
-          { returnDocument: "after", session: dbSession },
-        );
-        if (!user) {
-          const existingUser = await User.findById(uid).session(dbSession);
-          if (!existingUser) throw new Error("User not found");
-          throw new Error("Insufficient balance");
+        if (!isAdmin) {
+          const user = await User.findOneAndUpdate(
+            { _id: uid, walletBalance: { $gte: amount } },
+            { $inc: { walletBalance: -amount } },
+            { returnDocument: "after", session: dbSession },
+          );
+          if (!user) {
+            const existingUser = await User.findById(uid).session(dbSession);
+            if (!existingUser) throw new Error("User not found");
+            throw new Error("Insufficient balance");
+          }
         }
 
         txId = "TX_" + nanoid(20);

@@ -485,7 +485,8 @@ class AgentForegroundService : Service() {
         return builder
             .setContentTitle("dRecharge Agent")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setSmallIcon(R.drawable.ic_agent_notification)
+            .setColor(0xFF134235.toInt())
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
