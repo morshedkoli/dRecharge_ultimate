@@ -87,6 +87,10 @@ class BackendService {
     return token != null && token.isNotEmpty;
   }
 
+  static Future<String?> getStoredJwtToken() {
+    return _storage.read(key: _kJwtToken);
+  }
+
   static Future<AgentConfig?> loadConfig() async {
     final deviceId = await _storage.read(key: _kDeviceId);
     if (deviceId == null) return null;
@@ -378,6 +382,9 @@ class BackendService {
   static Future<void> reportJobResult({
     required String jobId,
     required String txId,
+    required String serviceName,
+    required String recipientNumber,
+    required num amount,
     required String rawSms,
     required bool isSuccess,
     Map<String, dynamic>? parsedResult,
@@ -390,6 +397,9 @@ class BackendService {
         'success': isSuccess,
         ...?parsedResult,
       },
+      'serviceName': serviceName,
+      'recipientNumber': recipientNumber,
+      'amount': amount,
       'ussdStepsExecuted': ussdStepsExecuted ?? [],
     });
   }

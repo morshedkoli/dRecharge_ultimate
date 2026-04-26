@@ -48,6 +48,20 @@ class MainActivity : FlutterActivity() {
                     "isAccessibilityEnabled" -> {
                         result.success(UssdAutomationManager.isAccessibilityEnabled())
                     }
+                    "syncBackgroundConfig" -> {
+                        handleSyncBackgroundConfig(call, result)
+                    }
+                    "clearBackgroundConfig" -> {
+                        getSharedPreferences(AgentForegroundService.NATIVE_CONFIG_PREFS, MODE_PRIVATE)
+                            .edit()
+                            .clear()
+                            .apply()
+                        result.success(null)
+                    }
+                    "startBackgroundService" -> {
+                        startAgentService()
+                        result.success(null)
+                    }
                     "openAccessibilitySettings" -> {
                         UssdAutomationManager.openAccessibilitySettings(this)
                         result.success(null)
@@ -85,6 +99,33 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun handleSyncBackgroundConfig(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val baseUrl = call.argument<String>("baseUrl")?.trim().orEmpty()
+            val jwtToken = call.argument<String>("jwtToken")?.trim()
+            val isPoweredOn = call.argument<Boolean>("isPoweredOn") ?: true
+            val deviceName = call.argument<String>("deviceName")?.trim().orEmpty()
+            val simProvider = call.argument<String>("simProvider")?.trim().orEmpty()
+
+            val editor = getSharedPreferences(AgentForegroundService.NATIVE_CONFIG_PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(AgentForegroundService.KEY_BASE_URL, baseUrl)
+                .putBoolean(AgentForegroundService.KEY_IS_POWERED_ON, isPoweredOn)
+                .putString(AgentForegroundService.KEY_DEVICE_NAME, deviceName)
+                .putString(AgentForegroundService.KEY_SIM_PROVIDER, simProvider)
+
+            if (!jwtToken.isNullOrBlank()) {
+                editor.putString(AgentForegroundService.KEY_JWT_TOKEN, jwtToken)
+            }
+
+            editor.apply()
+            startAgentService()
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("sync_background_config_failed", e.message, null)
+        }
     }
 
     @Suppress("UNCHECKED_CAST")

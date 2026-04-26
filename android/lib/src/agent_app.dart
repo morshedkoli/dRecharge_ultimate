@@ -139,9 +139,11 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
           _backendConfigured = true;
         }
         _config = savedConfig;
+        await _syncBackgroundServiceConfig();
         _startLoops();
       } else if (savedConfig != null && !authenticated) {
         await BackendService.clearConfig();
+        await _nativeBridge.clearBackgroundConfig();
       }
 
       await _refreshCapabilities();
@@ -151,6 +153,18 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _syncBackgroundServiceConfig() async {
+    final token = await BackendService.getStoredJwtToken();
+    await _nativeBridge.syncBackgroundConfig(
+      baseUrl: BackendService.currentBaseUrl,
+      jwtToken: token,
+      isPoweredOn: _isPoweredOn,
+      deviceName: _config?.name,
+      simProvider: _config?.simProvider,
+    );
+    await _nativeBridge.startBackgroundService();
   }
 
   Future<void> _refreshSubscription() async {
@@ -233,6 +247,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         _pollTimer?.cancel();
         _heartbeatTimer?.cancel();
         await BackendService.clearConfig();
+        await _nativeBridge.clearBackgroundConfig();
       }
 
       if (!mounted) return;
@@ -254,6 +269,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         }
       });
       _appendLog('Backend URL set to ${BackendService.currentBaseUrl}.');
+      await _syncBackgroundServiceConfig();
     } catch (error) {
       if (!mounted) return;
       setState(() => _lastError = 'Failed to save backend URL: $error');
@@ -274,6 +290,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         _pollTimer?.cancel();
         _heartbeatTimer?.cancel();
         await BackendService.clearConfig();
+        await _nativeBridge.clearBackgroundConfig();
       }
       if (!mounted) return;
       _backendUrlController.text = BackendService.currentBaseUrl;
@@ -346,6 +363,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         _tokenController.clear();
         _status = 'Device registered';
       });
+      await _syncBackgroundServiceConfig();
       _appendLog('Device $deviceId registered.');
       _startLoops();
       await _refreshCapabilities();
@@ -522,6 +540,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
           _status = serverPowerState ? 'Idle' : 'Paused';
         });
         await BackendService.savePowerState(serverPowerState);
+        await _syncBackgroundServiceConfig();
         _appendLog(serverPowerState ? 'Agent powered ON remotely.' : 'Agent powered OFF remotely.');
       }
     } catch (error) {
@@ -648,6 +667,9 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       await BackendService.reportJobResult(
         jobId: liveJob.jobId,
         txId: liveJob.txId,
+        serviceName: liveJob.serviceName,
+        recipientNumber: liveJob.recipientNumber,
+        amount: liveJob.amount,
         rawSms: rawSms,
         isSuccess: matchResult.isSuccess,
         parsedResult: parsedResult,
@@ -670,6 +692,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         _pollTimer?.cancel();
         _heartbeatTimer?.cancel();
         await BackendService.clearConfig();
+        await _nativeBridge.clearBackgroundConfig();
         if (mounted) {
           setState(() {
             _config = null;
@@ -729,6 +752,9 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
     await BackendService.reportJobResult(
       jobId: job.jobId,
       txId: job.txId,
+      serviceName: job.serviceName,
+      recipientNumber: job.recipientNumber,
+      amount: job.amount,
       rawSms: rawSms,
       isSuccess: false,
       parsedResult: <String, dynamic>{'success': false, 'reason': reason},
@@ -748,6 +774,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
 
   Future<void> _resetDevice() async {
     await BackendService.clearConfig();
+    await _nativeBridge.clearBackgroundConfig();
     if (!mounted) return;
     setState(() {
       _config = null;
@@ -757,6 +784,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       _isPoweredOn = true;
       _logs.clear();
     });
+    await _syncBackgroundServiceConfig();
   }
 
   // ── Power Toggle ──────────────────────────────────────────────────────────────
@@ -768,6 +796,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       _status = newValue ? 'Idle' : 'Paused';
     });
     await BackendService.savePowerState(newValue);
+    await _syncBackgroundServiceConfig();
     _appendLog(newValue ? 'Agent powered ON.' : 'Agent powered OFF.');
     // Immediately notify server with new state and explicit flag
     await _sendHeartbeat(isPowerToggle: true);

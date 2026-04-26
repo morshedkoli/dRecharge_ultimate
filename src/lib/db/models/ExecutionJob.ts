@@ -7,6 +7,7 @@ export interface IExecutionJob extends Document<string> {
   txId: string;
   userId: string;
   serviceId: string;
+  serviceName?: string;
   recipientNumber: string;
   amount: number;
   ussdSteps?: {               // structured steps (source of truth for agent)
@@ -46,6 +47,7 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     txId: { type: String, required: true },
     userId: { type: String, required: true },
     serviceId: { type: String, required: true },
+    serviceName: { type: String },
     recipientNumber: { type: String, required: true },
     amount: { type: Number, required: true },
     ussdSteps: {

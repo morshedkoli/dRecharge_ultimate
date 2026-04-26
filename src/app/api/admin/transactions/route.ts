@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
           txId,
           userId: uid,
           serviceId,
+          serviceName: service.name || serviceId,
           recipientNumber,
           amount,
           ussdSteps: resolvedSteps,
@@ -115,7 +116,17 @@ export async function POST(request: NextRequest) {
       await dbSession.endSession();
     }
 
-    await writeLog({ uid, action: "TX_INITIATED", entityId: txId, meta: { serviceId, amount } });
+    await writeLog({
+      uid,
+      action: "TX_INITIATED",
+      entityId: txId,
+      meta: {
+        serviceId,
+        serviceName: service.name || serviceId,
+        recipientNumber,
+        amount,
+      },
+    });
     return NextResponse.json({ success: true, txId, jobId });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Server error";

@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
     const jobs = raw.map((j) => ({ 
       ...j, 
       jobId: j._id,
-      serviceName: serviceMap[j.serviceId]?.name || j.serviceId,
+      serviceName: serviceMap[j.serviceId]?.name || j.serviceName || j.serviceId,
       serviceIcon: serviceMap[j.serviceId]?.icon || null,
     }));
     
@@ -97,11 +97,21 @@ export async function PATCH(request: NextRequest) {
 
     await connectDB();
     const dbSession = await mongoose.startSession();
+    let logDetails: Record<string, unknown> = { reason, jobId };
     try {
       await dbSession.withTransaction(async () => {
         const job = await ExecutionJob.findById(jobId).session(dbSession);
         const tx = await Transaction.findById(txId).session(dbSession);
         if (!job || !tx) throw new Error("Job or transaction not found");
+        const service = await Service.findById(job.serviceId).select("name").lean().session(dbSession);
+        logDetails = {
+          reason,
+          jobId,
+          serviceId: job.serviceId,
+          serviceName: service?.name || job.serviceName || job.serviceId,
+          recipientNumber: job.recipientNumber,
+          amount: job.amount,
+        };
 
         job.status = "failed";
         job.locked = false;
@@ -124,7 +134,7 @@ export async function PATCH(request: NextRequest) {
       await dbSession.endSession();
     }
 
-    await writeLog({ uid: session.sub, action: "TX_FAILED", entityId: txId, severity: "warn", meta: { reason, jobId } });
+    await writeLog({ uid: session.sub, action: "TX_FAILED", entityId: txId, severity: "warn", meta: logDetails });
     return NextResponse.json({ success: true });
   });
 }

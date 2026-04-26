@@ -57,7 +57,15 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const { jobId } = await params;
     const body = await request.json();
-    const { txId, rawSms, parsedResult: clientResult, ussdStepsExecuted } = body;
+    const {
+      txId,
+      rawSms,
+      parsedResult: clientResult,
+      ussdStepsExecuted,
+      serviceName: agentServiceName,
+      recipientNumber: agentRecipientNumber,
+      amount: agentAmount,
+    } = body;
 
     await connectDB();
 
@@ -176,16 +184,44 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const finalOutcome = outcome as FinalJobOutcome;
 
+    const tx = await Transaction.findById(txId).lean();
+    const service = tx?.serviceId ? await Service.findById(tx.serviceId).lean() : null;
+    const serviceName =
+      (service as { name?: string } | null)?.name ||
+      (typeof agentServiceName === "string" && agentServiceName.trim()) ||
+      tx?.serviceId ||
+      undefined;
+    const recipientNumber =
+      tx?.recipientNumber ||
+      (typeof agentRecipientNumber === "string" && agentRecipientNumber.trim()) ||
+      undefined;
+    const amount =
+      typeof tx?.amount === "number"
+        ? tx.amount
+        : typeof agentAmount === "number"
+          ? agentAmount
+          : Number.isFinite(Number(agentAmount))
+            ? Number(agentAmount)
+            : undefined;
+
     await writeLog({
       action: finalOutcome === "done" ? "TX_COMPLETED" : finalOutcome === "failed" ? "TX_FAILED" : "TX_WAITING",
       entityId: txId,
       severity: finalOutcome === "done" ? "info" : "warn",
-      meta: { jobId, parsedResult: finalParsedResult, failureReason, outcome: finalOutcome },
+      meta: {
+        jobId,
+        serviceId: tx?.serviceId,
+        serviceName,
+        recipientNumber,
+        amount,
+        parsedResult: finalParsedResult,
+        failureReason,
+        outcome: finalOutcome,
+      },
     });
 
     // Notify the user based on the final authoritative outcome.
     try {
-      const tx = await Transaction.findById(txId).lean();
       if (tx) {
         if (finalOutcome === "done") {
           await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");

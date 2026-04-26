@@ -17,6 +17,20 @@ const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-600 text-white",
 };
 
+function formatAmount(value: unknown) {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return `৳ ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function logRequestSummary(log: AuditLog) {
+  const meta = log.meta || {};
+  const serviceName = typeof meta.serviceName === "string" ? meta.serviceName : "";
+  const recipientNumber = typeof meta.recipientNumber === "string" ? meta.recipientNumber : "";
+  const amount = formatAmount(meta.amount);
+  return [serviceName, recipientNumber, amount].filter(Boolean).join(" · ");
+}
+
 export default function LogsPage() {
   const [severity, setSeverity] = useState<LogSeverity | "all">("all");
   const [uidFilter, setUidFilter] = useState("");
@@ -28,9 +42,10 @@ export default function LogsPage() {
   });
 
   function exportCsv() {
-    const headers = ["timestamp", "action", "severity", "uid", "city", "country", "browser", "os", "deviceType", "entityId"];
+    const headers = ["timestamp", "action", "severity", "uid", "serviceName", "recipientNumber", "amount", "city", "country", "browser", "os", "deviceType", "entityId"];
     const rows = logs.map((l) => [
       fullDateTime(l.timestamp), l.action, l.severity, l.uid || "",
+      l.meta?.serviceName || "", l.meta?.recipientNumber || "", l.meta?.amount || "",
       l.location?.city || "", l.location?.country || "",
       l.browser, l.os, l.deviceType, l.entityId || "",
     ]);
@@ -106,9 +121,16 @@ export default function LogsPage() {
                   className="group hover:bg-surface-container/20 transition-colors cursor-pointer">
                   <td className="px-8 py-4"><LogSeverityDot severity={log.severity} /></td>
                   <td className="px-8 py-4">
-                    <span className="font-mono text-xs bg-surface-container px-2.5 py-1 rounded-lg text-on-surface font-bold">
-                      {log.action}
-                    </span>
+                    <div className="space-y-1">
+                      <span className="font-mono text-xs bg-surface-container px-2.5 py-1 rounded-lg text-on-surface font-bold inline-flex">
+                        {log.action}
+                      </span>
+                      {logRequestSummary(log) && (
+                        <div className="text-xs text-on-surface-variant font-manrope">
+                          {logRequestSummary(log)}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-8 py-4 text-on-surface-variant font-mono text-xs">
                     {log.uid ? log.uid.slice(0, 12) + "…" : "anon"}

@@ -46,6 +46,10 @@ export async function GET(request: NextRequest) {
     if (!job) return NextResponse.json({ job: null });
 
     const service = await Service.findById(job.serviceId).lean();
+    const serviceName =
+      (service as { name?: string } | null)?.name ||
+      (job as { serviceName?: string }).serviceName ||
+      "Unknown Service";
     const ussdSteps = resolveJobUssdSteps({
       ...(service as { ussdSteps?: unknown; ussdFlow?: unknown; pin?: unknown } | null ?? {}),
       ussdSteps: job.ussdSteps,
@@ -59,7 +63,7 @@ export async function GET(request: NextRequest) {
         txId: job.txId,
         userId: job.userId,
         serviceId: job.serviceId,
-        serviceName: (service as { name?: string } | null)?.name || "Unknown Service",
+        serviceName,
         recipientNumber: job.recipientNumber,
         amount: job.amount,
         ussdSteps,

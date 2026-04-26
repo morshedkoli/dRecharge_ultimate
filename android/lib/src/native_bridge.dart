@@ -14,6 +14,31 @@ class NativeBridge {
     return _channel.invokeMethod<void>('openAccessibilitySettings');
   }
 
+  Future<void> syncBackgroundConfig({
+    required String baseUrl,
+    required bool isPoweredOn,
+    String? jwtToken,
+    String? deviceName,
+    String? simProvider,
+  }) async {
+    final payload = <String, dynamic>{
+      'baseUrl': baseUrl,
+      'isPoweredOn': isPoweredOn,
+    };
+    if (jwtToken != null) payload['jwtToken'] = jwtToken;
+    if (deviceName != null) payload['deviceName'] = deviceName;
+    if (simProvider != null) payload['simProvider'] = simProvider;
+    await _channel.invokeMethod<void>('syncBackgroundConfig', payload);
+  }
+
+  Future<void> clearBackgroundConfig() async {
+    await _channel.invokeMethod<void>('clearBackgroundConfig');
+  }
+
+  Future<void> startBackgroundService() async {
+    await _channel.invokeMethod<void>('startBackgroundService');
+  }
+
   // ── Structured step executor ─────────────────────────────────────────────
 
   /// Execute a list of structured [UssdStep]s.

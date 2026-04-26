@@ -48,6 +48,8 @@ export function AuditLogDrawer({ log, onClose }: { log: AuditLog; onClose: () =>
   const targetUid    = meta?.targetUid as string | undefined;
   const newRole      = meta?.newRole as string | undefined;
   const serviceId    = meta?.serviceId as string | undefined;
+  const serviceName  = meta?.serviceName as string | undefined;
+  const recipientNumber = meta?.recipientNumber as string | undefined;
   const adminNote    = meta?.adminNote as string | undefined;
   const type         = meta?.type as string | undefined;
 
@@ -86,10 +88,12 @@ export function AuditLogDrawer({ log, onClose }: { log: AuditLog; onClose: () =>
           </section>
 
           {/* Action-specific details */}
-          {(amount !== undefined || note || targetUid || newRole || serviceId || adminNote || type) && (
+          {(amount !== undefined || note || targetUid || newRole || serviceId || serviceName || recipientNumber || adminNote || type) && (
             <section>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Details</h3>
               <div className="space-y-2 text-sm">
+                {serviceName && <MetaRow label="Service" value={serviceName} />}
+                {recipientNumber && <MetaRow label="Number" value={recipientNumber} />}
                 {amount   !== undefined && <MetaRow label="Amount"     value={`৳ ${Number(amount).toFixed(2)}`} />}
                 {type     && <MetaRow label="Type"       value={type} />}
                 {note     && <MetaRow label="Note / Reason" value={note} />}

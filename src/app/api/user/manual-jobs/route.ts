@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       jobId: raw._id,
       txId: raw.txId,
       serviceId: raw.serviceId,
-      serviceName: srv?.name || raw.serviceId,
+      serviceName: srv?.name || raw.serviceName || raw.serviceId,
       serviceIcon: srv?.icon || null,
       amount: raw.amount,
       // Mask recipient if not claimed by me

@@ -37,6 +37,20 @@ function MetricCard({ label, value, sub, loading }: { label: string; value: stri
   );
 }
 
+function formatLogAmount(value: unknown) {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return `৳ ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function logRequestSummary(log: AuditLog) {
+  const meta = log.meta || {};
+  const serviceName = typeof meta.serviceName === "string" ? meta.serviceName : "";
+  const recipientNumber = typeof meta.recipientNumber === "string" ? meta.recipientNumber : "";
+  const amount = formatLogAmount(meta.amount);
+  return [serviceName, recipientNumber, amount].filter(Boolean).join(" · ");
+}
+
 export default function OverviewPage() {
   const { stats, loading: statsLoading } = useAdminStats();
   const { logs, loading: logsLoading } = useAuditLogs();
@@ -121,11 +135,16 @@ export default function OverviewPage() {
                   <button
                     key={log.id}
                     onClick={() => setSelectedLog(log)}
-                    className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left hover:bg-surface-container"
+                    className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left hover:bg-surface-container"
                   >
-                    <div className="flex items-center gap-2 truncate">
+                    <div className="flex min-w-0 items-start gap-2">
                       <div className={`h-2 w-2 shrink-0 rounded-full ${log.severity === "error" ? "bg-red-500" : log.severity === "warn" ? "bg-amber-500" : "bg-primary"}`} />
-                      <span className="truncate text-sm font-medium">{log.action}</span>
+                      <div className="min-w-0">
+                        <span className="block truncate text-sm font-medium">{log.action}</span>
+                        {logRequestSummary(log) && (
+                          <span className="block truncate text-xs text-on-surface-variant/70">{logRequestSummary(log)}</span>
+                        )}
+                      </div>
                     </div>
                     <span className="shrink-0 text-xs text-on-surface-variant/50">{relativeTime(log.timestamp)}</span>
                   </button>

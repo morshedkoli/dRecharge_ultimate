@@ -33,6 +33,12 @@ class AgentForegroundService : Service() {
     companion object {
         const val CHANNEL_ID      = "drecharge_agent_channel"
         const val NOTIFICATION_ID = 1001
+        const val NATIVE_CONFIG_PREFS = "AgentNativeConfig"
+        const val KEY_BASE_URL = "agent_backend_base_url"
+        const val KEY_IS_POWERED_ON = "agent_is_powered_on"
+        const val KEY_JWT_TOKEN = "agent_jwt_token"
+        const val KEY_DEVICE_NAME = "agent_device_name"
+        const val KEY_SIM_PROVIDER = "agent_sim_provider"
         private const val POLL_INTERVAL_MS      = 15_000L
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
         private const val SMS_POLL_INTERVAL_MS  = 3_000L
@@ -54,12 +60,6 @@ class AgentForegroundService : Service() {
     private var screenWakeLock: PowerManager.WakeLock? = null
 
     // ─── Key names mirror Flutter's backend_service.dart constants ────────────
-    private val kBaseUrl     = "agent_backend_base_url"
-    private val kIsPoweredOn = "agent_is_powered_on"
-    private val kJwtToken    = "agent_jwt_token"
-    private val kDeviceName  = "agent_device_name"
-    private val kSimProvider = "agent_sim_provider"
-
     // ─── Lifecycle ───────────────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -90,6 +90,16 @@ class AgentForegroundService : Service() {
         // Re-schedule immediately so the OS restarts us ASAP
         scheduleWatchdog(delayMs = 5_000L)
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        scheduleWatchdog(delayMs = 5_000L)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(startIntent(this))
+        } else {
+            startService(startIntent(this))
+        }
+        super.onTaskRemoved(rootIntent)
     }
 
     // ─── Loop management ─────────────────────────────────────────────────────
@@ -141,13 +151,24 @@ class AgentForegroundService : Service() {
     )
 
     private fun readConfig(): AgentConfig {
+        val nativePrefs = getSharedPreferences(NATIVE_CONFIG_PREFS, MODE_PRIVATE)
         val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
-        val baseUrl     = prefs.getString("flutter.$kBaseUrl",     null) ?: DEFAULT_BASE_URL
-        val isPoweredOn = prefs.getBoolean("flutter.$kIsPoweredOn", true)
-        val deviceName  = prefs.getString("flutter.$kDeviceName",  "") ?: ""
-        val simProvider = prefs.getString("flutter.$kSimProvider", "") ?: ""
+        val baseUrl = nativePrefs.getString(KEY_BASE_URL, null)
+            ?: prefs.getString("flutter.$KEY_BASE_URL", null)
+            ?: DEFAULT_BASE_URL
+        val isPoweredOn = if (nativePrefs.contains(KEY_IS_POWERED_ON)) {
+            nativePrefs.getBoolean(KEY_IS_POWERED_ON, true)
+        } else {
+            prefs.getBoolean("flutter.$KEY_IS_POWERED_ON", true)
+        }
+        val deviceName = nativePrefs.getString(KEY_DEVICE_NAME, null)
+            ?: prefs.getString("flutter.$KEY_DEVICE_NAME", "")
+            ?: ""
+        val simProvider = nativePrefs.getString(KEY_SIM_PROVIDER, null)
+            ?: prefs.getString("flutter.$KEY_SIM_PROVIDER", "")
+            ?: ""
 
-        val jwtToken: String? = try {
+        val jwtToken: String? = nativePrefs.getString(KEY_JWT_TOKEN, null)?.takeIf { it.isNotBlank() } ?: try {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
             val encPrefs = EncryptedSharedPreferences.create(
                 "FlutterSecureStorage",
@@ -156,7 +177,7 @@ class AgentForegroundService : Service() {
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
             )
-            encPrefs.getString(kJwtToken, null)
+            encPrefs.getString(KEY_JWT_TOKEN, null)
         } catch (_: Exception) { null }
 
         return AgentConfig(
@@ -206,6 +227,7 @@ class AgentForegroundService : Service() {
         val steps   = parseUssdSteps(jobJson.optJSONArray("ussdSteps"))
 
         acquireScreenWake()
+        delay(1_000L)
 
         var rawSms        = ""
         var ussdSuccess   = false
@@ -231,7 +253,17 @@ class AgentForegroundService : Service() {
             if (ussdError.isNotBlank()) put("reason", ussdError)
         }
 
-        submitResult(config, jobId, txId, rawSms, parsedResult, executedSteps)
+        submitResult(
+            config,
+            jobId,
+            txId,
+            serviceName,
+            recipientNumber,
+            amount,
+            rawSms,
+            parsedResult,
+            executedSteps,
+        )
         updateNotification("Agent running…")
     }
 
@@ -291,6 +323,9 @@ class AgentForegroundService : Service() {
         config: AgentConfig,
         jobId: String,
         txId: String,
+        serviceName: String,
+        recipientNumber: String,
+        amount: Double,
         rawSms: String,
         parsedResult: JSONObject,
         executedSteps: List<Map<String, Any>>,
@@ -299,6 +334,9 @@ class AgentForegroundService : Service() {
         executedSteps.forEach { stepsArray.put(JSONObject(it)) }
         val body = JSONObject().apply {
             put("txId",               txId)
+            put("serviceName",        serviceName)
+            put("recipientNumber",    recipientNumber)
+            put("amount",             amount)
             put("rawSms",             rawSms)
             put("parsedResult",       parsedResult)
             put("ussdStepsExecuted",  stepsArray)
@@ -401,6 +439,12 @@ class AgentForegroundService : Service() {
                 PowerManager.ON_AFTER_RELEASE,
                 "drecharge:bg_job",
             ).also { it.acquire(90_000L) }
+            startActivity(
+                Intent(this, BackgroundWakeActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                },
+            )
         } catch (_: Exception) {}
     }
 
