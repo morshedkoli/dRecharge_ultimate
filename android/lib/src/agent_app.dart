@@ -98,7 +98,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed && !_processing) {
       _refreshCapabilities();
     }
   }
@@ -852,6 +852,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       onRunNow: _runQueueTick,
       onReloadSubscription: _refreshSubscription,
       onOpenSettings: () async {
+        if (_processing) return;
         await Navigator.push(
           context,
           MaterialPageRoute(
@@ -2382,6 +2383,18 @@ class _LicenseBannerState extends State<_LicenseBanner>
       duration: const Duration(milliseconds: 700),
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeIn);
+  }
+
+  @override
+  void didUpdateWidget(_LicenseBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.info?.logoFullUrl != widget.info?.logoFullUrl) {
+      setState(() {
+        _imageLoaded = false;
+        _imageError = false;
+      });
+      _fadeCtrl.reset();
+    }
   }
 
   @override

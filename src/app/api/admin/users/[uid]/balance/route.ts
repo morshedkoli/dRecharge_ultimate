@@ -30,10 +30,6 @@ export async function POST(request: NextRequest, { params }: Params) {
         const user = await User.findById(uid).session(dbSession);
         if (!user) throw new Error("User not found");
 
-        if (isDeduct && user.walletBalance < parsedAmount) {
-          throw new Error(`Insufficient balance. Current: ৳${user.walletBalance.toFixed(2)}`);
-        }
-
         user.walletBalance = isDeduct
           ? user.walletBalance - parsedAmount
           : user.walletBalance + parsedAmount;

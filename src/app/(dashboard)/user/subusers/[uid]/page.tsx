@@ -92,11 +92,6 @@ export default function SubUserDetailPage({ params }: { params: Promise<{ uid: s
   const [showDeductBalance, setShowDeductBalance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   
-  // Credit limit
-  const [showCreditLimit, setShowCreditLimit] = useState(false);
-  const [creditLimitInput, setCreditLimitInput] = useState("");
-  const [savingCredit, setSavingCredit] = useState(false);
-  
   // Admin tools
   const [showAdminTools, setShowAdminTools] = useState(false);
   const [newName, setNewName] = useState("");
@@ -141,18 +136,6 @@ export default function SubUserDetailPage({ params }: { params: Promise<{ uid: s
     finally { setSubmitting(false); }
   }
 
-  async function handleSetCreditLimit() {
-    const limit = parseFloat(creditLimitInput);
-    if (isNaN(limit) || limit < 0) { toast.error("Enter a valid credit limit"); return; }
-    setSavingCredit(true);
-    try {
-      await apiCall({ action: "setCreditLimit", limit });
-      setUser(u => u ? { ...u, creditLimit: limit } : u);
-      toast.success(`Credit limit set to ৳${limit.toFixed(2)}`);
-      setShowCreditLimit(false); setCreditLimitInput("");
-    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
-    finally { setSavingCredit(false); }
-  }
 
   async function handleChangeName() {
     if (!newName.trim()) { toast.error("Enter a new name"); return; }
@@ -360,35 +343,38 @@ export default function SubUserDetailPage({ params }: { params: Promise<{ uid: s
                 <Wallet className="w-4 h-4" /> Payment History <span className="ml-1.5 px-2 py-0.5 rounded-md bg-black/10 text-black/70 text-[10px]">{transactions.filter(tx => tx.type === "topup" || tx.type === "deduct").length}</span>
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="bg-surface-container/30">
-                    <th className="px-6 py-4 font-bold text-xs uppercase tracking-widest text-on-surface-variant font-manrope border-b border-black/[0.03]">ID / Date</th>
-                    <th className="px-6 py-4 font-bold text-xs uppercase tracking-widest text-on-surface-variant font-manrope border-b border-black/[0.03]">Type</th>
-                    <th className="px-6 py-4 font-bold text-xs uppercase tracking-widest text-on-surface-variant font-manrope border-b border-black/[0.03]">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/[0.03]">
-                  {(tab === "payments" ? transactions.filter(tx => tx.type === "topup" || tx.type === "deduct") : transactions).length === 0 ? (
-                    <tr><td colSpan={3} className="px-6 py-12 text-center text-on-surface-variant">No transactions found</td></tr>
-                  ) : (tab === "payments" ? transactions.filter(tx => tx.type === "topup" || tx.type === "deduct") : transactions).map(tx => (
-                    <tr key={tx.id} className="hover:bg-surface-container/30">
-                      <td className="px-6 py-4">
-                        <p className="font-mono text-xs font-semibold text-on-surface">{tx.id.slice(0, 8)}</p>
-                        <p className="text-[11px] text-on-surface-variant">{fullDateTime(tx.createdAt as string)}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider ${txTypeBadge[tx.type] || "bg-gray-100 text-gray-700"}`}>
-                          {tx.type}
-                        </span>
-                        {tx.note && <p className="text-xs text-on-surface-variant mt-1.5 line-clamp-1">{tx.note}</p>}
-                      </td>
-                      <td className="px-6 py-4 font-mono font-bold text-[#134235]">৳{tx.amount.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="p-4 space-y-2">
+              {(() => {
+                const items = tab === "payments"
+                  ? transactions.filter(tx => tx.type === "topup" || tx.type === "deduct")
+                  : transactions;
+                if (items.length === 0) return (
+                  <div className="py-12 text-center text-on-surface-variant">
+                    <Receipt className="w-8 h-8 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm font-manrope font-semibold">No transactions found</p>
+                  </div>
+                );
+                return items.map(tx => {
+                  const isCredit = tx.type === "topup" || tx.type === "refund";
+                  return (
+                    <div key={tx.id} className="flex items-center gap-3 bg-surface-container/30 hover:bg-surface-container/50 border border-black/[0.04] rounded-xl px-4 py-3 transition-colors">
+                      <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider font-manrope shrink-0 ${txTypeBadge[tx.type] || "bg-gray-100 text-gray-700"}`}>
+                        {tx.type}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-mono text-xs font-semibold text-on-surface">{tx.id.slice(0, 10)}</p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          {tx.note && <span className="text-[10px] text-on-surface-variant truncate">{tx.note}</span>}
+                          <span className="text-[10px] text-on-surface-variant">{relativeTime(tx.createdAt as string)}</span>
+                        </div>
+                      </div>
+                      <span className={`font-mono font-bold text-sm shrink-0 ${isCredit ? "text-primary" : "text-red-600"}`}>
+                        {isCredit ? "+" : "−"}৳{tx.amount.toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>
@@ -424,7 +410,7 @@ export default function SubUserDetailPage({ params }: { params: Promise<{ uid: s
             </div>
 
             <div className="pt-6 border-t border-black/5">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-orange-600">
                   <CreditCard className="w-4 h-4" />
                   <span className="font-manrope font-bold text-sm">Credit Limit</span>
@@ -433,10 +419,7 @@ export default function SubUserDetailPage({ params }: { params: Promise<{ uid: s
                   ৳{user.creditLimit.toFixed(2)}
                 </span>
               </div>
-              <button onClick={() => { setCreditLimitInput(user.creditLimit.toString()); setShowCreditLimit(true); }}
-                className="w-full py-2.5 text-xs font-bold font-manrope border border-orange-200 text-orange-600 bg-orange-50/50 hover:bg-orange-100 rounded-xl transition-all">
-                Manage Limit
-              </button>
+              <p className="text-[10px] text-on-surface-variant/60 font-manrope">Set by admin only. Used when wallet balance reaches ৳0.</p>
             </div>
           </div>
         </div>
@@ -459,45 +442,12 @@ export default function SubUserDetailPage({ params }: { params: Promise<{ uid: s
         icon={Minus} iconBg="bg-red-50" iconColor="text-red-500"
         inputColor="focus:ring-red-300"
         actionLabel="Return Balance" actionBg="bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20"
-        warning="This amount will be returned to your wallet. User must have sufficient balance."
+        warning="This amount will be returned to your wallet. Sub-user balance may go negative."
         amount={deductAmount} setAmount={setDeductAmount} note={deductNote} setNote={setDeductNote}
         submitting={submitting} onSubmit={() => handleTransferBalance("deduct")}
       />
 
-      {showCreditLimit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingCredit && setShowCreditLimit(false)} />
-          <div className="relative bg-white rounded-2xl border border-black/5 premium-shadow w-full max-w-sm">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-black/[0.03]">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-orange-50 text-orange-600"><CreditCard className="w-5 h-5" /></div>
-                <h3 className="font-manrope font-bold text-[#134235] text-lg">Set Credit Limit</h3>
-              </div>
-              <button onClick={() => setShowCreditLimit(false)} disabled={savingCredit} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-xl transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="px-4 py-3 bg-orange-50 border border-orange-100 rounded-xl text-xs text-orange-800 font-medium">
-                Set to 0 to disable credit.
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">Credit Limit (BDT)</label>
-                <input type="number" min="0" value={creditLimitInput} onChange={e => setCreditLimitInput(e.target.value)} placeholder="0"
-                  className="w-full border bg-surface rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all" />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button onClick={() => setShowCreditLimit(false)} disabled={savingCredit}
-                  className="flex-1 px-4 py-3 text-sm font-bold font-manrope border rounded-xl hover:bg-surface-container transition-colors">Cancel</button>
-                <button onClick={handleSetCreditLimit} disabled={savingCredit}
-                  className="flex-1 px-4 py-3 text-sm font-bold font-manrope text-white bg-orange-600 hover:bg-orange-700 rounded-xl transition-all">
-                  {savingCredit ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Save Limit"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

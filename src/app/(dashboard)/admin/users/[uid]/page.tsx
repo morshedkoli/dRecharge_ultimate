@@ -177,7 +177,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
     try {
       await callBalanceApi("deduct", amt, deductNote);
       toast.success(`৳${amt.toFixed(2)} deducted from wallet`);
-      setUser(u => u ? { ...u, walletBalance: Math.max(0, u.walletBalance - amt) } : u);
+      setUser(u => u ? { ...u, walletBalance: u.walletBalance - amt } : u);
       setShowDeductBalance(false); setDeductAmount(""); setDeductNote("");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Failed"); }
     finally { setSubmitting(false); }
@@ -621,102 +621,85 @@ export default function UserDetailPage({ params }: { params: Promise<{ uid: stri
           ))}
         </div>
 
-        {/* Transactions table */}
+
+        {/* Transactions cards */}
         {tab === "tx" && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[640px]">
-              <thead>
-                <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-                  <th className="px-8 py-4">Date</th>
-                  <th className="px-8 py-4">Type</th>
-                  <th className="px-8 py-4">Provider</th>
-                  <th className="px-8 py-4">Recipient / Note</th>
-                  <th className="px-8 py-4">Amount</th>
-                  <th className="px-8 py-4">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-black/[0.03]">
-                {transactions.map((tx) => {
-                  const isCredit = tx.type === "topup" || tx.type === "refund";
-                  const isAdminAdj = tx.type === "topup" || tx.type === "deduct";
-                  return (
-                    <tr key={tx.id} className="group hover:bg-surface-container/20 transition-colors">
-                      <td className="px-8 py-4 text-on-surface-variant text-xs whitespace-nowrap">{relativeTime(tx.createdAt)}</td>
-                      <td className="px-8 py-4">
-                        <span className={`text-[10px] px-3 py-1 rounded-full font-bold capitalize font-manrope uppercase tracking-wider ${txTypeBadge[tx.type] ?? "bg-surface-container text-on-surface-variant"}`}>
-                          {tx.type}
-                        </span>
-                      </td>
-                      <td className="px-8 py-4">
-                        {tx.serviceId
-                          ? <span className="text-xs bg-surface-container text-on-surface-variant px-2.5 py-1 rounded-lg font-mono">{tx.serviceId.slice(0, 8)}</span>
-                          : <span className="text-on-surface-variant/40">—</span>}
-                      </td>
-                      <td className="px-8 py-4 text-on-surface-variant">
-                        {isAdminAdj
-                          ? <span className="text-xs font-manrope">{tx.note || "Admin adjustment"}</span>
-                          : tx.recipientNumber ? <span className="font-mono text-sm">{maskNumber(tx.recipientNumber)}</span> : "—"}
-                      </td>
-                      <td className={`px-8 py-4 font-bold font-manrope ${isCredit ? "text-primary" : "text-red-600"}`}>
-                        {isCredit ? "+" : "−"}<WalletAmount amount={tx.amount} />
-                      </td>
-                      <td className="px-8 py-4"><StatusBadge status={tx.status} /></td>
-                    </tr>
-                  );
-                })}
-                {transactions.length === 0 && (
-                  <tr><td colSpan={6} className="px-8 py-14 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-surface-container mx-auto flex items-center justify-center mb-3">
-                      <Receipt className="w-6 h-6 text-on-surface-variant" />
+          <div className="p-5 space-y-2">
+            {transactions.length === 0 ? (
+              <div className="py-14 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-surface-container mx-auto flex items-center justify-center mb-3">
+                  <Receipt className="w-6 h-6 text-on-surface-variant" />
+                </div>
+                <p className="text-on-surface-variant text-sm font-manrope font-semibold">No transactions yet</p>
+              </div>
+            ) : transactions.map((tx) => {
+              const isCredit = tx.type === "topup" || tx.type === "refund";
+              const isAdminAdj = tx.type === "topup" || tx.type === "deduct";
+              return (
+                <div key={tx.id} className="flex items-center gap-4 bg-surface-container/30 hover:bg-surface-container/50 border border-black/[0.04] rounded-xl px-4 py-3 transition-colors">
+                  {/* Type badge */}
+                  <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider font-manrope shrink-0 ${txTypeBadge[tx.type] ?? "bg-surface-container text-on-surface-variant"}`}>
+                    {tx.type}
+                  </span>
+                  {/* Details */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-manrope text-on-surface truncate">
+                      {isAdminAdj
+                        ? (tx.note || "Admin adjustment")
+                        : tx.recipientNumber ? maskNumber(tx.recipientNumber) : "—"}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {tx.serviceId && (
+                        <span className="text-[10px] font-mono text-on-surface-variant bg-surface-container px-2 py-0.5 rounded">{tx.serviceId.slice(0, 8)}</span>
+                      )}
+                      <span className="text-[10px] text-on-surface-variant">{relativeTime(tx.createdAt)}</span>
                     </div>
-                    <p className="text-on-surface-variant text-sm font-manrope font-semibold">No transactions yet</p>
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
+                  </div>
+                  {/* Amount */}
+                  <span className={`font-bold font-manrope shrink-0 ${isCredit ? "text-primary" : "text-red-600"}`}>
+                    {isCredit ? "+" : "−"}<WalletAmount amount={tx.amount} />
+                  </span>
+                  {/* Status */}
+                  <div className="shrink-0"><StatusBadge status={tx.status} /></div>
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Balance requests table */}
+        {/* Balance requests cards */}
         {tab === "req" && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[480px]">
-              <thead>
-                <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-                  <th className="px-8 py-4">Date</th>
-                  <th className="px-8 py-4">Amount</th>
-                  <th className="px-8 py-4">Medium</th>
-                  <th className="px-8 py-4">Status</th>
-                  <th className="px-8 py-4">Note</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-black/[0.03]">
-                {requests.map((r) => (
-                  <tr key={r.id} className="group hover:bg-surface-container/20 transition-colors">
-                    <td className="px-8 py-4 text-on-surface-variant text-xs whitespace-nowrap">{relativeTime(r.createdAt)}</td>
-                    <td className="px-8 py-4 font-bold font-manrope text-[#134235]"><WalletAmount amount={r.amount} /></td>
-                    <td className="px-8 py-4">
-                      {r.medium
-                        ? <span className="text-xs bg-surface-container px-2.5 py-1 rounded-lg font-manrope font-semibold text-on-surface-variant">{r.medium}</span>
-                        : <span className="text-on-surface-variant/40">—</span>}
-                    </td>
-                    <td className="px-8 py-4"><StatusBadge status={r.status} /></td>
-                    <td className="px-8 py-4 text-on-surface-variant text-xs">{r.note || "—"}</td>
-                  </tr>
-                ))}
-                {requests.length === 0 && (
-                  <tr><td colSpan={5} className="px-8 py-14 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-surface-container mx-auto flex items-center justify-center mb-3">
-                      <CreditCard className="w-6 h-6 text-on-surface-variant" />
-                    </div>
-                    <p className="text-on-surface-variant text-sm font-manrope font-semibold">No balance requests</p>
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
+          <div className="p-5 space-y-2">
+            {requests.length === 0 ? (
+              <div className="py-14 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-surface-container mx-auto flex items-center justify-center mb-3">
+                  <CreditCard className="w-6 h-6 text-on-surface-variant" />
+                </div>
+                <p className="text-on-surface-variant text-sm font-manrope font-semibold">No balance requests</p>
+              </div>
+            ) : requests.map((r) => (
+              <div key={r.id} className="flex items-center gap-4 bg-surface-container/30 hover:bg-surface-container/50 border border-black/[0.04] rounded-xl px-4 py-3 transition-colors">
+                {/* Icon */}
+                <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-4 h-4 text-blue-600" />
+                </div>
+                {/* Details */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold font-manrope text-[#134235]"><WalletAmount amount={r.amount} /></p>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    {r.medium && <span className="text-[10px] font-semibold bg-surface-container text-on-surface-variant px-2 py-0.5 rounded font-manrope">{r.medium}</span>}
+                    {r.note && <span className="text-[10px] text-on-surface-variant truncate">{r.note}</span>}
+                    <span className="text-[10px] text-on-surface-variant">{relativeTime(r.createdAt)}</span>
+                  </div>
+                </div>
+                {/* Status */}
+                <div className="shrink-0"><StatusBadge status={r.status} /></div>
+              </div>
+            ))}
           </div>
         )}
       </div>
+
 
       {/* ── Add balance modal ─────────────────────────────────────────────── */}
       <BalanceModal

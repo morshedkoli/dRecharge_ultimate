@@ -73,9 +73,11 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
     );
   }
 
-  const balance = profile?.walletBalance || 0;
+  const balance = profile?.walletBalance ?? 0;
+  const creditLimit = profile?.creditLimit ?? 0;
+  const effectiveBalance = balance + creditLimit;
   const amount = parseFloat(amountStr) || 0;
-  const isOverBalance = amount > balance;
+  const isOverBalance = amount > effectiveBalance;
   const requiredRecipientLength = service.recipientLength || 11;
   const isValid = recipient.length === requiredRecipientLength && amount > 0 && !isOverBalance;
   const effectivePin = profile?.pin?.trim() || "1234";
@@ -196,7 +198,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                 {isOverBalance && (
                   <p className="text-red-500 text-xs mt-2 flex items-center font-bold font-manrope">
                     <Info className="w-3.5 h-3.5 mr-1 text-red-400" />
-                    Amount exceeds available balance.
+                    Amount exceeds available balance (৳{effectiveBalance.toFixed(2)}).
                   </p>
                 )}
               </div>
@@ -230,10 +232,15 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-[10px] font-bold font-manrope mb-4 uppercase tracking-widest backdrop-blur-md w-fit">
                  <Wallet className="w-3.5 h-3.5 text-emerald-300" /> Wallet Balance
               </div>
-              <p className="text-4xl font-extrabold mb-1 font-headline flex items-baseline tracking-tight">
-                <span className="text-xl mr-1 font-bold text-[#A2C2B5]">৳</span>
-                {balance.toLocaleString()}
-              </p>
+               <p className={`text-4xl font-extrabold mb-1 font-headline flex items-baseline tracking-tight ${balance < 0 ? 'text-red-300' : ''}`}>
+                 <span className="text-xl mr-1 font-bold text-[#A2C2B5]">৳</span>
+                 {balance < 0 ? '-' : ''}{Math.abs(balance).toLocaleString()}
+               </p>
+               {creditLimit > 0 && (
+                 <p className="text-xs text-emerald-300 mt-1">
+                   Credit: ৳{creditLimit.toLocaleString()} &nbsp;|&nbsp; Available: ৳{effectiveBalance.toFixed(2)}
+                 </p>
+               )}
             </div>
             {/* Decoration */}
             <div className="absolute right-0 bottom-0 w-48 h-48 bg-white/5 rounded-full blur-2xl translate-y-1/3 translate-x-1/4 pointer-events-none" />

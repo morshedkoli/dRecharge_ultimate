@@ -20,7 +20,8 @@
       "Bash(flutter pub *)",
       "Bash(flutter build *)",
       "mcp__plugin_claude-mem_mcp-search__smart_outline",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx\\)$\")"
     ]
   }
 }

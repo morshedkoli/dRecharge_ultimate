@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useProfile } from "@/lib/hooks/user/useProfile";
 import { toast } from "sonner";
-import { User, Lock, KeyRound, Save, Mail, Phone, Info, AtSign } from "lucide-react";
+import { User, Lock, KeyRound, Save, Mail, Phone, Info, AtSign, CreditCard } from "lucide-react";
 
 export default function UserProfilePage() {
   const { user } = useAuth();
@@ -166,6 +166,19 @@ export default function UserProfilePage() {
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5"/> Phone Number</p>
                 <p className="font-mono text-gray-900 bg-gray-50 px-2 py-1 rounded inline-block text-sm">{profile?.phoneNumber || "Not assigned"}</p>
+              </div>
+
+              {/* Credit Limit — read-only */}
+              <div className="pt-4 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                  <CreditCard className="w-3.5 h-3.5 text-orange-400" /> Credit Limit
+                </p>
+                {(profile?.creditLimit ?? 0) > 0 ? (
+                  <p className="font-bold text-orange-600 text-lg">৳{(profile?.creditLimit ?? 0).toLocaleString()}</p>
+                ) : (
+                  <p className="font-mono text-gray-400 text-sm italic">No credit assigned</p>
+                )}
+                <p className="text-[10px] text-gray-400 mt-1">Assigned by admin. Spend this when wallet balance is ৳0.</p>
               </div>
             </div>
             

@@ -74,8 +74,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ success: true, status: targetUser.status });
     }
 
-    // ── Set Credit Limit ────────────────────────────────────────────────────
+    // ── Set Credit Limit ── ADMIN ONLY ──────────────────────────────────────
     if (action === "setCreditLimit") {
+      // Only admins can set credit limits — regular users are blocked
+      const isAdmin = ["admin", "super_admin", "support_admin"].includes(session.role);
+      if (!isAdmin) {
+        return NextResponse.json({ error: "Only admins can set credit limits" }, { status: 403 });
+      }
       const limit = Number(body.limit);
       if (isNaN(limit) || limit < 0) {
         return NextResponse.json({ error: "Invalid credit limit" }, { status: 400 });
@@ -193,17 +198,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         let newChildBalance = child.walletBalance;
 
         if (type === "topup") {
-          // Parent sends money to child
-          if (parent.walletBalance + parent.creditLimit < numAmount) {
-            throw new Error("Insufficient parent balance to topup sub-user");
+          // Parent sends money to child — parent may use their creditLimit
+          const parentEffective = parent.walletBalance + (parent.creditLimit ?? 0);
+          if (parentEffective < numAmount) {
+            throw new Error(
+              `Insufficient balance. Your available balance is ৳${parentEffective.toFixed(2)} (wallet ৳${parent.walletBalance.toFixed(2)} + credit ৳${(parent.creditLimit ?? 0).toFixed(2)})`
+            );
           }
-          newParentBalance -= numAmount;
+          newParentBalance -= numAmount; // parent may go negative (into credit)
           newChildBalance += numAmount;
         } else {
-          // Parent deducts money from child (child returns to parent)
-          if (child.walletBalance + child.creditLimit < numAmount) {
-            throw new Error("Insufficient sub-user balance to deduct");
-          }
+          // Parent deducts money from child — child balance can go negative (no lower limit enforced)
           newChildBalance -= numAmount;
           newParentBalance += numAmount;
         }

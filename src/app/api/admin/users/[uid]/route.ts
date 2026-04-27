@@ -166,7 +166,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
     // ── Admin change username ───────────────────────────────────────────────
     if (action === "adminChangeUsername") {
-      const newUsername = String(body.username || "").trim();
+      const newUsername = String(body.username || "").trim().toLowerCase();
       if (!newUsername) {
         return NextResponse.json({ error: "Username cannot be empty" }, { status: 400 });
       }
@@ -296,6 +296,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         creditLimit: user.creditLimit ?? 0,
         walletLocked: user.walletLocked,
         status: user.status,
+        username: user.username,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
         phoneNumber: user.phoneNumber,

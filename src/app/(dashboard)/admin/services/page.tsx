@@ -264,81 +264,69 @@ export default function ServicesPage() {
                 <span className="text-xs text-on-surface-variant font-manrope font-bold">
                   ({group.items.length} service{group.items.length !== 1 ? "s" : ""})
                 </span>
-              </div>
+                        {/* Card grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {group.items.map((svc) => (
+                  <div key={svc.id} className="bg-white border border-black/5 rounded-2xl p-5 premium-shadow hover:border-primary/20 hover:shadow-md transition-all flex flex-col gap-4">
+                    {/* Top: icon + name + toggle */}
+                    <div className="flex items-start gap-3">
+                      <div className="w-11 h-11 shrink-0 bg-surface-container rounded-xl flex items-center justify-center overflow-hidden">
+                        {svc.icon ? (
+                          <img src={svc.icon} alt={svc.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Terminal className="w-5 h-5 text-on-surface-variant" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-on-surface font-manrope leading-tight">{svc.name}</p>
+                        {svc.description && (
+                          <p className="text-xs text-on-surface-variant mt-0.5 line-clamp-2">{svc.description}</p>
+                        )}
+                      </div>
+                    </div>
 
-              <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm min-w-[600px]">
-                    <thead>
-                      <tr className="text-[11px] font-extrabold text-on-surface-variant/60 uppercase tracking-[0.2em] bg-surface-container/30 font-manrope">
-                        <th className="px-8 py-4">Service</th>
-                        <th className="px-8 py-4">USSD Flow</th>
-                        <th className="px-8 py-4">SIM & PIN</th>
-                        <th className="px-8 py-4">Status</th>
-                        <th className="px-8 py-4">Updated</th>
-                        <th className="px-8 py-4" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-black/[0.03]">
-                      {group.items.map((svc) => (
-                        <tr key={svc.id} className="group hover:bg-surface-container/20 transition-colors">
-                          <td className="px-8 py-5">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 shrink-0 bg-surface-container rounded-xl flex items-center justify-center overflow-hidden">
-                                {svc.icon ? (
-                                  <img src={svc.icon} alt={svc.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <Terminal className="w-5 h-5 text-on-surface-variant" />
-                                )}
-                              </div>
-                              <div>
-                                <p className="font-bold text-on-surface font-manrope">{svc.name}</p>
-                                {svc.description && (
-                                  <p className="text-xs text-on-surface-variant mt-0.5 truncate max-w-[200px]">{svc.description}</p>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-8 py-5">
-                            {svc.ussdSteps && svc.ussdSteps.length > 0
-                              ? <span className="text-xs font-bold bg-surface-container px-2.5 py-1 rounded-lg font-manrope text-on-surface">{svc.ussdSteps.length} step{svc.ussdSteps.length !== 1 ? 's' : ''}</span>
-                              : <span className="text-xs text-amber-600 italic font-manrope">Not configured</span>}
-                          </td>
-                          <td className="px-8 py-5 text-on-surface-variant">
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-bold bg-surface-container px-2.5 py-1 rounded-full text-on-surface-variant font-manrope uppercase tracking-wider w-fit">SIM {svc.simSlot || 1}</span>
-                              <span className="text-xs font-mono">{svc.pin ? "••••" : <span className="text-outline">none</span>}</span>
-                            </div>
-                          </td>
-                          <td className="px-8 py-5">
-                            <button disabled={togglingId === svc.id} onClick={() => handleToggle(svc)}
-                              className="flex items-center gap-1.5 disabled:opacity-50 transition-opacity">
-                              {svc.isActive
-                                ? <><ToggleRight className="w-5 h-5 text-primary" /><span className="text-xs font-bold text-primary font-manrope">Active</span></>
-                                : <><ToggleLeft className="w-5 h-5 text-on-surface-variant" /><span className="text-xs font-bold text-on-surface-variant font-manrope">Inactive</span></>
-                              }
-                            </button>
-                          </td>
-                          <td className="px-8 py-5 text-xs text-on-surface-variant">
-                            {svc.updatedAt ? relativeTime(svc.updatedAt) : "—"}
-                          </td>
-                          <td className="px-8 py-5">
-                            <div className="flex items-center gap-2 justify-end">
-                              <Link href={`/admin/services/${svc.id}`}
-                                className="inline-flex items-center gap-1 text-primary text-xs font-bold font-manrope hover:underline">
-                                <Pencil className="w-3 h-3" /> Edit <ArrowRight className="w-3 h-3" />
-                              </Link>
-                              <button disabled={deletingId === svc.id} onClick={() => handleDelete(svc)}
-                                className="p-1.5 text-on-surface-variant hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    {/* Badges row */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* USSD steps */}
+                      {svc.ussdSteps && svc.ussdSteps.length > 0
+                        ? <span className="text-[10px] font-bold bg-surface-container px-2.5 py-1 rounded-lg font-manrope text-on-surface">{svc.ussdSteps.length} step{svc.ussdSteps.length !== 1 ? "s" : ""}</span>
+                        : <span className="text-[10px] text-amber-600 italic font-manrope bg-amber-50 px-2.5 py-1 rounded-lg">Not configured</span>
+                      }
+                      {/* SIM slot */}
+                      <span className="text-[10px] font-bold bg-surface-container px-2.5 py-1 rounded-full text-on-surface-variant font-manrope uppercase tracking-wider">SIM {svc.simSlot || 1}</span>
+                      {/* PIN */}
+                      <span className="text-[10px] font-mono font-bold text-on-surface-variant">{svc.pin ? "••••" : <span className="text-outline italic">no pin</span>}</span>
+                    </div>
+
+                    {/* Footer: status + updated + actions */}
+                    <div className="flex items-center justify-between pt-2 border-t border-black/[0.04]">
+                      <div className="flex items-center gap-3">
+                        {/* Toggle */}
+                        <button disabled={togglingId === svc.id} onClick={() => handleToggle(svc)}
+                          className="flex items-center gap-1.5 disabled:opacity-50 transition-opacity">
+                          {svc.isActive
+                            ? <><ToggleRight className="w-5 h-5 text-primary" /><span className="text-xs font-bold text-primary font-manrope">Active</span></>
+                            : <><ToggleLeft className="w-5 h-5 text-on-surface-variant" /><span className="text-xs font-bold text-on-surface-variant font-manrope">Inactive</span></>
+                          }
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Link href={`/admin/services/${svc.id}`}
+                          className="inline-flex items-center gap-1 text-primary text-xs font-bold font-manrope px-2.5 py-1.5 rounded-lg hover:bg-primary/5 transition-colors">
+                          <Pencil className="w-3 h-3" /> Edit
+                        </Link>
+                        <button disabled={deletingId === svc.id} onClick={() => handleDelete(svc)}
+                          className="p-1.5 text-on-surface-variant hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    {svc.updatedAt && (
+                      <p className="text-[10px] text-on-surface-variant/60 font-manrope -mt-2">Updated {relativeTime(svc.updatedAt)}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
               </div>
             </div>
           ))}

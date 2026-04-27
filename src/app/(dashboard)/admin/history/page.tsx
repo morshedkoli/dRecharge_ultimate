@@ -1,17 +1,17 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useModalEffect } from "@/lib/hooks/useModalEffect";
 import { useExecutionQueue } from "@/lib/hooks/admin/useExecutionQueue";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
-import { relativeTime, maskNumber } from "@/lib/utils";
+import { relativeTime } from "@/lib/utils";
 import { JobStatus } from "@/types";
 import Link from "next/link";
 import { ListOrdered, ArrowRight, ListChecks } from "lucide-react";
 
 import { toast } from "sonner";
 import { ExecutionJob } from "@/types";
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Activity, RefreshCw, CheckCheck, X } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Activity, RefreshCw, CheckCheck, X, Undo2 } from "lucide-react";
 
 function StatCard({ title, value, amount, icon: Icon, bg, text, border }: any) {
   return (
@@ -258,7 +258,8 @@ function JobCard({
   const [expanded, setExpanded] = useState(false);
   const [resending, setResending] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const [dialog, setDialog] = useState<null | "resend" | "complete">(null);
+  const [refunding, setRefunding] = useState(false);
+  const [dialog, setDialog] = useState<null | "resend" | "complete" | "refund">(null);
 
   async function doResend() {
     setDialog(null);
@@ -302,6 +303,26 @@ function JobCard({
     }
   }
 
+  async function doRefund() {
+    setDialog(null);
+    setRefunding(true);
+    try {
+      const res = await fetch(`/api/admin/history/${job.jobId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Admin refund" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to refund job");
+      toast.success("Job cancelled and amount refunded to user");
+      refetch();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to refund");
+    } finally {
+      setRefunding(false);
+    }
+  }
+
   return (
     <>
     <ConfirmDialog
@@ -312,6 +333,16 @@ function JobCard({
       variant="amber"
       icon={<RefreshCw className="w-5 h-5" />}
       onConfirm={doResend}
+      onCancel={() => setDialog(null)}
+    />
+    <ConfirmDialog
+      open={dialog === "refund"}
+      title="Refund & Cancel Job?"
+      description={`This will cancel the job and refund ৳${job.amount?.toLocaleString()} back to the user's wallet immediately. This cannot be undone.`}
+      confirmLabel="Yes, Refund"
+      variant="red"
+      icon={<Undo2 className="w-5 h-5" />}
+      onConfirm={doRefund}
       onCancel={() => setDialog(null)}
     />
     <CompleteJobDialog
@@ -409,12 +440,12 @@ function JobCard({
             </div>
           </div>
           
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-2 flex-wrap">
             {job.status === "waiting" && (
               <>
                 <button 
                   onClick={(e) => { e.stopPropagation(); setDialog("complete"); }}
-                  disabled={completing || resending}
+                  disabled={completing || resending || refunding}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-100 text-emerald-700 text-xs font-bold font-manrope rounded-xl hover:bg-emerald-200 transition-all disabled:opacity-50"
                 >
                   <CheckCheck className={`w-3.5 h-3.5 ${completing ? "animate-pulse" : ""}`} />
@@ -422,11 +453,19 @@ function JobCard({
                 </button>
                 <button 
                   onClick={(e) => { e.stopPropagation(); setDialog("resend"); }}
-                  disabled={resending || completing}
+                  disabled={resending || completing || refunding}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-amber-100 text-amber-700 text-xs font-bold font-manrope rounded-xl hover:bg-amber-200 transition-all disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${resending ? "animate-spin" : ""}`} /> 
                   {resending ? "Resending..." : "Resend Job"}
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setDialog("refund"); }}
+                  disabled={refunding || completing || resending}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-red-100 text-red-700 text-xs font-bold font-manrope rounded-xl hover:bg-red-200 transition-all disabled:opacity-50"
+                >
+                  <Undo2 className={`w-3.5 h-3.5 ${refunding ? "animate-spin" : ""}`} /> 
+                  {refunding ? "Refunding..." : "Refund & Cancel"}
                 </button>
               </>
             )}
@@ -457,6 +496,8 @@ export default function HistoryPage() {
   const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
   const [resendingBulk, setResendingBulk] = useState(false);
   const [showBulkDialog, setShowBulkDialog] = useState(false);
+  const [refundingBulk, setRefundingBulk] = useState(false);
+  const [showBulkRefundDialog, setShowBulkRefundDialog] = useState(false);
 
   const { jobs, pagination, stats, loading, refetch } = useExecutionQueue({ 
     status: statusFilter,
@@ -511,6 +552,27 @@ export default function HistoryPage() {
     }
   }
 
+  async function handleBulkRefund() {
+    if (!selectedJobs.size) return;
+    setRefundingBulk(true);
+    try {
+      const res = await fetch(`/api/admin/history/refund-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobIds: Array.from(selectedJobs) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to refund jobs");
+      toast.success(`Refunded ${data.refundedCount ?? selectedJobs.size} job(s) — amounts returned to users`);
+      setSelectedJobs(new Set());
+      refetch();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to refund jobs");
+    } finally {
+      setRefundingBulk(false);
+    }
+  }
+
   const counts = STATUS_TABS.map((s) => ({
     ...s,
     count: stats?.[s.key]?.count || 0,
@@ -530,6 +592,16 @@ export default function HistoryPage() {
       icon={<RefreshCw className="w-5 h-5" />}
       onConfirm={() => { setShowBulkDialog(false); handleBulkResend(); }}
       onCancel={() => setShowBulkDialog(false)}
+    />
+    <ConfirmDialog
+      open={showBulkRefundDialog}
+      title={`Refund ${selectedJobs.size} Job${selectedJobs.size > 1 ? "s" : ""}?`}
+      description={`This will cancel ${selectedJobs.size} waiting job${selectedJobs.size > 1 ? "s" : ""} and refund each user's amount back to their wallet immediately. This cannot be undone.`}
+      confirmLabel="Yes, Refund All"
+      variant="red"
+      icon={<Undo2 className="w-5 h-5" />}
+      onConfirm={() => { setShowBulkRefundDialog(false); handleBulkRefund(); }}
+      onCancel={() => setShowBulkRefundDialog(false)}
     />
     <div className="p-6 sm:p-10 max-w-4xl mx-auto space-y-8 pb-12">
       {/* Header */}
@@ -635,7 +707,7 @@ export default function HistoryPage() {
             </span>
             <span className="text-sm font-bold text-[#134235] font-manrope">jobs selected</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button 
               onClick={() => setSelectedJobs(new Set())}
               className="px-3 py-1.5 text-xs font-bold text-on-surface-variant hover:text-on-surface transition-colors font-manrope"
@@ -643,8 +715,16 @@ export default function HistoryPage() {
               Cancel
             </button>
             <button 
+              onClick={() => setShowBulkRefundDialog(true)}
+              disabled={refundingBulk || resendingBulk}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-xs font-bold font-manrope rounded-xl hover:bg-red-700 transition-all disabled:opacity-50 shadow-sm shadow-red-200"
+            >
+              <Undo2 className={`w-3.5 h-3.5 ${refundingBulk ? "animate-spin" : ""}`} /> 
+              {refundingBulk ? "Refunding..." : "Refund Selected"}
+            </button>
+            <button 
               onClick={() => setShowBulkDialog(true)}
-              disabled={resendingBulk}
+              disabled={resendingBulk || refundingBulk}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-white text-xs font-bold font-manrope rounded-xl hover:opacity-90 transition-all disabled:opacity-50 shadow-sm shadow-primary/20"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${resendingBulk ? "animate-spin" : ""}`} /> 

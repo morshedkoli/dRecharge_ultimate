@@ -71,16 +71,20 @@ export async function POST(request: NextRequest) {
     try {
       await dbSession.withTransaction(async () => {
         if (!isAdmin) {
-          const user = await User.findOneAndUpdate(
-            { _id: uid, walletBalance: { $gte: amount } },
-            { $inc: { walletBalance: -amount } },
-            { returnDocument: "after", session: dbSession },
-          );
-          if (!user) {
-            const existingUser = await User.findById(uid).session(dbSession);
-            if (!existingUser) throw new Error("User not found");
-            throw new Error("Insufficient balance");
+          // Load the user and check effective balance (wallet + creditLimit)
+          const user = await User.findById(uid).session(dbSession);
+          if (!user) throw new Error("User not found");
+
+          const effectiveBalance = user.walletBalance + (user.creditLimit ?? 0);
+          if (effectiveBalance < amount) {
+            throw new Error(
+              `Insufficient balance. Available: ৳${effectiveBalance.toFixed(2)} (balance ৳${user.walletBalance.toFixed(2)} + credit ৳${(user.creditLimit ?? 0).toFixed(2)})`
+            );
           }
+
+          // Deduct — balance may go negative (into credit territory)
+          user.walletBalance = user.walletBalance - amount;
+          await user.save({ session: dbSession });
         }
 
         txId = "TX_" + nanoid(20);
