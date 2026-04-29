@@ -15,11 +15,13 @@ type Params = { params: Promise<{ jobId: string }> };
 /** Build a regex from an SMS format template. */
 function buildRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
   if (!format?.trim()) return null;
-  let escaped = format.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  escaped = escaped.replace(/ /g, "\\s+");
+  let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  escaped = escaped.replace(/\s+/g, "\\s+");
+  const amountText = String(amount).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const amountWithOptionalSeparators = amountText.replace(/\\,/g, ",").replace(/\d/g, "$&[,]?");
   escaped = escaped
     .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .replace(/\\\{amount\\\}/g, `(?:${amount}\\.?0*|${amount})`)
+    .replace(/\\\{amount\\\}/g, `(?:${amountWithOptionalSeparators}(?:\\.0+)?|${amountText}(?:\\.0+)?)`)
     .replace(/\\\{trxId\\\}/g, "(?<trxId>\\w+)")
     .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
     .replace(/\\\{[^\\}]+\\\}/g, ".*?");

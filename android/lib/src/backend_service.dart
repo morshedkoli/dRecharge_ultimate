@@ -555,6 +555,33 @@ class BackendService {
 
   // ─── SMS Matching ─────────────────────────────────────────────────────────
 
+  /// Converts an admin SMS template into a tolerant regex.
+  ///
+  /// Literal text is escaped, whitespace is normalized, and any
+  /// `{placeholder}` token matches a short dynamic segment.
+  static RegExp? _templateRegex(String template) {
+    final trimmed = template.trim();
+    if (trimmed.isEmpty) return null;
+
+    final placeholder = RegExp(r'\{[^}]+\}');
+    final buffer = StringBuffer();
+    var index = 0;
+    for (final match in placeholder.allMatches(trimmed)) {
+      final literal = trimmed.substring(index, match.start);
+      buffer.write(RegExp.escape(literal).replaceAll(RegExp(r'\s+'), r'\s+'));
+      buffer.write(r'.*?');
+      index = match.end;
+    }
+    final tail = trimmed.substring(index);
+    buffer.write(RegExp.escape(tail).replaceAll(RegExp(r'\s+'), r'\s+'));
+
+    try {
+      return RegExp(buffer.toString(), caseSensitive: false, dotAll: true);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Shared SMS matching logic. Converts a format template with
   /// {placeholders} into a regex and scans the message list.
   static SmsEntry? _matchSms({
@@ -564,18 +591,14 @@ class BackendService {
   }) {
     if (messages.isEmpty || template.trim().isEmpty) return null;
 
-    // Build a loose regex: replace any {placeholder} with .*?
-    final patternStr = template.replaceAll(RegExp(r'\{[^}]+\}'), r'.*?');
-    try {
-      final regex = RegExp(patternStr, caseSensitive: false);
+    final regex = _templateRegex(template);
+    if (regex != null) {
       for (final msg in messages) {
         if (regex.hasMatch(msg.body)) return msg;
       }
-    } catch (_) {
-      // Regex failed — fall back to keyword search
+    } else {
       for (final msg in messages) {
-        if (msg.body.toLowerCase().contains('successful') ||
-            msg.body.contains(recipientNumber)) {
+        if (msg.body.toLowerCase().contains(template.trim().toLowerCase())) {
           return msg;
         }
       }
@@ -623,6 +646,7 @@ class BackendService {
         sms: successSms,
         isSuccess: true,
         failureReason: null,
+        matched: true,
       );
     }
 
@@ -637,10 +661,18 @@ class BackendService {
         sms: failureMatch.sms,
         isSuccess: false,
         failureReason: failureMatch.template.message,
+        matched: true,
       );
     }
 
-    return SmsMatchResult(sms: null, isSuccess: false, failureReason: null);
+    return SmsMatchResult(
+      sms: messages.isNotEmpty ? messages.first : null,
+      isSuccess: false,
+      failureReason: messages.isNotEmpty
+          ? 'SMS received but did not match any success or failure template.'
+          : null,
+      matched: false,
+    );
   }
 }
 
@@ -650,6 +682,7 @@ class SmsMatchResult {
     required this.sms,
     required this.isSuccess,
     required this.failureReason,
+    this.matched = false,
   });
 
   /// The matched SMS, or null if no template matched.
@@ -662,6 +695,9 @@ class SmsMatchResult {
   /// Null when no failure template matched or when [isSuccess] is true.
   final String? failureReason;
 
+  /// True only when the SMS matched a configured success or failure template.
+  final bool matched;
+
   /// Returns true if any template matched (success or failure).
-  bool get hasMatch => sms != null;
+  bool get hasMatch => matched;
 }

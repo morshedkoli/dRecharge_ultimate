@@ -661,7 +661,8 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
           : <String, dynamic>{
               'success': false,
               'reason':
-                  'No confirmation SMS received within ${liveJob.smsTimeout}s',
+                  matchResult.failureReason ??
+                      'No confirmation SMS received within ${liveJob.smsTimeout}s',
             };
 
       await BackendService.reportJobResult(
@@ -724,6 +725,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
   }) async {
     final timeoutSeconds = job.smsTimeout;
     final deadline = DateTime.now().add(Duration(seconds: timeoutSeconds));
+    SmsMatchResult? latestUnmatched;
     while (DateTime.now().isBefore(deadline)) {
       final messages = await _nativeBridge.readRecentSms(
         sinceMs: sinceMs,
@@ -734,8 +736,10 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         job: job,
       );
       if (matchResult.hasMatch) return matchResult;
+      if (matchResult.sms != null) latestUnmatched = matchResult;
       await Future<void>.delayed(const Duration(seconds: 4));
     }
+    if (latestUnmatched != null) return latestUnmatched;
     return const SmsMatchResult(
       sms: null,
       isSuccess: false,
