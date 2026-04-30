@@ -66,9 +66,10 @@ function Card({ title, icon: Icon, iconBg, children }: {
 // ── Step type badge ──────────────────────────────────────────────────────────
 
 const stepTypeStyle: Record<string, string> = {
-  dial:   "bg-blue-50 text-blue-700 border border-blue-100",
-  select: "bg-amber-50 text-amber-700 border border-amber-100",
-  input:  "bg-violet-50 text-violet-700 border border-violet-100",
+  dial:     "bg-blue-50 text-blue-700 border border-blue-100",
+  select:   "bg-amber-50 text-amber-700 border border-amber-100",
+  input:    "bg-violet-50 text-violet-700 border border-violet-100",
+  response: "bg-emerald-50 text-emerald-700 border border-emerald-100",
 };
 
 // ── Main page ────────────────────────────────────────────────────────────────
@@ -290,7 +291,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
                 </span>
 
                 {/* Value */}
-                <span className="font-mono text-sm text-on-surface flex-1 min-w-0 truncate">
+                <span className={`font-mono text-sm text-on-surface flex-1 min-w-0 ${step.type === 'response' ? 'whitespace-pre-wrap leading-relaxed' : 'truncate'}`}>
                   {step.value}
                 </span>
 

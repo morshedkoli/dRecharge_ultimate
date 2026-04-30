@@ -1,11 +1,166 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAdminSettings } from "@/lib/hooks/admin/useAdminSettings";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Loader2, Save, Plus, Trash2, Upload } from "lucide-react";
+import { Loader2, Save, Plus, Trash2, Upload, KeyRound, Eye, EyeOff, RefreshCw, CheckCircle2, Terminal } from "lucide-react";
 import { toast } from "sonner";
+
+/* ── Per-service PIN editor ──────────────────────────────────────────────── */
+interface ServicePin { id: string; name: string; icon?: string; pin: string; }
+
+function RechargePinCard() {
+  const [services, setServices]         = useState<ServicePin[]>([]);
+  const [pinValues, setPinValues]       = useState<Record<string, string>>({});
+  const [showPin, setShowPin]           = useState<Record<string, boolean>>({});
+  const [saving, setSaving]             = useState<Record<string, boolean>>({});
+  const [saved, setSaved]               = useState<Record<string, boolean>>({});
+  const [loadingPins, setLoadingPins]   = useState(true);
+
+  const fetchServices = useCallback(async () => {
+    setLoadingPins(true);
+    try {
+      const res  = await fetch("/api/admin/services", { credentials: "include" });
+      const data = await res.json();
+      if (data.services) {
+        setServices(data.services);
+        const initial: Record<string, string> = {};
+        data.services.forEach((s: ServicePin) => { initial[s.id] = s.pin ?? ""; });
+        setPinValues(initial);
+      }
+    } catch { toast.error("Failed to load services"); }
+    finally { setLoadingPins(false); }
+  }, []);
+
+  useEffect(() => { fetchServices(); }, [fetchServices]);
+
+  async function handleSavePin(svc: ServicePin) {
+    setSaving(prev => ({ ...prev, [svc.id]: true }));
+    try {
+      // PATCH only the pin field — send a full body because the API replaces all fields
+      const getRes  = await fetch(`/api/admin/services/${svc.id}`, { credentials: "include" });
+      const getData = await getRes.json();
+      if (!getRes.ok) throw new Error(getData.error || "Could not load service");
+      const full = getData.service;
+
+      const res = await fetch(`/api/admin/services/${svc.id}`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ ...full, pin: pinValues[svc.id] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Update failed");
+      setSaved(prev => ({ ...prev, [svc.id]: true }));
+      setServices(prev => prev.map(s => s.id === svc.id ? { ...s, pin: pinValues[svc.id] } : s));
+      toast.success(`PIN updated for ${svc.name}`);
+      setTimeout(() => setSaved(prev => ({ ...prev, [svc.id]: false })), 2000);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update PIN");
+    } finally {
+      setSaving(prev => ({ ...prev, [svc.id]: false }));
+    }
+  }
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-50 rounded-xl">
+              <KeyRound className="w-4 h-4 text-amber-600" />
+            </div>
+            <div>
+              <CardTitle>Recharge PIN</CardTitle>
+              <CardDescription>Update the secret PIN used by the agent for each recharge service.</CardDescription>
+            </div>
+          </div>
+          <button
+            onClick={fetchServices}
+            disabled={loadingPins}
+            className="p-2 hover:bg-surface-container rounded-xl transition-colors disabled:opacity-50"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 text-on-surface-variant ${loadingPins ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loadingPins ? (
+          <div className="flex items-center justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </div>
+        ) : services.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-10 text-on-surface-variant">
+            <Terminal className="w-8 h-8 opacity-30" />
+            <p className="text-sm">No services configured yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {services.map((svc) => (
+              <div
+                key={svc.id}
+                className="flex items-center gap-3 p-3 rounded-xl border border-black/[0.06] bg-surface-container/30 hover:border-primary/20 transition-colors"
+              >
+                {/* Service icon / initial */}
+                <div className="w-9 h-9 shrink-0 bg-white border border-black/[0.06] rounded-xl flex items-center justify-center overflow-hidden">
+                  {svc.icon ? (
+                    <img src={svc.icon} alt={svc.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <Terminal className="w-4 h-4 text-on-surface-variant" />
+                  )}
+                </div>
+
+                {/* Name */}
+                <div className="w-36 shrink-0">
+                  <p className="text-sm font-semibold text-on-surface font-manrope truncate">{svc.name}</p>
+                  <p className="text-[10px] text-on-surface-variant/60">
+                    {svc.pin ? "PIN set" : <span className="text-amber-600 italic">No PIN</span>}
+                  </p>
+                </div>
+
+                {/* PIN input */}
+                <div className="flex-1 relative">
+                  <input
+                    type={showPin[svc.id] ? "text" : "password"}
+                    value={pinValues[svc.id] ?? ""}
+                    onChange={(e) => setPinValues(prev => ({ ...prev, [svc.id]: e.target.value }))}
+                    placeholder="Enter PIN…"
+                    className="w-full pr-10 pl-4 py-2 bg-white border border-black/[0.08] rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(prev => ({ ...prev, [svc.id]: !prev[svc.id] }))}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant/40 hover:text-on-surface-variant transition-colors"
+                  >
+                    {showPin[svc.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {/* Save button */}
+                <button
+                  onClick={() => handleSavePin(svc)}
+                  disabled={saving[svc.id] || pinValues[svc.id] === (svc.pin ?? "")}
+                  className="shrink-0 flex items-center gap-1.5 px-4 py-2 bg-primary text-white text-xs font-bold font-manrope rounded-xl hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm shadow-primary/20"
+                >
+                  {saving[svc.id] ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : saved[svc.id] ? (
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  {saved[svc.id] ? "Saved" : "Save"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminSettingsPage() {
   const { settings, loading, updateSettings } = useAdminSettings();
@@ -225,6 +380,9 @@ export default function AdminSettingsPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* RECHARGE PIN */}
+        <RechargePinCard />
       </div>
     </div>
   );

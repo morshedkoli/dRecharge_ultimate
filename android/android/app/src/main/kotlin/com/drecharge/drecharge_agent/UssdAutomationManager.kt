@@ -96,10 +96,17 @@ object UssdAutomationManager {
 
         val interactionSteps = steps.filter { !it.isDial }
         if (interactionSteps.isEmpty()) {
-            mainHandler.postDelayed(
-                { completeSession(success = true, errorMessage = null) },
-                3500L,
-            )
+            // For single-step dial flows, wait up to stepTimeoutMs for the final dialog.
+            // If it doesn't appear, we just complete successfully.
+            val finalTimeout = Runnable {
+                val s = session
+                if (s === newSession) {
+                    completeSession(success = true, errorMessage = null, finalMessage = null)
+                }
+            }
+            newSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            newSession.timeoutRunnable = finalTimeout
+            mainHandler.postDelayed(finalTimeout, stepTimeoutMs.toLong())
         }
     }
 
@@ -146,10 +153,15 @@ object UssdAutomationManager {
 
         val interactionSteps = steps.filter { !it.isDial }
         if (interactionSteps.isEmpty()) {
-            mainHandler.postDelayed(
-                { completeSession(success = true, errorMessage = null) },
-                3500L,
-            )
+            val finalTimeout = Runnable {
+                val s = session
+                if (s === newSession) {
+                    completeSession(success = true, errorMessage = null, finalMessage = null)
+                }
+            }
+            newSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            newSession.timeoutRunnable = finalTimeout
+            mainHandler.postDelayed(finalTimeout, stepTimeoutMs.toLong())
         }
     }
 
@@ -198,10 +210,15 @@ object UssdAutomationManager {
         scheduleTimeout("Timed out waiting for the USSD dialog.", stepTimeoutMs.toLong())
 
         if (interactionSegments.isEmpty()) {
-            mainHandler.postDelayed(
-                { completeSession(success = true, errorMessage = null) },
-                3500L,
-            )
+            val finalTimeout = Runnable {
+                val s = session
+                if (s === newSession) {
+                    completeSession(success = true, errorMessage = null, finalMessage = null)
+                }
+            }
+            newSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            newSession.timeoutRunnable = finalTimeout
+            mainHandler.postDelayed(finalTimeout, stepTimeoutMs.toLong())
         }
     }
 
@@ -226,12 +243,13 @@ object UssdAutomationManager {
             }
         }
 
-        val signature = collectTexts(root).joinToString("|").trim()
+        val signature = collectTexts(root).joinToString("\n").trim()
         if (signature.isNotEmpty() && signature == activeSession.lastSignature) return
         activeSession.lastSignature = signature
 
         if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
-            completeSession(success = true, errorMessage = null)
+            // We've completed all inputs, this is the final USSD pop-up!
+            completeSession(success = true, errorMessage = null, finalMessage = signature)
             return
         }
 
@@ -310,10 +328,15 @@ object UssdAutomationManager {
                 activeSession.lastSignature = ""
 
                 if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
-                    mainHandler.postDelayed(
-                        { completeSession(success = true, errorMessage = null) },
-                        2500L,
-                    )
+                    val finalTimeout = Runnable {
+                        val s = session
+                        if (s === activeSession) {
+                            completeSession(success = true, errorMessage = null, finalMessage = null)
+                        }
+                    }
+                    activeSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+                    activeSession.timeoutRunnable = finalTimeout
+                    mainHandler.postDelayed(finalTimeout, activeSession.stepTimeoutMs.toLong())
                 } else {
                     scheduleTimeout(
                         "Timed out waiting for the next USSD prompt.",
@@ -384,11 +407,26 @@ object UssdAutomationManager {
         mainHandler.postDelayed(activeSession.timeoutRunnable!!, timeoutMs)
     }
 
-    private fun completeSession(success: Boolean, errorMessage: String?) {
+    private fun completeSession(success: Boolean, errorMessage: String?, finalMessage: String? = null) {
         val activeSession = session ?: return
         activeSession.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
         activeSession.isProcessingStep = false
         session = null
+
+        if (finalMessage != null && finalMessage.isNotEmpty()) {
+            val iso8601 = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.format(Date())
+            activeSession.executedSteps.add(
+                mapOf(
+                    "order"      to activeSession.executedSteps.size + 1,
+                    "type"       to "response",
+                    "value"      to finalMessage,
+                    "executedAt" to iso8601,
+                    "success"    to true,
+                )
+            )
+        }
 
         if (success) {
             activeSession.result?.success(activeSession.executedSteps)

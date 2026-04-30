@@ -33,7 +33,7 @@ interface FailureMatch {
   message: string;
 }
 
-type FinalJobOutcome = "done" | "failed" | "waiting";
+type FinalJobOutcome = "done" | "failed" | "waiting" | "processing";
 
 /** Try to match rawSms against each failure template. Returns first match. */
 function matchFailureTemplates(
@@ -142,12 +142,15 @@ export async function POST(request: NextRequest, { params }: Params) {
             }
           }
         } else if (!rawSms?.trim()) {
-          // No SMS received at all or the agent hit an execution issue before receiving one.
-          outcome = "waiting";
+          // No SMS received yet — USSD was executed but confirmation SMS hasn't
+          // arrived at the agent. Set status to "processing" (awaiting SMS).
+          // The agent will call POST /api/agent/queue/[jobId]/sms when the SMS
+          // arrives, which will resolve the job to done/failed.
+          outcome = "processing";
           isSuccess = false;
-          failureReason = clientResult?.reason || `No confirmation SMS received within ${job.smsTimeout}s.`;
+          failureReason = undefined; // not a failure — just pending SMS
           finalParsedResult.success = false;
-          finalParsedResult.reason = failureReason;
+          finalParsedResult.reason = "Awaiting confirmation SMS from agent.";
         }
 
         // ── Persist updates ─────────────────────────────────────────────────────

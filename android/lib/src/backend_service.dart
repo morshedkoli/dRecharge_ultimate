@@ -404,6 +404,20 @@ class BackendService {
     });
   }
 
+  /// Submit an SMS received after USSD execution to the server for matching.
+  /// The server will resolve the job to done/failed if the SMS matches a template.
+  /// Call this from the background SMS poller.
+  static Future<Map<String, dynamic>> sendJobSmsConfirmation({
+    required String jobId,
+    required String txId,
+    required String rawSms,
+  }) async {
+    return _authPost('/api/agent/queue/$jobId/sms', {
+      'txId': txId,
+      'rawSms': rawSms,
+    });
+  }
+
   // ─── Service Config ─────────────────────────────────────────────────────────
 
   static Future<ServiceConfig?> fetchService(String serviceId) async {
