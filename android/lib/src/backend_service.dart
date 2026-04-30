@@ -683,7 +683,7 @@ class BackendService {
       sms: messages.isNotEmpty ? messages.first : null,
       isSuccess: false,
       failureReason: messages.isNotEmpty
-          ? 'SMS received but did not match any success or failure template.'
+          ? 'USSD response received but did not match any template.'
           : null,
       matched: false,
     );

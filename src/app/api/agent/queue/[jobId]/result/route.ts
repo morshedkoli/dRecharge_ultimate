@@ -142,15 +142,15 @@ export async function POST(request: NextRequest, { params }: Params) {
             }
           }
         } else if (!rawSms?.trim()) {
-          // No SMS received yet — USSD was executed but confirmation SMS hasn't
-          // arrived at the agent. Set status to "processing" (awaiting SMS).
-          // The agent will call POST /api/agent/queue/[jobId]/sms when the SMS
-          // arrives, which will resolve the job to done/failed.
-          outcome = "processing";
+          // No USSD response text received.
+          // Since we rely on the USSD dialog response instead of SMS,
+          // an empty response means we cannot automatically verify it.
+          // Mark as "waiting" for manual review.
+          outcome = "waiting";
           isSuccess = false;
-          failureReason = undefined; // not a failure — just pending SMS
+          failureReason = "No response dialog text was captured from USSD.";
           finalParsedResult.success = false;
-          finalParsedResult.reason = "Awaiting confirmation SMS from agent.";
+          finalParsedResult.reason = failureReason;
         }
 
         // ── Persist updates ─────────────────────────────────────────────────────

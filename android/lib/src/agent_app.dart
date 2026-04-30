@@ -645,20 +645,39 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         return;
       }
 
-      // ── Quick SMS scan (5 s) immediately after USSD execution ──────────────
-      // Try to capture a same-second confirmation SMS before reporting.
-      final quickResult = await _quickSmsCheck(sinceMs: startedAtMs, job: liveJob);
-      final rawSmsImmediate = quickResult?.sms?.body ?? '';
+      // ── Extract USSD Response Text ─────────────────────────────────────────
+      final Map<String, dynamic>? ussdResponseStep = stepsExecuted
+          .cast<Map<String, dynamic>?>()
+          .lastWhere(
+            (s) => s != null && s['type'] == 'response',
+            orElse: () => null,
+          );
+      final String ussdResponseText = ussdResponseStep?['value'] as String? ?? '';
 
-      // Report result to server immediately — no blocking timeout.
-      // If we already have a matched SMS send it now; otherwise rawSms is empty
-      // and the server will set the job to "processing" (awaiting SMS).
+      // We no longer wait for a real SMS. The USSD text itself is evaluated.
+      SmsMatchResult? quickResult;
+
+      if (ussdResponseText.isNotEmpty) {
+        final mockSms = SmsEntry(
+          address: 'USSD',
+          body: ussdResponseText,
+          dateMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        quickResult = BackendService.matchIncomingSms(messages: [mockSms], job: liveJob);
+      }
+
+      // Report result to server immediately.
       final immediateParsedResult = (quickResult != null && quickResult.hasMatch)
           ? <String, dynamic>{
               'success': quickResult.isSuccess,
               if (quickResult.failureReason != null) 'reason': quickResult.failureReason,
             }
-          : <String, dynamic>{'success': false, 'reason': 'Awaiting SMS confirmation'};
+          : <String, dynamic>{
+              'success': false, 
+              'reason': ussdResponseText.isNotEmpty 
+                  ? 'USSD response did not match any template.' 
+                  : 'No USSD response received.',
+            };
 
       await BackendService.reportJobResult(
         jobId: liveJob.jobId,
@@ -666,7 +685,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         serviceName: liveJob.serviceName,
         recipientNumber: liveJob.recipientNumber,
         amount: liveJob.amount,
-        rawSms: rawSmsImmediate,
+        rawSms: ussdResponseText, // the server also treats this as the SMS text
         isSuccess: quickResult?.isSuccess ?? false,
         parsedResult: immediateParsedResult,
         ussdStepsExecuted: stepsExecuted,
@@ -674,25 +693,19 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       await _nativeBridge.releaseWakeLock().catchError((_) {});
 
       if (quickResult != null && quickResult.hasMatch) {
-        // Already confirmed — done.
         _appendLog(
           quickResult.isSuccess
               ? '✓ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}'
               : '✗ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
         );
-        if (mounted) setState(() => _status = 'Last job reported');
       } else {
-        // No SMS yet — start an indefinite background poller.
-        // It will call POST /api/agent/queue/[jobId]/sms when SMS arrives.
         _appendLog(
-          '⏳ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount} — awaiting SMS',
+          '⏳ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount} — Unrecognized response',
         );
-        if (mounted) setState(() => _status = 'Awaiting SMS for ${liveJob.serviceName}');
-        unawaited(_pollSmsUntilConfirmed(
-          sinceMs: startedAtMs,
-          job: liveJob,
-        ));
       }
+      
+      if (mounted) setState(() => _status = 'Last job reported');
+
     } catch (error) {
       _appendLog('Queue tick failed: $error');
       final errorStr = error.toString().toLowerCase();
@@ -725,72 +738,6 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       await _sendHeartbeat();
       if (mounted && _status.startsWith('Processing'))
         setState(() => _status = 'Idle');
-    }
-  }
-
-  /// Quickly scans for an SMS match for up to 5 seconds right after USSD execution.
-  /// Returns the match result if found, or null if no SMS arrived yet.
-  Future<SmsMatchResult?> _quickSmsCheck({
-    required int sinceMs,
-    required ExecutionJob job,
-  }) async {
-    const maxWait = Duration(seconds: 5);
-    final deadline = DateTime.now().add(maxWait);
-    while (DateTime.now().isBefore(deadline)) {
-      final messages = await _nativeBridge.readRecentSms(sinceMs: sinceMs, maxMessages: 12);
-      if (messages.isNotEmpty) {
-        final result = BackendService.matchIncomingSms(messages: messages, job: job);
-        if (result.hasMatch) return result;
-      }
-      await Future<void>.delayed(const Duration(seconds: 2));
-    }
-    return null;
-  }
-
-  /// Polls for an SMS indefinitely (no timeout) and calls
-  /// POST /api/agent/queue/[jobId]/sms when one arrives that matches.
-  /// This runs as a fire-and-forget background task after USSD execution.
-  Future<void> _pollSmsUntilConfirmed({
-    required int sinceMs,
-    required ExecutionJob job,
-  }) async {
-    const interval = Duration(seconds: 5);
-    bool resolved = false;
-    while (!resolved) {
-      await Future<void>.delayed(interval);
-      try {
-        final messages = await _nativeBridge.readRecentSms(sinceMs: sinceMs, maxMessages: 12);
-        if (messages.isEmpty) continue;
-
-        final result = BackendService.matchIncomingSms(messages: messages, job: job);
-
-        // If we have any SMS (matched or not), send it to the server to evaluate.
-        // The /sms endpoint will only resolve the job if it matches a template.
-        if (result.sms != null) {
-          final rawSms = result.sms!.body;
-          try {
-            await BackendService.sendJobSmsConfirmation(
-              jobId: job.jobId,
-              txId: job.txId,
-              rawSms: rawSms,
-            );
-            // Stop polling only when a template matched (server resolved the job).
-            if (result.hasMatch) {
-              resolved = true;
-              _appendLog(
-                result.isSuccess
-                    ? '✓ SMS confirmed: ${job.serviceName} → ${job.recipientNumber}'
-                    : '✗ SMS failure: ${job.serviceName} → ${job.recipientNumber}',
-              );
-              if (mounted) setState(() => _status = 'Idle');
-            }
-          } catch (e) {
-            debugPrint('[AgentApp] _pollSmsUntilConfirmed send error: $e');
-          }
-        }
-      } catch (e) {
-        debugPrint('[AgentApp] _pollSmsUntilConfirmed read error: $e');
-      }
     }
   }
 
