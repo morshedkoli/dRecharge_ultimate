@@ -109,7 +109,7 @@ export interface SmsFailureTemplate {
 
 export interface UssdStepResult {
   order: number;
-  type: "dial" | "select" | "input" | "wait";
+  type: "dial" | "select" | "input" | "wait" | "response";
   value: string;
   executedAt: Date | string;
   success: boolean;

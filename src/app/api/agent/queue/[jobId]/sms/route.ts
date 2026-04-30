@@ -56,9 +56,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     await connectDB();
     const dbSession = await mongoose.startSession();
 
-    let outcome: "done" | "failed" = "failed";
+    let outcome: string = "failed";
     let failureReason: string | undefined;
-    let finalParsedResult: Record<string, unknown> = {};
+    let finalParsedResult: { success: boolean; txRef?: string; amount?: number; reason?: string; balance?: string } = { success: false };
 
     try {
       await dbSession.withTransaction(async () => {
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         }
 
         // Persist resolution
-        job.status = outcome;
+        job.status = outcome as any;
         job.locked = false;
         job.rawSms = rawSms;
         job.parsedResult = finalParsedResult;
