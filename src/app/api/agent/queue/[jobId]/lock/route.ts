@@ -15,14 +15,18 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { jobId } = await params;
     await connectDB();
 
-    // Atomic: only lock if not already locked and status is queued
+    // Atomic: only lock if not already locked and status is queued.
+    // Increment attempt counter each time the job is picked up.
     const job = await ExecutionJob.findOneAndUpdate(
       { _id: jobId, locked: false, status: "queued" },
       {
-        locked: true,
-        lockedAt: new Date(),
-        lockedByDevice: agentSession.deviceId,
-        status: "processing",
+        $set: {
+          locked: true,
+          lockedAt: new Date(),
+          lockedByDevice: agentSession.deviceId,
+          status: "processing",
+        },
+        $inc: { attempt: 1 },
       },
       { returnDocument: "after" }
     );

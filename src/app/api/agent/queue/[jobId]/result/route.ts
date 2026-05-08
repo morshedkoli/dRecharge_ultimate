@@ -12,7 +12,10 @@ import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
 
-/** Build a regex from an SMS format template. */
+// Maximum infra-failure retries before escalating to "waiting"
+const MAX_INFRA_RETRIES = 5;
+
+/** Build a regex from an SMS/USSD format template. */
 function buildRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
   if (!format?.trim()) return null;
   let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -28,12 +31,10 @@ function buildRegex(format: string, recipientNumber: string, amount: number): Re
   try { return new RegExp(escaped, "i"); } catch { return null; }
 }
 
-interface FailureMatch {
-  matched: boolean;
-  message: string;
+/** True if the success template contains a {trxId} placeholder. */
+function templateRequiresTrxId(format: string): boolean {
+  return format.includes("{trxId}");
 }
-
-type FinalJobOutcome = "done" | "failed" | "waiting" | "processing";
 
 /** Try to match rawSms against each failure template. Returns first match. */
 function matchFailureTemplates(
@@ -41,15 +42,17 @@ function matchFailureTemplates(
   rawSms: string,
   recipientNumber: string,
   amount: number,
-): FailureMatch | null {
+): { message: string } | null {
   for (const ft of templates) {
     const regex = buildRegex(ft.template, recipientNumber, amount);
     if (regex && regex.test(rawSms)) {
-      return { matched: true, message: ft.message };
+      return { message: ft.message };
     }
   }
   return null;
 }
+
+type FinalJobOutcome = "done" | "failed" | "waiting" | "queued";
 
 // POST /api/agent/queue/[jobId]/result
 export async function POST(request: NextRequest, { params }: Params) {
@@ -73,13 +76,24 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const dbSession = await mongoose.startSession();
 
-    // The agent reports the raw execution result. The server tries to validate
-    // via templates, but trusts the agent's explicit success/failure signal when
-    // no template match is found (USSD responses differ from SMS format).
-    let outcome: FinalJobOutcome = clientResult?.success === true ? "done" : "waiting";
-    let isSuccess = clientResult?.success === true;
-    let failureReason: string | undefined = clientResult?.reason;
-    let finalParsedResult = { ...(clientResult || { success: isSuccess }) };
+    // Determine whether USSD steps actually ran on the device
+    const stepsRan = Array.isArray(ussdStepsExecuted) && ussdStepsExecuted.length > 0;
+    const hasUssdResponse = typeof rawSms === "string" && rawSms.trim().length > 0;
+
+    // Infrastructure failure: agent couldn't even dial USSD.
+    // This happens when the app loses accessibility/phone permission mid-job,
+    // or when the USSD call itself never connected.
+    // Detection: no steps ran AND no USSD response AND agent reported failure.
+    const isInfraFailure =
+      !hasUssdResponse &&
+      !stepsRan &&
+      clientResult?.success === false;
+
+    let outcome: FinalJobOutcome = "waiting";
+    let isSuccess = false;
+    let failureReason: string | undefined;
+    let finalParsedResult: { success: boolean; [key: string]: unknown } = { success: false };
+    let requeuedDueToInfra = false;
 
     try {
       await dbSession.withTransaction(async () => {
@@ -88,13 +102,43 @@ export async function POST(request: NextRequest, { params }: Params) {
 
         if (!job || !tx) throw new Error("Job or transaction not found");
 
-        // ── Server-side SMS/USSD validation ──────────────────────────────────────
-        if (rawSms?.trim()) {
-          // Get failure templates — prefer job-embedded snapshot, fall back to service
+        // ── Infrastructure failure: requeue or escalate ──────────────────────────
+        // When the agent app lost connectivity / accessibility, we should NOT
+        // refund the user. Instead put the job back in queue for the next agent
+        // tick. After MAX_INFRA_RETRIES we escalate to "waiting" for manual review.
+        if (isInfraFailure) {
+          if (job.attempt < MAX_INFRA_RETRIES) {
+            // Requeue for retry
+            job.status = "queued";
+            job.locked = false;
+            (job as any).lockedAt = undefined;
+            (job as any).lockedByDevice = undefined;
+            await job.save({ session: dbSession });
+
+            // Release device
+            await AgentDevice.findByIdAndUpdate(
+              agentSession.deviceId,
+              { currentJob: null, lastHeartbeat: new Date(), status: "online" },
+              { session: dbSession }
+            );
+
+            requeuedDueToInfra = true;
+            return; // exit transaction — job is requeued, no wallet changes
+          }
+
+          // Too many infra failures — escalate to waiting for manual review
+          outcome = "waiting";
+          isSuccess = false;
+          failureReason = `Agent could not execute the job after ${job.attempt} attempt(s). Manual review required.`;
+          finalParsedResult = { success: false, reason: failureReason };
+        }
+
+        // ── Template-based outcome determination ─────────────────────────────────
+        // Only runs when we have a real USSD response OR infra-failure escalation.
+        if (!requeuedDueToInfra && !isInfraFailure) {
+          // Load failure templates — prefer job snapshot, fall back to service
           let failureTemplates: { template: string; message: string }[] =
             (job.failureSmsTemplates as { template: string; message: string }[] | undefined) ?? [];
-
-          // If not embedded, fetch from service
           if (failureTemplates.length === 0) {
             const svc = await Service.findById(job.serviceId).lean();
             if (svc?.failureSmsTemplates?.length) {
@@ -103,106 +147,96 @@ export async function POST(request: NextRequest, { params }: Params) {
           }
 
           const successFormat = (job.successSmsFormat as string | undefined) ?? "";
+          const requiresTrxId = templateRequiresTrxId(successFormat);
 
-          // 1. Try success template (server-authoritative match)
-          const sRegex = successFormat ? buildRegex(successFormat, job.recipientNumber, job.amount) : null;
-          const successMatch = sRegex ? rawSms.match(sRegex) : null;
-          if (successMatch) {
-            outcome = "done";
-            isSuccess = true;
-            failureReason = undefined;
-            finalParsedResult.success = true;
-            if (successMatch.groups?.trxId) finalParsedResult.txRef = successMatch.groups.trxId;
-            if (successMatch.groups?.balance) finalParsedResult.balance = successMatch.groups.balance;
-          } else {
-            // 2. Try each failure template
-            const failureMatch = matchFailureTemplates(
-              failureTemplates, rawSms, job.recipientNumber, job.amount
-            );
-            if (failureMatch) {
-              // Explicit failure template matched — mark failed
-              outcome = "failed";
-              isSuccess = false;
-              failureReason = failureMatch.message;
-              finalParsedResult.success = false;
-              finalParsedResult.reason = failureMatch.message;
-            } else {
-              // No template matched either way.
-              // Trust the agent's explicit result: if the agent said success=true,
-              // mark as done. If the agent said failure, mark as failed.
-              // Only use "waiting" when the agent was ambiguous (no parsedResult).
-              if (clientResult?.success === true) {
-                // Agent explicitly confirmed success via USSD response
+          if (hasUssdResponse) {
+            // ── 1. Try success template ────────────────────────────────────────
+            const sRegex = successFormat ? buildRegex(successFormat, job.recipientNumber, job.amount) : null;
+            const successMatch = sRegex ? rawSms.match(sRegex) : null;
+
+            if (successMatch) {
+              // Template matched. If template requires a trxId, it must be captured.
+              const capturedTrxId = successMatch.groups?.trxId;
+              if (requiresTrxId && !capturedTrxId) {
+                // Template has {trxId} but wasn't captured — treat as partial match → waiting
+                outcome = "waiting";
+                isSuccess = false;
+                failureReason = "Success template matched but transaction ID could not be extracted.";
+                finalParsedResult = { success: false, reason: failureReason };
+              } else {
+                // Clean success
                 outcome = "done";
                 isSuccess = true;
                 failureReason = undefined;
-                finalParsedResult.success = true;
-              } else if (clientResult?.success === false && clientResult?.reason) {
-                // Agent explicitly reported failure with a reason
+                finalParsedResult = { success: true };
+                if (capturedTrxId) finalParsedResult.txRef = capturedTrxId;
+                if (successMatch.groups?.balance) finalParsedResult.balance = successMatch.groups.balance;
+              }
+            } else {
+              // ── 2. Try failure templates ─────────────────────────────────────
+              const failureMatch = matchFailureTemplates(
+                failureTemplates, rawSms, job.recipientNumber, job.amount
+              );
+              if (failureMatch) {
+                // Failure template matched → refund
                 outcome = "failed";
                 isSuccess = false;
-                failureReason = clientResult.reason;
-                finalParsedResult.success = false;
-                finalParsedResult.reason = failureReason;
+                failureReason = failureMatch.message;
+                finalParsedResult = { success: false, reason: failureReason };
               } else {
-                // Agent was ambiguous — needs manual review
+                // Neither template matched → manual review, no refund
                 outcome = "waiting";
                 isSuccess = false;
-                failureReason = successFormat
-                  ? "Transaction could not be confirmed automatically — response did not match any template."
-                  : "Transaction result could not be determined automatically.";
-                finalParsedResult.success = false;
-                finalParsedResult.reason = failureReason;
+                failureReason = "USSD response did not match any configured success or failure template.";
+                finalParsedResult = { success: false, reason: failureReason };
               }
             }
-          }
-        } else {
-          // No USSD response text received.
-          // Trust agent's explicit result if provided; otherwise mark waiting.
-          if (clientResult?.success === true) {
-            outcome = "done";
-            isSuccess = true;
-            failureReason = undefined;
-            finalParsedResult.success = true;
-          } else if (clientResult?.success === false && clientResult?.reason) {
-            outcome = "failed";
-            isSuccess = false;
-            failureReason = clientResult.reason;
-            finalParsedResult.success = false;
-            finalParsedResult.reason = failureReason;
           } else {
-            // Truly ambiguous — no response text and no clear agent result
+            // USSD steps ran (stepsRan=true) but no response text captured,
+            // OR we have no information at all. Manual review required.
             outcome = "waiting";
             isSuccess = false;
-            failureReason = "No USSD response text was captured. Manual review required.";
-            finalParsedResult.success = false;
-            finalParsedResult.reason = failureReason;
+            failureReason = stepsRan
+              ? "USSD steps executed but no response dialog text was captured."
+              : "No USSD response received and no steps executed.";
+            finalParsedResult = { success: false, reason: failureReason };
           }
         }
 
-        // ── Persist updates ─────────────────────────────────────────────────────
+        if (requeuedDueToInfra) return; // already saved above
+
+        // ── Persist final outcome ────────────────────────────────────────────────
         job.status = outcome;
         job.locked = false;
-        job.rawSms = rawSms;
+        job.rawSms = rawSms ?? "";
         job.parsedResult = finalParsedResult;
         job.ussdStepsExecuted = ussdStepsExecuted || [];
         job.completedAt = new Date();
         await job.save({ session: dbSession });
 
-        tx.status = outcome === "done" ? "complete" : outcome === "failed" ? "failed" : "waiting";
+        // Map job outcome → transaction status
+        const txStatus = outcome === "done" ? "complete"
+                       : outcome === "failed" ? "failed"
+                       : "waiting";
+        tx.status = txStatus;
         if (outcome !== "done" && failureReason) (tx as any).failureReason = failureReason;
-        tx.completedAt = new Date();
+        if (outcome !== "waiting") tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 
+        // Wallet:
+        //   done    → just unlock (money spent, service delivered)
+        //   failed  → unlock + full refund
+        //   waiting → keep locked (manual admin decision pending)
         if (outcome === "failed") {
           await User.findByIdAndUpdate(
             tx.userId,
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
             { session: dbSession }
           );
-        } else {
+        } else if (outcome === "done") {
           await User.findByIdAndUpdate(tx.userId, { walletLocked: false }, { session: dbSession });
         }
+        // "waiting" → wallet stays locked until admin resolves
 
         await AgentDevice.findByIdAndUpdate(
           agentSession.deviceId,
@@ -214,8 +248,22 @@ export async function POST(request: NextRequest, { params }: Params) {
       await dbSession.endSession();
     }
 
-    const finalOutcome = outcome as FinalJobOutcome;
+    // Short-circuit: job was requeued, no notifications needed
+    if (requeuedDueToInfra) {
+      await writeLog({
+        action: "JOB_REQUEUED",
+        entityId: jobId,
+        severity: "info",
+        meta: {
+          jobId,
+          deviceId: agentSession.deviceId,
+          reason: "Infrastructure failure — requeued for retry",
+        },
+      });
+      return NextResponse.json({ success: true, requeued: true });
+    }
 
+    // ── Audit log ──────────────────────────────────────────────────────────────
     const tx = await Transaction.findById(txId).lean();
     const service = tx?.serviceId ? await Service.findById(tx.serviceId).lean() : null;
     const serviceName =
@@ -236,8 +284,14 @@ export async function POST(request: NextRequest, { params }: Params) {
             ? Number(agentAmount)
             : undefined;
 
+    const finalOutcome = outcome as string;
+    const logAction =
+      finalOutcome === "done" ? "TX_COMPLETED"
+      : finalOutcome === "failed" ? "TX_FAILED"
+      : "TX_WAITING";
+
     await writeLog({
-      action: finalOutcome === "done" ? "TX_COMPLETED" : finalOutcome === "failed" ? "TX_FAILED" : "TX_WAITING",
+      action: logAction,
       entityId: txId,
       severity: finalOutcome === "done" ? "info" : "warn",
       meta: {
@@ -248,11 +302,11 @@ export async function POST(request: NextRequest, { params }: Params) {
         amount,
         parsedResult: finalParsedResult,
         failureReason,
-        outcome: finalOutcome,
+        outcome,
       },
     });
 
-    // Notify the user based on the final authoritative outcome.
+    // ── User notifications ─────────────────────────────────────────────────────
     try {
       if (tx) {
         if (finalOutcome === "done") {
