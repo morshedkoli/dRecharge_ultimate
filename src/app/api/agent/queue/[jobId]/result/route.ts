@@ -73,8 +73,9 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const dbSession = await mongoose.startSession();
 
-    // The agent reports the raw execution result, but the server decides whether the
-    // request is confirmed, failed, or needs manual review.
+    // The agent reports the raw execution result. The server tries to validate
+    // via templates, but trusts the agent's explicit success/failure signal when
+    // no template match is found (USSD responses differ from SMS format).
     let outcome: FinalJobOutcome = clientResult?.success === true ? "done" : "waiting";
     let isSuccess = clientResult?.success === true;
     let failureReason: string | undefined = clientResult?.reason;
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
         if (!job || !tx) throw new Error("Job or transaction not found");
 
-        // ── Server-side SMS validation (authoritative) ───────────────────────────
+        // ── Server-side SMS/USSD validation ──────────────────────────────────────
         if (rawSms?.trim()) {
           // Get failure templates — prefer job-embedded snapshot, fall back to service
           let failureTemplates: { template: string; message: string }[] =
@@ -103,8 +104,8 @@ export async function POST(request: NextRequest, { params }: Params) {
 
           const successFormat = (job.successSmsFormat as string | undefined) ?? "";
 
-          // 1. Try success template
-          const sRegex = buildRegex(successFormat, job.recipientNumber, job.amount);
+          // 1. Try success template (server-authoritative match)
+          const sRegex = successFormat ? buildRegex(successFormat, job.recipientNumber, job.amount) : null;
           const successMatch = sRegex ? rawSms.match(sRegex) : null;
           if (successMatch) {
             outcome = "done";
@@ -119,38 +120,64 @@ export async function POST(request: NextRequest, { params }: Params) {
               failureTemplates, rawSms, job.recipientNumber, job.amount
             );
             if (failureMatch) {
+              // Explicit failure template matched — mark failed
               outcome = "failed";
               isSuccess = false;
               failureReason = failureMatch.message;
               finalParsedResult.success = false;
               finalParsedResult.reason = failureMatch.message;
-            } else if (successFormat) {
-              // Success template configured but SMS didn't match — needs manual review
-              outcome = "waiting";
-              isSuccess = false;
-              failureReason = "Transaction could not be confirmed automatically — SMS did not match any success or failure template.";
-              finalParsedResult.success = false;
-              finalParsedResult.reason = failureReason;
             } else {
-              // No success template — failure templates already checked above, trust agent's result
-              isSuccess = clientResult?.success === true;
-              outcome = isSuccess ? "done" : "waiting";
-              if (!isSuccess) {
-                failureReason = clientResult?.reason || "Transaction failed.";
+              // No template matched either way.
+              // Trust the agent's explicit result: if the agent said success=true,
+              // mark as done. If the agent said failure, mark as failed.
+              // Only use "waiting" when the agent was ambiguous (no parsedResult).
+              if (clientResult?.success === true) {
+                // Agent explicitly confirmed success via USSD response
+                outcome = "done";
+                isSuccess = true;
+                failureReason = undefined;
+                finalParsedResult.success = true;
+              } else if (clientResult?.success === false && clientResult?.reason) {
+                // Agent explicitly reported failure with a reason
+                outcome = "failed";
+                isSuccess = false;
+                failureReason = clientResult.reason;
+                finalParsedResult.success = false;
+                finalParsedResult.reason = failureReason;
+              } else {
+                // Agent was ambiguous — needs manual review
+                outcome = "waiting";
+                isSuccess = false;
+                failureReason = successFormat
+                  ? "Transaction could not be confirmed automatically — response did not match any template."
+                  : "Transaction result could not be determined automatically.";
+                finalParsedResult.success = false;
                 finalParsedResult.reason = failureReason;
               }
             }
           }
-        } else if (!rawSms?.trim()) {
+        } else {
           // No USSD response text received.
-          // Since we rely on the USSD dialog response instead of SMS,
-          // an empty response means we cannot automatically verify it.
-          // Mark as "waiting" for manual review.
-          outcome = "waiting";
-          isSuccess = false;
-          failureReason = "No response dialog text was captured from USSD.";
-          finalParsedResult.success = false;
-          finalParsedResult.reason = failureReason;
+          // Trust agent's explicit result if provided; otherwise mark waiting.
+          if (clientResult?.success === true) {
+            outcome = "done";
+            isSuccess = true;
+            failureReason = undefined;
+            finalParsedResult.success = true;
+          } else if (clientResult?.success === false && clientResult?.reason) {
+            outcome = "failed";
+            isSuccess = false;
+            failureReason = clientResult.reason;
+            finalParsedResult.success = false;
+            finalParsedResult.reason = failureReason;
+          } else {
+            // Truly ambiguous — no response text and no clear agent result
+            outcome = "waiting";
+            isSuccess = false;
+            failureReason = "No USSD response text was captured. Manual review required.";
+            finalParsedResult.success = false;
+            finalParsedResult.reason = failureReason;
+          }
         }
 
         // ── Persist updates ─────────────────────────────────────────────────────

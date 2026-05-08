@@ -85,9 +85,14 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     completedAt: { type: Date },
   },
   {
-    timestamps: { createdAt: "queuedAt", updatedAt: "updatedAt" },
+    timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" },
   }
 );
+
+// queuedAt is kept as a virtual alias for backward compatibility
+ExecutionJobSchema.virtual("queuedAt").get(function (this: IExecutionJob) {
+  return this.createdAt;
+});
 
 ExecutionJobSchema.index({ status: 1, createdAt: 1 });
 ExecutionJobSchema.index({ locked: 1, status: 1, lockedAt: 1 });

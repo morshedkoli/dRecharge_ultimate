@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       locked: { $ne: true },
       serviceId: { $in: assignedServices },
     })
-      .sort({ queuedAt: 1, createdAt: 1 })
+      .sort({ createdAt: 1 })
       .lean();
 
     if (!job) return NextResponse.json({ job: null });

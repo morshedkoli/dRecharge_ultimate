@@ -4,7 +4,7 @@ import ExecutionJob from "@/lib/db/models/ExecutionJob";
 import Transaction from "@/lib/db/models/Transaction";
 import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
-import { notifyTransactionCancelled } from "@/lib/notifications";
+import { notifyTransactionCancelled, notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
 import mongoose from "mongoose";
 
@@ -126,6 +126,28 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       entityId: txId,
       meta: { jobId, adminCompleted: true, txRef, senderNumber, note },
     });
+
+    // Notify the user about the manual resolution
+    try {
+      const resolvedTx = await Transaction.findById(txId).lean();
+      if (resolvedTx) {
+        if (isSuccess) {
+          await notifyTransactionCompleted(
+            resolvedTx.userId,
+            resolvedTx.amount,
+            resolvedTx.recipientNumber ?? ""
+          );
+        } else {
+          await notifyTransactionFailed(
+            resolvedTx.userId,
+            resolvedTx.amount,
+            resolvedTx.recipientNumber ?? "",
+            note || "Admin marked as failed"
+          );
+        }
+      }
+    } catch { /* non-critical */ }
+
     return NextResponse.json({ success: true });
   });
 }
