@@ -107,12 +107,25 @@ export async function POST(request: NextRequest, { params }: Params) {
         // refund the user. Instead put the job back in queue for the next agent
         // tick. After MAX_INFRA_RETRIES we escalate to "waiting" for manual review.
         if (isInfraFailure) {
+          // Always log the infra attempt so admin can see what happened
+          const infraLogEntry = {
+            attempt: job.attempt,
+            ussdResponse: rawSms ?? "",
+            outcome: job.attempt < MAX_INFRA_RETRIES ? "queued" : "waiting",
+            failureReason: clientResult?.reason || "Agent could not execute USSD (system/permission error)",
+            deviceId: agentSession.deviceId,
+            stepsExecuted: ussdStepsExecuted || [],
+            executedAt: new Date(),
+          };
+
           if (job.attempt < MAX_INFRA_RETRIES) {
             // Requeue for retry
             job.status = "queued";
             job.locked = false;
             (job as any).lockedAt = undefined;
             (job as any).lockedByDevice = undefined;
+            if (!job.executionLogs) (job as any).executionLogs = [];
+            (job as any).executionLogs.push(infraLogEntry);
             await job.save({ session: dbSession });
 
             // Release device
@@ -210,8 +223,22 @@ export async function POST(request: NextRequest, { params }: Params) {
         job.locked = false;
         job.rawSms = rawSms ?? "";
         job.parsedResult = finalParsedResult;
-        job.ussdStepsExecuted = ussdStepsExecuted || [];
+        job.ussdStepsExecuted = ussdStepsExecuted || [];   // latest attempt steps
         job.completedAt = new Date();
+
+        // Append this attempt to the execution log so admins can see full history
+        const logEntry = {
+          attempt: job.attempt,
+          ussdResponse: rawSms ?? "",
+          outcome: outcome as string,
+          failureReason: failureReason,
+          deviceId: agentSession.deviceId,
+          stepsExecuted: ussdStepsExecuted || [],
+          executedAt: new Date(),
+        };
+        if (!job.executionLogs) (job as any).executionLogs = [];
+        (job as any).executionLogs.push(logEntry);
+
         await job.save({ session: dbSession });
 
         // Map job outcome → transaction status

@@ -36,6 +36,15 @@ export interface IExecutionJob extends Document<string> {
     reason?: string;
   };
   ussdStepsExecuted?: object[];
+  executionLogs?: {
+    attempt: number;
+    ussdResponse: string;       // raw USSD dialog text captured
+    outcome: string;            // "done" | "failed" | "waiting" | "queued" (requeued)
+    failureReason?: string;
+    deviceId?: string;
+    stepsExecuted?: object[];
+    executedAt: Date;
+  }[];
   queuedAt?: Date;
   createdAt: Date;
   completedAt?: Date;
@@ -82,6 +91,20 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     rawSms: { type: String },
     parsedResult: { type: Schema.Types.Mixed },
     ussdStepsExecuted: [{ type: Schema.Types.Mixed }],
+    executionLogs: {
+      type: [
+        {
+          attempt:      { type: Number },
+          ussdResponse: { type: String, default: "" },
+          outcome:      { type: String },
+          failureReason:{ type: String },
+          deviceId:     { type: String },
+          stepsExecuted:[{ type: Schema.Types.Mixed }],
+          executedAt:   { type: Date },
+        },
+      ],
+      default: [],
+    },
     completedAt: { type: Date },
   },
   {

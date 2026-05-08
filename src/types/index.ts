@@ -84,6 +84,7 @@ export interface ExecutionJob {
     reason?: string;
   };
   ussdStepsExecuted?: UssdStepResult[];
+  executionLogs?: ExecutionLog[];
   simSlot?: number;
   smsTimeout?: number;
   createdAt: Date | string;
@@ -113,6 +114,17 @@ export interface UssdStepResult {
   value: string;
   executedAt: Date | string;
   success: boolean;
+}
+
+// ─── Execution Log (per-attempt history) ─────────────────────────────────────
+export interface ExecutionLog {
+  attempt: number;
+  ussdResponse: string;        // raw USSD dialog text from device
+  outcome: string;             // "done" | "failed" | "waiting" | "queued"
+  failureReason?: string;
+  deviceId?: string;
+  stepsExecuted?: UssdStepResult[];
+  executedAt: Date | string;
 }
 
 // ─── Service Category ────────────────────────────────────────────────────────
