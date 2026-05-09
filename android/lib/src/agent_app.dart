@@ -77,6 +77,9 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
   String _status = 'Idle';
   String? _currentJobId;
   String? _lastError;
+  String? _lastUssdResponse;   // last USSD response text from device
+  String? _lastJobOutcome;     // 'success' | 'failed' | 'waiting' | 'unrecognized'
+  String? _lastServiceName;    // service name of the last executed job
   final List<String> _logs = <String>[];
   SubscriptionInfo? _subscriptionInfo;
   Timer? _pollTimer;
@@ -692,6 +695,18 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       );
       await _nativeBridge.releaseWakeLock().catchError((_) {});
 
+      // ── Store last USSD response for the dashboard preview ─────────────
+      final String outcome = quickResult != null && quickResult.hasMatch
+          ? (quickResult.isSuccess ? 'success' : 'failed')
+          : (ussdResponseText.isNotEmpty ? 'unrecognized' : 'failed');
+      if (mounted) {
+        setState(() {
+          _lastUssdResponse = ussdResponseText.isNotEmpty ? ussdResponseText : null;
+          _lastJobOutcome   = outcome;
+          _lastServiceName  = liveJob.serviceName.isNotEmpty ? liveJob.serviceName : null;
+        });
+      }
+
       if (quickResult != null && quickResult.hasMatch) {
         _appendLog(
           quickResult.isSuccess
@@ -846,6 +861,9 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       accessibilityEnabled: _accessibilityEnabled,
       isPoweredOn: _isPoweredOn,
       subscriptionInfo: _subscriptionInfo,
+      lastUssdResponse: _lastUssdResponse,
+      lastJobOutcome: _lastJobOutcome,
+      lastServiceName: _lastServiceName,
       onTogglePower: _togglePower,
       onRunNow: _runQueueTick,
       onReloadSubscription: _refreshSubscription,
@@ -1422,6 +1440,9 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenSettings,
     required this.onReloadSubscription,
     this.subscriptionInfo,
+    this.lastUssdResponse,
+    this.lastJobOutcome,
+    this.lastServiceName,
   });
 
   final AgentConfig? config;
@@ -1435,6 +1456,9 @@ class HomeScreen extends StatefulWidget {
   final bool accessibilityEnabled;
   final bool isPoweredOn;
   final SubscriptionInfo? subscriptionInfo;
+  final String? lastUssdResponse;
+  final String? lastJobOutcome;
+  final String? lastServiceName;
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
   final Future<void> Function() onOpenSettings;
@@ -1473,6 +1497,9 @@ class _HomeScreenState extends State<HomeScreen> {
             isPoweredOn: widget.isPoweredOn,
             subscriptionInfo: widget.subscriptionInfo,
             allReady: _allReady,
+            lastUssdResponse: widget.lastUssdResponse,
+            lastJobOutcome: widget.lastJobOutcome,
+            lastServiceName: widget.lastServiceName,
             onTogglePower: widget.onTogglePower,
             onRunNow: widget.onRunNow,
             onOpenSettings: widget.onOpenSettings,
@@ -1606,6 +1633,9 @@ class _DashboardTab extends StatelessWidget {
     required this.onRunNow,
     required this.onOpenSettings,
     required this.onReloadSubscription,
+    this.lastUssdResponse,
+    this.lastJobOutcome,
+    this.lastServiceName,
   });
 
   final AgentConfig? config;
@@ -1620,6 +1650,9 @@ class _DashboardTab extends StatelessWidget {
   final bool isPoweredOn;
   final SubscriptionInfo? subscriptionInfo;
   final bool allReady;
+  final String? lastUssdResponse;
+  final String? lastJobOutcome;
+  final String? lastServiceName;
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
   final Future<void> Function() onOpenSettings;
@@ -1637,9 +1670,47 @@ class _DashboardTab extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
+              // ── Status hero card ──────────────────────────────────────
+              _StatusHeroCard(
+                status: status,
+                currentJobId: currentJobId,
+                lastError: lastError,
+                processing: processing,
+                registered: config != null,
+                allReady: allReady,
+                isPoweredOn: isPoweredOn,
+              ),
+              const SizedBox(height: 12),
+
+              // ── Quick actions ─────────────────────────────────────────
+              _QuickActionsRow(
+                isPoweredOn: isPoweredOn,
+                processing: processing,
+                allReady: allReady,
+                onTogglePower: onTogglePower,
+                onRunNow: onRunNow,
+              ),
+              const SizedBox(height: 14),
+
+              // ── Device info ───────────────────────────────────────────
+              if (config != null) ...[
+                _DeviceInfoCard(config: config!),
+                const SizedBox(height: 14),
+              ],
+
               // ── Licence card ──────────────────────────────────────────
               _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
               const SizedBox(height: 14),
+
+              // ── Last USSD Response card ───────────────────────────────
+              if (lastUssdResponse != null && lastUssdResponse!.isNotEmpty) ...[
+                _UssdResponseCard(
+                  ussdText: lastUssdResponse!,
+                  outcome: lastJobOutcome ?? 'unrecognized',
+                  serviceName: lastServiceName,
+                ),
+                const SizedBox(height: 14),
+              ],
 
               // ── Recent activity ───────────────────────────────────────
               _RecentActivityPreview(logs: logs),
@@ -2064,6 +2135,314 @@ class _RecentActivityPreview extends StatelessWidget {
                 ),
               );
             }),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _UssdResponseCard — phone-dialog preview of the last USSD response
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _UssdResponseCard extends StatelessWidget {
+  const _UssdResponseCard({
+    required this.ussdText,
+    required this.outcome,
+    this.serviceName,
+  });
+
+  final String ussdText;
+  final String outcome;   // 'success' | 'failed' | 'unrecognized'
+  final String? serviceName;
+
+  Color get _accentColor => outcome == 'success'
+      ? const Color(0xFF1B6B4D)
+      : outcome == 'failed'
+      ? const Color(0xFFDC2626)
+      : const Color(0xFFD97706);
+
+  Color get _bgColor => outcome == 'success'
+      ? const Color(0xFFEBF3EE)
+      : outcome == 'failed'
+      ? const Color(0xFFFEF2F2)
+      : const Color(0xFFFFFBEB);
+
+  Color get _borderColor => outcome == 'success'
+      ? const Color(0xFFC3D9CE)
+      : outcome == 'failed'
+      ? const Color(0xFFFECACA)
+      : const Color(0xFFFDE68A);
+
+  IconData get _icon => outcome == 'success'
+      ? Icons.check_circle_outline_rounded
+      : outcome == 'failed'
+      ? Icons.cancel_outlined
+      : Icons.help_outline_rounded;
+
+  String get _outcomeLabel => outcome == 'success'
+      ? 'Successful'
+      : outcome == 'failed'
+      ? 'Failed'
+      : 'Unrecognized';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE8EDEB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Card header ─────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFFE8EDEB))),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEDE9FE),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.phone_android_rounded,
+                    size: 14,
+                    color: Color(0xFF7C3AED),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Last USSD Response',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF134235),
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const Spacer(),
+                // Outcome badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _bgColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _borderColor),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_icon, size: 10, color: _accentColor),
+                      const SizedBox(width: 3),
+                      Text(
+                        _outcomeLabel,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: _accentColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Phone dialog mockup ──────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 280),
+                child: Column(
+                  children: [
+                    // Phone top chrome bar
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD4D0C8),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(14),
+                          topRight: Radius.circular(14),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 5,
+                            height: 5,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF9E9B93),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              serviceName ?? 'USSD Dialog',
+                              style: const TextStyle(
+                                fontSize: 8,
+                                fontFamily: 'monospace',
+                                color: Color(0xFF5A5752),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Dialog content area (phone body bg)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(8, 20, 8, 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0EDE8),
+                        border: Border.all(color: const Color(0xFFC8C5BD)),
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(14),
+                          bottomRight: Radius.circular(14),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          // Dialog card
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: _borderColor,
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.06),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Dialog title bar
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: _bgColor,
+                                    borderRadius: const BorderRadius.only(
+                                      topLeft: Radius.circular(13),
+                                      topRight: Radius.circular(13),
+                                    ),
+                                    border: Border(
+                                      bottom: BorderSide(color: _borderColor),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(_icon, size: 13, color: _accentColor),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        serviceName ?? 'Carrier Message',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: _accentColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Dialog body text
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                                  child: Text(
+                                    ussdText,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF1A1A1A),
+                                      height: 1.5,
+                                    ),
+                                  ),
+                                ),
+
+                                // OK button
+                                Container(
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      top: BorderSide(
+                                          color: const Color(0xFFE5E7EB)),
+                                    ),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10),
+                                  child: Center(
+                                    child: Text(
+                                      'OK',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: _accentColor,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 8),
+
+                          // Phone nav bar
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              Container(
+                                  width: 20,
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF9E9B93),
+                                    borderRadius: BorderRadius.circular(2),
+                                  )),
+                              Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: const Color(0xFF9E9B93), width: 1.5),
+                                ),
+                              ),
+                              Container(
+                                  width: 20,
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF9E9B93),
+                                    borderRadius: BorderRadius.circular(2),
+                                  )),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

@@ -11,6 +11,7 @@ import {
   ArrowLeft, CheckCircle, XCircle, SmartphoneNfc,
   Hash, CreditCard, Phone, Calendar, Lock, Cpu,
   MessageSquare, Activity, AlertTriangle, Zap, Ban, RefreshCw, Terminal,
+  Smartphone, Radio,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -326,6 +327,124 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
           </div>
         </Card>
       )}
+
+      {/* ── USSD Response (Phone Dialog Preview) ─────────────────────────── */}
+      {(() => {
+        // Use the latest log's ussdResponse first, then fall back to job.rawSms
+        const latestLog = job.executionLogs && job.executionLogs.length > 0
+          ? [...job.executionLogs].reverse()[0]
+          : null;
+        const ussdText = latestLog?.ussdResponse || job.rawSms || "";
+        if (!ussdText.trim()) return null;
+
+        // Detect success/failure from parsedResult or status
+        const responseIsSuccess = job.parsedResult?.success === true || job.status === "done";
+        const responseIsFailed  = job.status === "failed" || (job.parsedResult?.success === false && job.status !== "waiting");
+        const responseIsWaiting = job.status === "waiting";
+
+        const dialogBorderColor = responseIsSuccess
+          ? "border-[#134235]/20"
+          : responseIsFailed
+          ? "border-red-200"
+          : responseIsWaiting
+          ? "border-amber-200"
+          : "border-black/10";
+
+        const headerBg = responseIsSuccess
+          ? "bg-[#E8F1EE] border-b border-[#134235]/10"
+          : responseIsFailed
+          ? "bg-red-50 border-b border-red-100"
+          : responseIsWaiting
+          ? "bg-amber-50 border-b border-amber-100"
+          : "bg-surface-container border-b border-black/[0.04]";
+
+        const iconColor = responseIsSuccess ? "text-[#134235]" : responseIsFailed ? "text-red-500" : responseIsWaiting ? "text-amber-600" : "text-on-surface-variant";
+
+        return (
+          <div className="bg-white border border-black/5 rounded-2xl overflow-hidden premium-shadow">
+            {/* Card header */}
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-black/[0.04] bg-surface-container/20">
+              <div className="p-2 rounded-xl bg-violet-100">
+                <Smartphone className="w-4 h-4 text-violet-600" />
+              </div>
+              <h2 className="font-manrope font-bold text-on-surface text-sm tracking-tight">USSD Response from Device</h2>
+              <div className="ml-auto flex items-center gap-1.5">
+                <Radio className="w-3.5 h-3.5 text-on-surface-variant/40" />
+                <span className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-on-surface-variant/40 font-manrope">
+                  {latestLog?.deviceId ? latestLog.deviceId.slice(-8) : "Device"}
+                </span>
+              </div>
+            </div>
+
+            <div className="px-6 py-5">
+              {/* Phone frame mockup */}
+              <div className="max-w-xs mx-auto">
+                {/* Phone chrome top bar */}
+                <div className="bg-[#d4d0c8] rounded-t-2xl px-3 py-1.5 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-[#9e9b93]" />
+                  <div className="flex-1 bg-[#c8c5bd] rounded-full px-3 py-0.5 text-[9px] font-mono text-[#5a5752] truncate">
+                    {job.serviceName || "USSD Dialog"}
+                  </div>
+                </div>
+
+                {/* Dialog popup */}
+                <div className="bg-[#f0ede8] pb-3 rounded-b-2xl shadow-md border border-[#c8c5bd]">
+                  {/* Dialog card */}
+                  <div className={`mx-4 mt-8 mb-4 bg-white rounded-2xl shadow-lg border-2 ${dialogBorderColor} overflow-hidden`}>
+                    {/* Dialog header */}
+                    <div className={`px-5 py-3.5 ${headerBg}`}>
+                      <div className="flex items-center gap-2">
+                        {responseIsSuccess && <CheckCircle className={`w-4 h-4 ${iconColor} shrink-0`} />}
+                        {responseIsFailed  && <XCircle    className={`w-4 h-4 ${iconColor} shrink-0`} />}
+                        {responseIsWaiting && <AlertTriangle className={`w-4 h-4 ${iconColor} shrink-0`} />}
+                        {!responseIsSuccess && !responseIsFailed && !responseIsWaiting && (
+                          <Smartphone className={`w-4 h-4 ${iconColor} shrink-0`} />
+                        )}
+                        <p className="font-bold text-[13px] text-on-surface font-manrope">
+                          {job.serviceName || "Carrier Message"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Dialog body */}
+                    <div className="px-5 py-4">
+                      <p className="text-[13px] text-on-surface font-inter leading-relaxed whitespace-pre-wrap break-words">
+                        {ussdText}
+                      </p>
+                    </div>
+
+                    {/* OK button */}
+                    <div className="border-t border-black/[0.06] px-5 py-3 text-center">
+                      <span className={`text-[13px] font-bold font-manrope ${
+                        responseIsSuccess ? "text-[#134235]" : responseIsFailed ? "text-red-600" : "text-[#134235]"
+                      }`}>OK</span>
+                    </div>
+                  </div>
+
+                  {/* Phone bottom bar */}
+                  <div className="flex items-center justify-around px-8 pt-1">
+                    <div className="w-6 h-1 rounded-full bg-[#9e9b93]" />
+                    <div className="w-6 h-6 rounded-full border-2 border-[#9e9b93]" />
+                    <div className="w-6 h-1 rounded-full bg-[#9e9b93]" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Raw text (expandable) */}
+              <details className="group mt-4">
+                <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.15em] text-on-surface-variant/40 font-manrope hover:text-on-surface-variant transition-colors justify-center">
+                  <Terminal className="w-3 h-3" />
+                  View raw response text
+                  <span className="ml-1 text-[8px] group-open:rotate-90 transition-transform inline-block">▶</span>
+                </summary>
+                <pre className="mt-2 bg-surface-container/60 border border-black/[0.04] rounded-xl px-4 py-3 text-xs font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed">
+                  {ussdText}
+                </pre>
+              </details>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Execution History ─────────────────────────────────────────────── */}
       {job.executionLogs && job.executionLogs.length > 0 ? (
