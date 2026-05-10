@@ -11,7 +11,7 @@ import { ListOrdered, ArrowRight, ListChecks } from "lucide-react";
 
 import { toast } from "sonner";
 import { ExecutionJob } from "@/types";
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Activity, RefreshCw, CheckCheck, X, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Activity, RefreshCw, CheckCheck, X, Undo2, Smartphone } from "lucide-react";
 
 function StatCard({ title, value, amount, icon: Icon, bg, text, border }: any) {
   return (
@@ -440,6 +440,34 @@ function JobCard({
             </div>
           </div>
           
+          {/* USSD Response Preview */}
+          {(() => {
+            const latestLog = job.executionLogs && job.executionLogs.length > 0
+              ? [...job.executionLogs].reverse()[0]
+              : null;
+            const ussdText = latestLog?.ussdResponse || job.rawSms || "";
+            if (!ussdText.trim()) return null;
+            const isSuccess = job.status === "done";
+            const isFailed  = job.status === "failed";
+            const isWaiting = job.status === "waiting";
+            return (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Smartphone className="w-3 h-3 text-on-surface-variant/50" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope">USSD Response from Device</p>
+                </div>
+                <pre className={`bg-surface-container/60 border rounded-xl px-3 py-2.5 text-[11px] font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed max-h-24 overflow-y-auto ${
+                  isSuccess ? "border-[#134235]/15" : isFailed ? "border-red-100" : isWaiting ? "border-amber-100" : "border-black/[0.04]"
+                }`}>
+                  {ussdText}
+                </pre>
+                {job.parsedResult?.reason && (
+                  <p className="text-[11px] text-amber-700 font-manrope px-1">{job.parsedResult.reason}</p>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="flex justify-end gap-3 pt-2 flex-wrap">
             {job.status === "waiting" && (
               <>

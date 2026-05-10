@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { ExecutionJob, JobStatus } from "@/types";
 import {
   ArrowRight, RefreshCw, History, Wifi, WifiOff,
-  Clock, Activity, Loader2, ChevronDown, ChevronUp,
+  Clock, Activity, Loader2, ChevronDown, ChevronUp, Smartphone,
 } from "lucide-react";
 
 const REFRESH_INTERVAL = 8000; // 8 seconds
@@ -111,28 +111,56 @@ function QueueCard({ job, refetch }: { job: ExecutionJob; refetch: () => void })
       </div>
 
       {expanded && (
-        <div className="mt-4 pt-4 border-t border-black/[0.05] grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white/60 p-3 rounded-xl cursor-default" onClick={e => e.stopPropagation()}>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1">Device</p>
-            <p className="text-xs font-semibold text-on-surface">{job.lockedByDevice ?? "Unassigned"}</p>
+        <div className="mt-4 pt-4 border-t border-black/[0.05] space-y-3 bg-white/60 p-3 rounded-xl cursor-default" onClick={e => e.stopPropagation()}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1">Device</p>
+              <p className="text-xs font-semibold text-on-surface">{job.lockedByDevice ?? "Unassigned"}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1">SIM Slot</p>
+              <p className="text-xs font-semibold text-on-surface">SIM {job.simSlot ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1">Attempt</p>
+              <p className="text-xs font-semibold text-on-surface">#{job.attempt ?? 0}</p>
+            </div>
+            <div className="flex items-end justify-end">
+              <Link
+                href={`/admin/history/${job.jobId ?? ""}`}
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary/10 text-primary text-xs font-bold font-manrope rounded-xl hover:bg-primary hover:text-white transition-all"
+                onClick={e => e.stopPropagation()}
+              >
+                Details <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1">SIM Slot</p>
-            <p className="text-xs font-semibold text-on-surface">SIM {job.simSlot ?? "—"}</p>
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1">Attempt</p>
-            <p className="text-xs font-semibold text-on-surface">#{job.attempt ?? 0}</p>
-          </div>
-          <div className="flex items-end justify-end">
-            <Link
-              href={`/admin/history/${job.jobId ?? ""}`}
-              className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary/10 text-primary text-xs font-bold font-manrope rounded-xl hover:bg-primary hover:text-white transition-all"
-              onClick={e => e.stopPropagation()}
-            >
-              Details <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
+
+          {/* USSD Response Preview (for waiting/processing jobs that have a response) */}
+          {(() => {
+            const latestLog = job.executionLogs && job.executionLogs.length > 0
+              ? [...job.executionLogs].reverse()[0]
+              : null;
+            const ussdText = latestLog?.ussdResponse || job.rawSms || "";
+            if (!ussdText.trim()) return null;
+            const isWaiting = job.status === "waiting";
+            return (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Smartphone className="w-3 h-3 text-on-surface-variant/50" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope">USSD Response</p>
+                </div>
+                <pre className={`bg-surface-container/60 border rounded-xl px-3 py-2 text-[11px] font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed max-h-20 overflow-y-auto ${
+                  isWaiting ? "border-amber-100" : "border-black/[0.04]"
+                }`}>
+                  {ussdText}
+                </pre>
+                {job.parsedResult?.reason && (
+                  <p className="text-[11px] text-amber-700 font-manrope px-1">{job.parsedResult.reason}</p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
