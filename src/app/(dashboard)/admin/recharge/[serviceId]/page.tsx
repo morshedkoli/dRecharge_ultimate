@@ -72,7 +72,7 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
   const isAdmin = ["admin", "super_admin", "support_admin"].includes(profile?.role || "");
   const isOverBalance = isAdmin ? false : amount > balance;
   const requiredRecipientLength = service.recipientLength || 11;
-  const isAmountValid = isAdmin ? amount >= 0 : amount > 0;
+  const isAmountValid = amountStr.trim() !== "" && (isAdmin ? amount >= 0 : amount > 0);
   const isValid = recipient.length === requiredRecipientLength && isAmountValid && !isOverBalance;
   const effectivePin = profile?.pin?.trim() || "1234";
   const requiredPinLength = effectivePin.length;
@@ -185,7 +185,7 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
                     step="1"
                     value={amountStr}
                     onChange={(e) => setAmountStr(e.target.value)}
-                    required={!isAdmin}
+                    required
                     placeholder="0.00"
                     disabled={submitting}
                     className="w-full pl-12 pr-4 py-3.5 bg-surface-container border border-black/5 rounded-2xl text-[15px] font-bold text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all placeholder:text-on-surface-variant/40"

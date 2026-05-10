@@ -902,8 +902,9 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
   }
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// SetupScreen — first-run wizard (2 steps)
+// SetupScreen — first-run wizard (2 steps: Permissions → Connect)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SetupScreen extends StatefulWidget {
@@ -929,10 +930,6 @@ class SetupScreen extends StatefulWidget {
     required this.backendConfigured,
   });
 
-  // NOTE: The QR code from the admin panel contains both the server URL and a
-  // registration token. Scanning it once auto-saves the URL and registers the
-  // device — no separate backend step needed.
-
   final TextEditingController backendUrlController;
   final TextEditingController tokenController;
   final TextEditingController deviceNameController;
@@ -957,110 +954,73 @@ class SetupScreen extends StatefulWidget {
 }
 
 class _SetupScreenState extends State<SetupScreen> {
-  final PageController _pageController = PageController();
-  int _currentPage = 0;
+  final PageController _page = PageController();
+  int _step = 0;
 
-  final List<String> _pageTitles = ['Permissions', 'Register Device'];
+  bool get _allPermsOk =>
+      widget.phoneGranted &&
+      widget.smsGranted &&
+      widget.accessibilityEnabled &&
+      widget.exactAlarmGranted &&
+      widget.batteryOptGranted;
 
   void _goNext() {
-    if (_currentPage < 1) {
-      _pageController.nextPage(
+    setState(() => _step = 1);
+    _page.animateToPage(1,
         duration: const Duration(milliseconds: 350),
-        curve: Curves.easeInOut,
-      );
-      setState(() => _currentPage++);
-    }
+        curve: Curves.easeInOutCubic);
+  }
+
+  void _goBack() {
+    setState(() => _step = 0);
+    _page.animateToPage(0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOutCubic);
+  }
+
+  @override
+  void dispose() {
+    _page.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     return Scaffold(
       backgroundColor: cs.surface,
       body: SafeArea(
         child: Column(
           children: [
-            // ── Header ─────────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: cs.primaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.bolt_rounded,
-                          color: cs.primary,
-                          size: 26,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'dRecharge Agent',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Device Setup',
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodySmall?.copyWith(color: cs.outline),
-                          ),
-                        ],
-                      ),
-                    ],
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.bolt_rounded,
+                        color: Colors.white, size: 20),
                   ),
-                  const SizedBox(height: 28),
-                  // Step indicator — 2 steps
-                  Row(
-                    children: List.generate(2, (i) {
-                      final active = i == _currentPage;
-                      final done = i < _currentPage;
-                      return Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.only(right: i < 1 ? 6 : 0),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 250),
-                            height: 5,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(4),
-                              color: done || active
-                                  ? cs.primary
-                                  : cs.surfaceContainerHighest,
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Step ${_currentPage + 1} of 2 — ${_pageTitles[_currentPage]}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: cs.outline),
-                  ),
+                  const SizedBox(width: 10),
+                  Text('dRecharge Agent',
+                      style: tt.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  _StepIndicator(current: _step, total: 2),
                 ],
               ),
             ),
-
-            // ── Page content ────────────────────────────────────────────────
             Expanded(
               child: PageView(
-                controller: _pageController,
+                controller: _page,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  // Step 1: Permissions
                   _SetupPermissionsStep(
                     phoneGranted: widget.phoneGranted,
                     smsGranted: widget.smsGranted,
@@ -1071,8 +1031,8 @@ class _SetupScreenState extends State<SetupScreen> {
                     onOpenAccessibility: widget.onOpenAccessibility,
                     onOpenExactAlarmSettings: widget.onOpenExactAlarmSettings,
                     onNext: _goNext,
+                    allOk: _allPermsOk,
                   ),
-                  // Step 2: Register (one-scan QR does URL + registration)
                   _SetupRegisterStep(
                     backendUrlController: widget.backendUrlController,
                     tokenController: widget.tokenController,
@@ -1084,6 +1044,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     onSaveUrl: widget.onSaveUrl,
                     onRegister: widget.onRegister,
                     onScanQr: widget.onScanQr,
+                    onBack: _goBack,
                   ),
                 ],
               ),
@@ -1094,6 +1055,66 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 }
+
+class _StepIndicator extends StatelessWidget {
+  const _StepIndicator({required this.current, required this.total});
+  final int current;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(total * 2 - 1, (i) {
+        if (i.isOdd) {
+          final lineActive = (i ~/ 2) < current;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: 20,
+            height: 2,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: lineActive ? cs.primary : cs.outlineVariant,
+              borderRadius: BorderRadius.circular(1),
+            ),
+          );
+        }
+        final dotIndex = i ~/ 2;
+        final isDone = dotIndex < current;
+        final isActive = dotIndex == current;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: isDone || isActive
+                ? cs.primary
+                : cs.surfaceContainerHighest,
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: isDone
+                ? const Icon(Icons.check_rounded,
+                    size: 14, color: Colors.white)
+                : Text(
+                    '${dotIndex + 1}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isActive ? Colors.white : cs.onSurfaceVariant,
+                    ),
+                  ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 1: Permissions
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _SetupPermissionsStep extends StatelessWidget {
   const _SetupPermissionsStep({
@@ -1106,6 +1127,7 @@ class _SetupPermissionsStep extends StatelessWidget {
     required this.onOpenAccessibility,
     required this.onOpenExactAlarmSettings,
     required this.onNext,
+    required this.allOk,
   });
 
   final bool phoneGranted;
@@ -1117,126 +1139,145 @@ class _SetupPermissionsStep extends StatelessWidget {
   final Future<void> Function() onOpenAccessibility;
   final Future<void> Function() onOpenExactAlarmSettings;
   final VoidCallback onNext;
-
-  bool get _allOk => phoneGranted && smsGranted && accessibilityEnabled;
+  final bool allOk;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.all(24),
+    final tt = Theme.of(context).textTheme;
+    final needsRuntime = !phoneGranted || !smsGranted;
+    final needsAccessibility = !accessibilityEnabled;
+    final needsAlarm = !exactAlarmGranted;
+    final needsBattery = !batteryOptGranted;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 12),
-          Text(
-            'Required Permissions',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: cs.primaryContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(Icons.security_rounded, size: 30, color: cs.primary),
           ),
+          const SizedBox(height: 18),
+          Text('Grant Permissions',
+              style: tt.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           Text(
-            'The agent needs these permissions to automatically execute USSD requests.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            'The agent needs these to dial USSD codes and verify recharge confirmations.',
+            style: tt.bodyMedium
+                ?.copyWith(color: cs.onSurfaceVariant, height: 1.5),
           ),
-          const SizedBox(height: 28),
-          _PermissionTile(
-            icon: Icons.phone,
+          const SizedBox(height: 24),
+          _PermCard(
+            icon: Icons.phone_rounded,
             title: 'Phone & Calls',
-            subtitle: 'Dial USSD codes and read SIM info',
+            desc: 'Dial USSD codes on your behalf',
             granted: phoneGranted,
           ),
-          const SizedBox(height: 12),
-          _PermissionTile(
-            icon: Icons.sms,
+          const SizedBox(height: 8),
+          _PermCard(
+            icon: Icons.sms_rounded,
             title: 'SMS Read',
-            subtitle: 'Read confirmation messages',
+            desc: 'Verify recharge confirmations',
             granted: smsGranted,
           ),
-          const SizedBox(height: 12),
-          _PermissionTile(
-            icon: Icons.accessibility_new,
+          const SizedBox(height: 8),
+          _PermCard(
+            icon: Icons.accessibility_new_rounded,
             title: 'Accessibility Service',
-            subtitle: 'Auto-fill USSD dialogs',
+            desc: 'Auto-interact with USSD dialogs',
             granted: accessibilityEnabled,
           ),
-          const SizedBox(height: 12),
-          _PermissionTile(
+          const SizedBox(height: 8),
+          _PermCard(
             icon: Icons.alarm_rounded,
             title: 'Exact Alarms',
-            subtitle: 'Keep background service alive (Android 12+)',
+            desc: 'Schedule precise retry timers',
             granted: exactAlarmGranted,
           ),
-          const SizedBox(height: 12),
-          _PermissionTile(
+          const SizedBox(height: 8),
+          _PermCard(
             icon: Icons.battery_charging_full_rounded,
-            title: 'Battery Optimization Exempt',
-            subtitle: 'Prevent OS from killing the agent',
+            title: 'Battery Optimization',
+            desc: 'Keep agent running in background',
             granted: batteryOptGranted,
           ),
-          const Spacer(),
-          if (!phoneGranted || !smsGranted)
-            FilledButton.icon(
-              onPressed: onRequestPermissions,
-              icon: const Icon(Icons.security),
-              label: const Text('Grant Phone & SMS Permissions'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(double.infinity, 52),
-              ),
+          const SizedBox(height: 24),
+          if (needsRuntime)
+            _SetupActionButton(
+              icon: Icons.security_rounded,
+              label: 'Grant Phone & SMS',
+              onTap: onRequestPermissions,
             ),
-          if (!accessibilityEnabled) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: onOpenAccessibility,
-              icon: const Icon(Icons.accessibility_new),
-              label: const Text('Open Accessibility Settings'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-              ),
+          if (needsAccessibility) ...[
+            if (needsRuntime) const SizedBox(height: 8),
+            _SetupActionButton(
+              icon: Icons.accessibility_new_rounded,
+              label: 'Enable Accessibility Service',
+              onTap: onOpenAccessibility,
             ),
           ],
-          if (!exactAlarmGranted) ...[
+          if (needsAlarm) ...[
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: onOpenExactAlarmSettings,
-              icon: const Icon(Icons.alarm_rounded),
-              label: const Text('Allow Exact Alarms (Android 12+)'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-              ),
+            _SetupActionButton(
+              icon: Icons.alarm_rounded,
+              label: 'Allow Exact Alarms (Android 12+)',
+              onTap: onOpenExactAlarmSettings,
             ),
           ],
-          if (!batteryOptGranted) ...[
+          if (needsBattery) ...[
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => NativeBridge().openBatterySettings(),
-              icon: const Icon(Icons.battery_charging_full_rounded),
-              label: const Text('Exclude from Battery Optimization'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-              ),
+            _SetupActionButton(
+              icon: Icons.battery_charging_full_rounded,
+              label: 'Exclude from Battery Saver',
+              onTap: () => NativeBridge().openBatterySettings(),
             ),
           ],
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => NativeBridge().openAppInfo(),
-            icon: const Icon(Icons.lock_open_rounded),
-            label: const Text('Allow Restricted Settings (Android 13+)'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 44),
-            ),
+          _SetupActionButton(
+            icon: Icons.lock_open_rounded,
+            label: 'Allow Restricted Settings (Android 13+)',
+            onTap: () => NativeBridge().openAppInfo(),
+            outlined: true,
           ),
-          if (_allOk) ...[
-            const SizedBox(height: 8),
+          if (allOk) ...[
+            const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: onNext,
-              icon: const Icon(Icons.arrow_forward_rounded),
+              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
               label: const Text('Continue'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded,
+                      size: 16, color: cs.onSurfaceVariant),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text('Grant all permissions above to continue.',
+                        style: tt.bodySmall
+                            ?.copyWith(color: cs.onSurfaceVariant)),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1246,9 +1287,126 @@ class _SetupPermissionsStep extends StatelessWidget {
   }
 }
 
-// Merged step: server URL + device registration.
-// Primary path: scan admin QR (contains both URL and token) → one-shot register.
-// Manual fallback: enter server URL then token separately.
+class _PermCard extends StatelessWidget {
+  const _PermCard({
+    required this.icon,
+    required this.title,
+    required this.desc,
+    required this.granted,
+  });
+  final IconData icon;
+  final String title;
+  final String desc;
+  final bool granted;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: granted
+            ? cs.primaryContainer.withValues(alpha: 0.35)
+            : cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: granted
+              ? cs.primary.withValues(alpha: 0.3)
+              : cs.outlineVariant,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: granted ? cs.primary : cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon,
+                size: 18,
+                color: granted ? Colors.white : cs.onSurfaceVariant),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                Text(desc,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          Icon(
+            granted
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded,
+            color: granted ? cs.primary : cs.outlineVariant,
+            size: 20,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SetupActionButton extends StatelessWidget {
+  const _SetupActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.outlined = false,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool outlined;
+
+  @override
+  Widget build(BuildContext context) {
+    if (outlined) {
+      return OutlinedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 17),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(double.infinity, 46),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+    return FilledButton.tonal(
+      onPressed: onTap,
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(double.infinity, 46),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 17),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 2: Connect (server URL + device registration)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _SetupRegisterStep extends StatelessWidget {
   const _SetupRegisterStep({
     required this.backendUrlController,
@@ -1261,6 +1419,7 @@ class _SetupRegisterStep extends StatelessWidget {
     required this.onSaveUrl,
     required this.onRegister,
     required this.onScanQr,
+    required this.onBack,
   });
 
   final TextEditingController backendUrlController;
@@ -1273,145 +1432,197 @@ class _SetupRegisterStep extends StatelessWidget {
   final Future<void> Function() onSaveUrl;
   final Future<void> Function() onRegister;
   final Future<void> Function() onScanQr;
+  final VoidCallback onBack;
 
   bool get _busy => saving || registering;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 12),
-          Text(
-            'Register Device',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: cs.primaryContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(Icons.qr_code_scanner_rounded,
+                size: 30, color: cs.primary),
           ),
+          const SizedBox(height: 18),
+          Text('Connect Device',
+              style: tt.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           Text(
-            'Scan the QR code from the admin panel to connect and register in one step.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            'Scan the QR code from your admin panel to connect and register in one step.',
+            style: tt.bodyMedium
+                ?.copyWith(color: cs.onSurfaceVariant, height: 1.5),
           ),
-          const SizedBox(height: 16),
-          // One-scan tip
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: cs.primaryContainer.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.auto_awesome_rounded, color: cs.primary, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'One scan registers this device automatically — no manual URL or token entry needed.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onPrimaryContainer,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          // Primary CTA: scan QR → full registration
+          const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _busy ? null : onScanQr,
             icon: _busy
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.qr_code_scanner),
-            label: Text(_busy ? 'Registering…' : 'Scan QR to Register'),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.qr_code_scanner_rounded, size: 20),
+            label: Text(_busy ? 'Connecting…' : 'Scan QR Code'),
             style: FilledButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
+              minimumSize: const Size(double.infinity, 54),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+              textStyle:
+                  tt.labelLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Expanded(child: Divider()),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  'or enter manually',
-                  style: TextStyle(color: cs.outline, fontSize: 12),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(10),
+              border:
+                  Border.all(color: cs.primary.withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.auto_awesome_rounded,
+                    color: cs.primary, size: 16),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Admin Panel → Devices → Register Device → Show QR',
+                    style: tt.bodySmall?.copyWith(
+                        color: cs.onPrimaryContainer, height: 1.4),
+                  ),
                 ),
-              ),
-              const Expanded(child: Divider()),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
-          // Manual: server URL
+          const SizedBox(height: 24),
+          Row(children: [
+            const Expanded(child: Divider()),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text('or enter manually',
+                  style: tt.bodySmall?.copyWith(color: cs.outline)),
+            ),
+            const Expanded(child: Divider()),
+          ]),
+          const SizedBox(height: 18),
           TextField(
             controller: backendUrlController,
             keyboardType: TextInputType.url,
             decoration: InputDecoration(
               labelText: 'Server URL',
               hintText: 'https://admin.example.com',
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.link),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              prefixIcon: const Icon(Icons.link_rounded, size: 20),
               suffixIcon: backendConfigured
-                  ? Icon(Icons.check_circle, color: cs.primary)
+                  ? Icon(Icons.check_circle_rounded, color: cs.primary)
                   : null,
+              filled: true,
+              fillColor: cs.surfaceContainerLow,
             ),
           ),
-          const SizedBox(height: 12),
-          // Optional: device name override
+          const SizedBox(height: 10),
           TextField(
             controller: deviceNameController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Device Name (optional)',
-              hintText: 'Leave blank to use auto-detected name',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.phone_android),
+              hintText: 'Auto-detected if left blank',
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              prefixIcon:
+                  const Icon(Icons.phone_android_rounded, size: 20),
+              filled: true,
+              fillColor: cs.surfaceContainerLow,
             ),
           ),
-          const SizedBox(height: 12),
-          // Manual: registration token
+          const SizedBox(height: 10),
           TextField(
             controller: tokenController,
             minLines: 2,
             maxLines: 4,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Registration Token',
               hintText: 'Paste token from admin panel',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.vpn_key),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              prefixIcon: const Icon(Icons.vpn_key_rounded, size: 20),
               alignLabelWithHint: true,
+              filled: true,
+              fillColor: cs.surfaceContainerLow,
             ),
           ),
           if (lastError != null) ...[
-            const SizedBox(height: 8),
-            Text(lastError!, style: TextStyle(color: cs.error, fontSize: 12)),
-          ],
-          const SizedBox(height: 20),
-          // Manual submit: verify URL then register
-          OutlinedButton(
-            onPressed: _busy
-                ? null
-                : backendConfigured
-                ? onRegister
-                : onSaveUrl,
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
-            ),
-            child: _busy
-                ? const _LoadingIndicator()
-                : Text(
-                    backendConfigured ? 'Register & Start' : 'Verify & Connect',
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.error_outline_rounded,
+                      color: cs.error, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(lastError!,
+                        style: tt.bodySmall
+                            ?.copyWith(color: cs.onErrorContainer)),
                   ),
-          ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(
+              flex: 2,
+              child: OutlinedButton(
+                onPressed: _busy ? null : onBack,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Back'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 3,
+              child: FilledButton(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        await onSaveUrl();
+                        await onRegister();
+                      },
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: _busy
+                    ? const _LoadingIndicator()
+                    : const Text('Register'),
+              ),
+            ),
+          ]),
         ],
       ),
     );
@@ -1419,7 +1630,7 @@ class _SetupRegisterStep extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HomeScreen — main dashboard
+// HomeScreen — main app shell after setup
 // ─────────────────────────────────────────────────────────────────────────────
 
 class HomeScreen extends StatefulWidget {
@@ -1435,14 +1646,14 @@ class HomeScreen extends StatefulWidget {
     required this.smsGranted,
     required this.accessibilityEnabled,
     required this.isPoweredOn,
+    required this.subscriptionInfo,
+    required this.lastUssdResponse,
+    required this.lastJobOutcome,
+    required this.lastServiceName,
     required this.onTogglePower,
     required this.onRunNow,
-    required this.onOpenSettings,
     required this.onReloadSubscription,
-    this.subscriptionInfo,
-    this.lastUssdResponse,
-    this.lastJobOutcome,
-    this.lastServiceName,
+    required this.onOpenSettings,
   });
 
   final AgentConfig? config;
@@ -1461,8 +1672,8 @@ class HomeScreen extends StatefulWidget {
   final String? lastServiceName;
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
-  final Future<void> Function() onOpenSettings;
   final Future<void> Function() onReloadSubscription;
+  final Future<void> Function() onOpenSettings;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -1471,16 +1682,86 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
 
-  bool get _allReady =>
-      widget.phoneGranted && widget.smsGranted && widget.accessibilityEnabled;
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final hasIssue = !widget.phoneGranted ||
+        !widget.smsGranted ||
+        !widget.accessibilityEnabled;
+
+    final Color chipBg = widget.processing
+        ? cs.secondaryContainer
+        : widget.isPoweredOn
+            ? cs.primaryContainer
+            : cs.surfaceContainerHighest;
+    final Color chipFg = widget.processing
+        ? cs.onSecondaryContainer
+        : widget.isPoweredOn
+            ? cs.onPrimaryContainer
+            : cs.onSurfaceVariant;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7F6),
-      appBar: _buildAppBar(cs),
+      backgroundColor: cs.surfaceContainerLowest,
+      appBar: AppBar(
+        backgroundColor: cs.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: cs.primary,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.bolt_rounded,
+                  color: Colors.white, size: 16),
+            ),
+            const SizedBox(width: 8),
+            Text('dRecharge Agent',
+                style: tt.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+          ],
+        ),
+        actions: [
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: chipBg,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _StatusDot(
+                  processing: widget.processing,
+                  poweredOn: widget.isPoweredOn,
+                  hasIssue: hasIssue,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  widget.processing
+                      ? 'Running'
+                      : widget.isPoweredOn
+                          ? 'Active'
+                          : 'Off',
+                  style: tt.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w700, color: chipFg),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_rounded),
+            onPressed: widget.onOpenSettings,
+            tooltip: 'Settings',
+          ),
+        ],
+      ),
       body: IndexedStack(
         index: _tabIndex,
         children: [
@@ -1496,13 +1777,11 @@ class _HomeScreenState extends State<HomeScreen> {
             accessibilityEnabled: widget.accessibilityEnabled,
             isPoweredOn: widget.isPoweredOn,
             subscriptionInfo: widget.subscriptionInfo,
-            allReady: _allReady,
             lastUssdResponse: widget.lastUssdResponse,
             lastJobOutcome: widget.lastJobOutcome,
             lastServiceName: widget.lastServiceName,
             onTogglePower: widget.onTogglePower,
             onRunNow: widget.onRunNow,
-            onOpenSettings: widget.onOpenSettings,
             onReloadSubscription: widget.onReloadSubscription,
           ),
           _ActivityTab(logs: widget.logs),
@@ -1512,107 +1791,28 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedIndex: _tabIndex,
         onDestinationSelected: (i) => setState(() => _tabIndex = i),
         backgroundColor: cs.surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        indicatorColor: const Color(0xFF1B6B4D).withOpacity(0.12),
-        destinations: [
+        indicatorColor: cs.primaryContainer,
+        destinations: const [
           NavigationDestination(
-            icon: const Icon(Icons.home_outlined),
-            selectedIcon: const Icon(Icons.home_rounded, color: Color(0xFF1B6B4D)),
-            label: 'Home',
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard_rounded),
+            label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Badge(
-              isLabelVisible: widget.logs.isNotEmpty,
-              label: Text(
-                widget.logs.length > 99 ? '99+' : '${widget.logs.length}',
-              ),
-              child: const Icon(Icons.history_outlined),
-            ),
-            selectedIcon: const Icon(Icons.history_rounded, color: Color(0xFF1B6B4D)),
+            icon: Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history_rounded),
             label: 'Activity',
           ),
         ],
       ),
     );
   }
-
-  PreferredSizeWidget _buildAppBar(ColorScheme cs) {
-    final appName = widget.subscriptionInfo?.appName ?? 'dRecharge';
-    return PreferredSize(
-      preferredSize: const Size.fromHeight(kToolbarHeight),
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF134235), Color(0xFF1B6B4D)],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-        ),
-        child: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          foregroundColor: Colors.white,
-          title: Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.30)),
-                ),
-                child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    appName,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                      height: 1.1,
-                    ),
-                  ),
-                  Text(
-                    'Agent',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white.withValues(alpha: 0.70),
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            _PowerButton(
-              isPoweredOn: widget.isPoweredOn,
-              onToggle: widget.onTogglePower,
-            ),
-            IconButton(
-              icon: const Icon(Icons.settings_outlined, size: 20, color: Colors.white),
-              tooltip: 'Settings',
-              onPressed: widget.onOpenSettings,
-            ),
-            const SizedBox(width: 4),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Dashboard Tab — Home
+// Dashboard tab
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DashboardTab extends StatelessWidget {
@@ -1628,14 +1828,12 @@ class _DashboardTab extends StatelessWidget {
     required this.accessibilityEnabled,
     required this.isPoweredOn,
     required this.subscriptionInfo,
-    required this.allReady,
+    required this.lastUssdResponse,
+    required this.lastJobOutcome,
+    required this.lastServiceName,
     required this.onTogglePower,
     required this.onRunNow,
-    required this.onOpenSettings,
     required this.onReloadSubscription,
-    this.lastUssdResponse,
-    this.lastJobOutcome,
-    this.lastServiceName,
   });
 
   final AgentConfig? config;
@@ -1649,81 +1847,91 @@ class _DashboardTab extends StatelessWidget {
   final bool accessibilityEnabled;
   final bool isPoweredOn;
   final SubscriptionInfo? subscriptionInfo;
-  final bool allReady;
   final String? lastUssdResponse;
   final String? lastJobOutcome;
   final String? lastServiceName;
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
-  final Future<void> Function() onOpenSettings;
   final Future<void> Function() onReloadSubscription;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final hasIssue =
+        !phoneGranted || !smsGranted || !accessibilityEnabled;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        // ── Top licence banner ─────────────────────────────────────────
-        _LicenseBanner(info: subscriptionInfo),
-
-        // ── Scrollable body ────────────────────────────────────────────
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            children: [
-              // ── Status hero card ──────────────────────────────────────
-              _StatusHeroCard(
-                status: status,
-                currentJobId: currentJobId,
-                lastError: lastError,
-                processing: processing,
-                registered: config != null,
-                allReady: allReady,
-                isPoweredOn: isPoweredOn,
-              ),
-              const SizedBox(height: 12),
-
-              // ── Quick actions ─────────────────────────────────────────
-              _QuickActionsRow(
-                isPoweredOn: isPoweredOn,
-                processing: processing,
-                allReady: allReady,
-                onTogglePower: onTogglePower,
-                onRunNow: onRunNow,
-              ),
-              const SizedBox(height: 14),
-
-              // ── Device info ───────────────────────────────────────────
-              if (config != null) ...[
-                _DeviceInfoCard(config: config!),
-                const SizedBox(height: 14),
-              ],
-
-              // ── Licence card ──────────────────────────────────────────
-              _SubscriptionCard(info: subscriptionInfo, onReload: onReloadSubscription),
-              const SizedBox(height: 14),
-
-              // ── Last USSD Response card ───────────────────────────────
-              if (lastUssdResponse != null && lastUssdResponse!.isNotEmpty) ...[
-                _UssdResponseCard(
-                  ussdText: lastUssdResponse!,
-                  outcome: lastJobOutcome ?? 'unrecognized',
-                  serviceName: lastServiceName,
-                ),
-                const SizedBox(height: 14),
-              ],
-
-              // ── Recent activity ───────────────────────────────────────
-              _RecentActivityPreview(logs: logs),
-            ],
+        if (subscriptionInfo != null)
+          _LicenseBanner(
+            subscriptionInfo: subscriptionInfo!,
+            onReload: onReloadSubscription,
           ),
+        if (subscriptionInfo != null) const SizedBox(height: 10),
+        _StatusHeroCard(
+          status: status,
+          processing: processing,
+          isPoweredOn: isPoweredOn,
+          currentJobId: currentJobId,
+          lastJobOutcome: lastJobOutcome,
+          lastServiceName: lastServiceName,
+          onTogglePower: onTogglePower,
+          onRunNow: onRunNow,
         ),
+        const SizedBox(height: 10),
+        if (hasIssue) ...[
+          _AlertBanner(
+            message:
+                'Some permissions are missing — agent may not work correctly.',
+            icon: Icons.warning_amber_rounded,
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (lastError != null) ...[
+          _AlertBanner(
+            message: lastError!,
+            icon: Icons.error_outline_rounded,
+            isError: true,
+          ),
+          const SizedBox(height: 10),
+        ],
+        _QuickActionsRow(
+          processing: processing,
+          isPoweredOn: isPoweredOn,
+          onTogglePower: onTogglePower,
+          onRunNow: onRunNow,
+        ),
+        if (lastUssdResponse != null &&
+            lastUssdResponse!.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _UssdResponseCard(
+            response: lastUssdResponse!,
+            outcome: lastJobOutcome,
+            serviceName: lastServiceName,
+          ),
+        ],
+        if (config != null) ...[
+          const SizedBox(height: 10),
+          _DeviceInfoCard(config: config!),
+        ],
+        if (subscriptionInfo != null) ...[
+          const SizedBox(height: 10),
+          _SubscriptionCard(
+            info: subscriptionInfo!,
+            onReload: onReloadSubscription,
+          ),
+        ],
+        if (logs.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _RecentActivityPreview(logs: logs),
+        ],
       ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Activity Tab — full log
+// Activity tab
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ActivityTab extends StatelessWidget {
@@ -1733,148 +1941,115 @@ class _ActivityTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
 
-    return Column(
-      children: [
-        // ── Header ────────────────────────────────────────────────────
-        Container(
-          color: Colors.white,
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-          child: Row(
-            children: [
-              const Icon(Icons.history_rounded, size: 18, color: Color(0xFF134235)),
-              const SizedBox(width: 8),
-              const Text(
-                'Activity Log',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF134235),
-                ),
+    if (logs.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history_rounded,
+                size: 52, color: cs.outlineVariant),
+            const SizedBox(height: 14),
+            Text('No activity yet',
+                style: tt.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Text('Agent logs will appear here',
+                style:
+                    tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          ],
+        ),
+      );
+    }
+
+    final reversed = logs.reversed.toList();
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      itemCount: reversed.length,
+      itemBuilder: (ctx, i) {
+        final log = reversed[i];
+        final lower = log.toLowerCase();
+        final isError = lower.contains('error') ||
+            lower.contains('fail') ||
+            lower.contains('denied') ||
+            lower.contains('✗');
+        final isSuccess = lower.contains('success') ||
+            lower.contains('done') ||
+            lower.contains('✓');
+        final isWarning = lower.contains('wait') ||
+            lower.contains('retry') ||
+            lower.contains('⏳');
+
+        final Color dotColor = isError
+            ? cs.error
+            : isSuccess
+                ? cs.primary
+                : isWarning
+                    ? const Color(0xFFF59E0B)
+                    : cs.outlineVariant;
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 24,
+              child: Column(
+                children: [
+                  const SizedBox(height: 13),
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                        color: dotColor, shape: BoxShape.circle),
+                  ),
+                  if (i < reversed.length - 1)
+                    Container(
+                        width: 1.5,
+                        height: 30,
+                        color:
+                            cs.outlineVariant.withValues(alpha: 0.4)),
+                ],
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEBF3EE),
-                  borderRadius: BorderRadius.circular(20),
-                ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(
+                    left: 6, top: 6, bottom: 16),
                 child: Text(
-                  '${logs.length} event${logs.length == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1B6B4D),
+                  log,
+                  style: tt.bodySmall?.copyWith(
+                    color: isError
+                        ? cs.error
+                        : isSuccess
+                            ? cs.onSurface
+                            : cs.onSurfaceVariant,
+                    height: 1.45,
                   ),
                 ),
               ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-
-        // ── Log list ──────────────────────────────────────────────────
-        Expanded(
-          child: logs.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.inbox_rounded, size: 48, color: cs.outlineVariant),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No activity yet',
-                        style: TextStyle(color: cs.outline, fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Events will appear here as the agent runs.',
-                        style: TextStyle(color: cs.outlineVariant, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: logs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 56),
-                  itemBuilder: (context, index) {
-                    final entry = logs[index];
-                    final isNew = index == 0;
-                    final isError = entry.toLowerCase().contains('error') ||
-                        entry.toLowerCase().contains('fail');
-                    final isSuccess = entry.toLowerCase().contains('success') ||
-                        entry.toLowerCase().contains('complet') ||
-                        entry.toLowerCase().contains('delivered');
-
-                    final dotColor = isError
-                        ? const Color(0xFFDC2626)
-                        : isSuccess
-                        ? const Color(0xFF1B6B4D)
-                        : const Color(0xFF94A3B8);
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Timeline dot
-                          Column(
-                            children: [
-                              const SizedBox(height: 3),
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: dotColor,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              entry,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                                fontWeight: isNew ? FontWeight.w600 : FontWeight.normal,
-                                color: isError
-                                    ? const Color(0xFFDC2626)
-                                    : isNew
-                                    ? const Color(0xFF1B6B4D)
-                                    : cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quick Actions Row
+// Quick actions row
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _QuickActionsRow extends StatelessWidget {
   const _QuickActionsRow({
-    required this.isPoweredOn,
     required this.processing,
-    required this.allReady,
+    required this.isPoweredOn,
     required this.onTogglePower,
     required this.onRunNow,
   });
 
-  final bool isPoweredOn;
   final bool processing;
-  final bool allReady;
+  final bool isPoweredOn;
   final Future<void> Function() onTogglePower;
   final Future<void> Function() onRunNow;
 
@@ -1882,26 +2057,25 @@ class _QuickActionsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Power toggle chip
         Expanded(
           child: _ActionChip(
-            icon: Icons.power_settings_new_rounded,
-            label: isPoweredOn ? 'Running' : 'Paused',
-            color: isPoweredOn ? const Color(0xFF1B6B4D) : const Color(0xFF94A3B8),
-            bg: isPoweredOn ? const Color(0xFFEBF3EE) : const Color(0xFFF1F5F9),
+            icon: isPoweredOn
+                ? Icons.pause_circle_rounded
+                : Icons.play_circle_rounded,
+            label: isPoweredOn ? 'Pause' : 'Resume',
             onTap: onTogglePower,
+            disabled: processing,
+            danger: isPoweredOn,
           ),
         ),
         const SizedBox(width: 8),
-        // Run now chip
         Expanded(
           child: _ActionChip(
-            icon: processing ? Icons.sync_rounded : Icons.play_circle_outline_rounded,
-            label: processing ? 'Processing…' : 'Run Now',
-            color: const Color(0xFF1B6B4D),
-            bg: const Color(0xFFEBF3EE),
-            onTap: (processing || !allReady || !isPoweredOn) ? null : onRunNow,
-            loading: processing,
+            icon: Icons.play_arrow_rounded,
+            label: 'Run Now',
+            onTap: onRunNow,
+            disabled: processing || !isPoweredOn,
+            primary: true,
           ),
         ),
       ],
@@ -1913,57 +2087,64 @@ class _ActionChip extends StatelessWidget {
   const _ActionChip({
     required this.icon,
     required this.label,
-    required this.color,
-    required this.bg,
-    this.onTap,
-    this.loading = false,
+    required this.onTap,
+    this.disabled = false,
+    this.primary = false,
+    this.danger = false,
   });
 
   final IconData icon;
   final String label;
-  final Color color;
-  final Color bg;
-  final Future<void> Function()? onTap;
-  final bool loading;
+  final Future<void> Function() onTap;
+  final bool disabled;
+  final bool primary;
+  final bool danger;
 
   @override
   Widget build(BuildContext context) {
-    final disabled = onTap == null;
-    return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-        decoration: BoxDecoration(
-          color: disabled ? const Color(0xFFF1F5F9) : bg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: disabled ? const Color(0xFFE2E8F0) : color.withOpacity(0.25),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            loading
-                ? SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: color,
+    final cs = Theme.of(context).colorScheme;
+    final Color bg = primary
+        ? cs.primaryContainer
+        : danger
+            ? cs.errorContainer
+            : cs.surfaceContainerLow;
+    final Color fg = primary
+        ? cs.onPrimaryContainer
+        : danger
+            ? cs.onErrorContainer
+            : cs.onSurfaceVariant;
+
+    return Material(
+      color: disabled
+          ? cs.surfaceContainerLow.withValues(alpha: 0.5)
+          : bg,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: disabled ? null : () => onTap(),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 14, vertical: 13),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 17,
+                  color: disabled
+                      ? cs.onSurface.withValues(alpha: 0.38)
+                      : fg),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: disabled
+                          ? cs.onSurface.withValues(alpha: 0.38)
+                          : fg,
                     ),
-                  )
-                : Icon(icon, size: 16, color: disabled ? const Color(0xFF94A3B8) : color),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: disabled ? const Color(0xFF94A3B8) : color,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1971,61 +2152,56 @@ class _ActionChip extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Alert Banner
+// Alert banner
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AlertBanner extends StatelessWidget {
   const _AlertBanner({
-    required this.icon,
-    required this.color,
-    required this.bg,
-    required this.border,
     required this.message,
-    required this.onTap,
+    required this.icon,
+    this.isError = false,
   });
-
-  final IconData icon;
-  final Color color;
-  final Color bg;
-  final Color border;
   final String message;
-  final Future<void> Function() onTap;
+  final IconData icon;
+  final bool isError;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                ),
-              ),
+    final cs = Theme.of(context).colorScheme;
+    final Color bg =
+        isError ? cs.errorContainer : const Color(0xFFFFF8E6);
+    final Color fg =
+        isError ? cs.onErrorContainer : const Color(0xFF92400E);
+
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: fg),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: fg,
+                    height: 1.4,
+                    fontWeight: FontWeight.w500,
+                  ),
             ),
-            Icon(Icons.chevron_right_rounded, size: 16, color: color),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Recent Activity Preview (home tab)
+// Recent activity preview
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _RecentActivityPreview extends StatelessWidget {
@@ -2035,106 +2211,49 @@ class _RecentActivityPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final preview = logs.take(5).toList();
+    final tt = Theme.of(context).textTheme;
+    final recent = logs.take(3).toList();
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE8EDEB)),
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
             child: Row(
               children: [
-                const Icon(Icons.history_rounded, size: 15, color: Color(0xFF6B9E89)),
-                const SizedBox(width: 6),
-                const Text(
-                  'Recent Activity',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF134235),
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                const Spacer(),
-                if (logs.isNotEmpty)
-                  Text(
-                    '${logs.length} total',
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF6B9E89),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                Icon(Icons.history_rounded,
+                    size: 14, color: cs.onSurfaceVariant),
+                const SizedBox(width: 7),
+                Text('Recent Activity',
+                    style: tt.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurfaceVariant,
+                        letterSpacing: 0.3)),
               ],
             ),
           ),
-          const Divider(height: 1),
-          if (preview.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Center(
+          Divider(
+              height: 1,
+              color: cs.outlineVariant.withValues(alpha: 0.4)),
+          ...recent.map((log) => Padding(
+                padding:
+                    const EdgeInsets.fromLTRB(14, 9, 14, 9),
                 child: Text(
-                  'No activity yet',
-                  style: TextStyle(fontSize: 12, color: cs.outlineVariant),
+                  log,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodySmall
+                      ?.copyWith(color: cs.onSurfaceVariant),
                 ),
-              ),
-            )
-          else
-            ...preview.asMap().entries.map((e) {
-              final isError = e.value.toLowerCase().contains('error') ||
-                  e.value.toLowerCase().contains('fail');
-              final isSuccess = e.value.toLowerCase().contains('success') ||
-                  e.value.toLowerCase().contains('complet') ||
-                  e.value.toLowerCase().contains('delivered');
-              final dotColor = isError
-                  ? const Color(0xFFDC2626)
-                  : isSuccess
-                  ? const Color(0xFF1B6B4D)
-                  : const Color(0xFFCBD5E1);
-
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: dotColor,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        e.value,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          color: isError
-                              ? const Color(0xFFDC2626)
-                              : e.key == 0
-                              ? const Color(0xFF1B6B4D)
-                              : cs.onSurfaceVariant,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
+              )),
+          const SizedBox(height: 4),
         ],
       ),
     );
@@ -2142,305 +2261,92 @@ class _RecentActivityPreview extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _UssdResponseCard — phone-dialog preview of the last USSD response
+// USSD response card
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _UssdResponseCard extends StatelessWidget {
   const _UssdResponseCard({
-    required this.ussdText,
+    required this.response,
     required this.outcome,
-    this.serviceName,
+    required this.serviceName,
   });
-
-  final String ussdText;
-  final String outcome;   // 'success' | 'failed' | 'unrecognized'
+  final String response;
+  final String? outcome;
   final String? serviceName;
-
-  Color get _accentColor => outcome == 'success'
-      ? const Color(0xFF1B6B4D)
-      : outcome == 'failed'
-      ? const Color(0xFFDC2626)
-      : const Color(0xFFD97706);
-
-  Color get _bgColor => outcome == 'success'
-      ? const Color(0xFFEBF3EE)
-      : outcome == 'failed'
-      ? const Color(0xFFFEF2F2)
-      : const Color(0xFFFFFBEB);
-
-  Color get _borderColor => outcome == 'success'
-      ? const Color(0xFFC3D9CE)
-      : outcome == 'failed'
-      ? const Color(0xFFFECACA)
-      : const Color(0xFFFDE68A);
-
-  IconData get _icon => outcome == 'success'
-      ? Icons.check_circle_outline_rounded
-      : outcome == 'failed'
-      ? Icons.cancel_outlined
-      : Icons.help_outline_rounded;
-
-  String get _outcomeLabel => outcome == 'success'
-      ? 'Successful'
-      : outcome == 'failed'
-      ? 'Failed'
-      : 'Unrecognized';
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final isSuccess = outcome == 'success';
+    final isFailed = outcome == 'failed';
+
+    final Color accent = isSuccess
+        ? cs.primary
+        : isFailed
+            ? cs.error
+            : const Color(0xFFF59E0B);
+    final Color bg = isSuccess
+        ? cs.primaryContainer.withValues(alpha: 0.35)
+        : isFailed
+            ? cs.errorContainer.withValues(alpha: 0.35)
+            : const Color(0xFFFFFBEB);
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE8EDEB)),
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Card header ─────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFFE8EDEB))),
-            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 11, 13, 7),
             child: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEDE9FE),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.phone_android_rounded,
-                    size: 14,
-                    color: Color(0xFF7C3AED),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Last USSD Response',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF134235),
-                    letterSpacing: 0.2,
-                  ),
-                ),
+                Icon(Icons.smartphone_rounded,
+                    size: 14, color: accent),
+                const SizedBox(width: 7),
+                Text('USSD Response',
+                    style: tt.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: accent,
+                        letterSpacing: 0.3)),
                 const Spacer(),
-                // Outcome badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _bgColor,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _borderColor),
+                if (serviceName != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(serviceName!,
+                        style: tt.labelSmall?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w700)),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(_icon, size: 10, color: _accentColor),
-                      const SizedBox(width: 3),
-                      Text(
-                        _outcomeLabel,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: _accentColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
-
-          // ── Phone dialog mockup ──────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 280),
-                child: Column(
-                  children: [
-                    // Phone top chrome bar
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD4D0C8),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(14),
-                          topRight: Radius.circular(14),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 5,
-                            height: 5,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF9E9B93),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              serviceName ?? 'USSD Dialog',
-                              style: const TextStyle(
-                                fontSize: 8,
-                                fontFamily: 'monospace',
-                                color: Color(0xFF5A5752),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Dialog content area (phone body bg)
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(8, 20, 8, 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF0EDE8),
-                        border: Border.all(color: const Color(0xFFC8C5BD)),
-                        borderRadius: const BorderRadius.only(
-                          bottomLeft: Radius.circular(14),
-                          bottomRight: Radius.circular(14),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          // Dialog card
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: _borderColor,
-                                width: 1.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.06),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Dialog title bar
-                                Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: _bgColor,
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(13),
-                                      topRight: Radius.circular(13),
-                                    ),
-                                    border: Border(
-                                      bottom: BorderSide(color: _borderColor),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(_icon, size: 13, color: _accentColor),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        serviceName ?? 'Carrier Message',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: _accentColor,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-
-                                // Dialog body text
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                                  child: Text(
-                                    ussdText,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFF1A1A1A),
-                                      height: 1.5,
-                                    ),
-                                  ),
-                                ),
-
-                                // OK button
-                                Container(
-                                  width: double.infinity,
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      top: BorderSide(
-                                          color: const Color(0xFFE5E7EB)),
-                                    ),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 10),
-                                  child: Center(
-                                    child: Text(
-                                      'OK',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: _accentColor,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: 8),
-
-                          // Phone nav bar
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              Container(
-                                  width: 20,
-                                  height: 3,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF9E9B93),
-                                    borderRadius: BorderRadius.circular(2),
-                                  )),
-                              Container(
-                                width: 20,
-                                height: 20,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                      color: const Color(0xFF9E9B93), width: 1.5),
-                                ),
-                              ),
-                              Container(
-                                  width: 20,
-                                  height: 3,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF9E9B93),
-                                    borderRadius: BorderRadius.circular(2),
-                                  )),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          Container(
+            width: double.infinity,
+            margin:
+                const EdgeInsets.fromLTRB(13, 0, 13, 13),
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: accent.withValues(alpha: 0.2)),
+            ),
+            child: Text(
+              response,
+              style: tt.bodySmall?.copyWith(
+                  fontFamily: 'monospace',
+                  color: cs.onSurface,
+                  height: 1.5),
             ),
           ),
         ],
@@ -2449,173 +2355,158 @@ class _UssdResponseCard extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Status hero card
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _StatusHeroCard extends StatelessWidget {
   const _StatusHeroCard({
     required this.status,
-    required this.currentJobId,
-    required this.lastError,
     required this.processing,
-    required this.registered,
-    required this.allReady,
     required this.isPoweredOn,
+    required this.currentJobId,
+    required this.lastJobOutcome,
+    required this.lastServiceName,
+    required this.onTogglePower,
+    required this.onRunNow,
   });
 
   final String status;
-  final String? currentJobId;
-  final String? lastError;
   final bool processing;
-  final bool registered;
-  final bool allReady;
   final bool isPoweredOn;
-
-  _StatusStyle _style() {
-    if (lastError != null) return _StatusStyle(
-      icon: Icons.error_outline_rounded,
-      color: const Color(0xFFDC2626),
-      bg: const Color(0xFFFEF2F2),
-      border: const Color(0xFFFECACA),
-      label: 'Error',
-    );
-    if (processing) return _StatusStyle(
-      icon: Icons.sync_rounded,
-      color: const Color(0xFF1B6B4D),
-      bg: const Color(0xFFEBF3EE),
-      border: const Color(0xFFC3D9CE),
-      label: 'Processing',
-    );
-    if (!registered) return _StatusStyle(
-      icon: Icons.link_off_rounded,
-      color: const Color(0xFF64748B),
-      bg: const Color(0xFFF8FAFC),
-      border: const Color(0xFFE2E8F0),
-      label: 'Not registered',
-    );
-    if (!isPoweredOn) return _StatusStyle(
-      icon: Icons.power_off_rounded,
-      color: const Color(0xFFE65100),
-      bg: const Color(0xFFFFF8E1),
-      border: const Color(0xFFFFE082),
-      label: 'Paused',
-    );
-    if (!allReady) return _StatusStyle(
-      icon: Icons.warning_amber_rounded,
-      color: const Color(0xFFB45309),
-      bg: const Color(0xFFFFFBEB),
-      border: const Color(0xFFFDE68A),
-      label: 'Needs attention',
-    );
-    return _StatusStyle(
-      icon: Icons.check_circle_rounded,
-      color: const Color(0xFF1B6B4D),
-      bg: const Color(0xFFEBF3EE),
-      border: const Color(0xFFC3D9CE),
-      label: 'Active',
-    );
-  }
+  final String? currentJobId;
+  final String? lastJobOutcome;
+  final String? lastServiceName;
+  final Future<void> Function() onTogglePower;
+  final Future<void> Function() onRunNow;
 
   @override
   Widget build(BuildContext context) {
-    final s = _style();
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    final Color bg = processing
+        ? cs.secondaryContainer
+        : isPoweredOn
+            ? cs.primaryContainer
+            : cs.surfaceContainerHighest;
+    final Color fg = processing
+        ? cs.onSecondaryContainer
+        : isPoweredOn
+            ? cs.onPrimaryContainer
+            : cs.onSurfaceVariant;
 
     return Container(
-      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: s.bg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: s.border),
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
       ),
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  color: s.color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
+                  color: fg.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(13),
                 ),
-                child: Icon(s.icon, size: 18, color: s.color),
+                child: processing
+                    ? Center(
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: fg),
+                        ),
+                      )
+                    : Icon(
+                        isPoweredOn
+                            ? Icons.bolt_rounded
+                            : Icons.power_settings_new_rounded,
+                        size: 24,
+                        color: fg,
+                      ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      s.label,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: s.color.withOpacity(0.7),
-                        letterSpacing: 0.4,
-                      ),
+                      processing
+                          ? 'Processing'
+                          : isPoweredOn
+                              ? 'Agent Active'
+                              : 'Agent Paused',
+                      style: tt.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800, color: fg),
                     ),
+                    const SizedBox(height: 2),
                     Text(
                       status,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: s.color,
-                        height: 1.2,
-                      ),
+                      style: tt.bodySmall?.copyWith(
+                          color: fg.withValues(alpha: 0.75),
+                          height: 1.3),
                     ),
                   ],
                 ),
               ),
-              if (processing)
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: s.color,
-                  ),
-                ),
+              _PowerButton(
+                isPoweredOn: isPoweredOn,
+                onToggle: onTogglePower,
+                disabled: processing,
+                color: fg,
+              ),
             ],
           ),
-          if (currentJobId != null) ...[
-            const SizedBox(height: 12),
+          if (currentJobId != null || lastJobOutcome != null) ...[
+            const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: s.color.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
+                color: fg.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.receipt_long_rounded, size: 12, color: s.color),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Job: $currentJobId',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      color: s.color,
-                      fontWeight: FontWeight.w600,
+                  if (processing && currentJobId != null) ...[
+                    Icon(Icons.pending_rounded,
+                        size: 13,
+                        color: fg.withValues(alpha: 0.7)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Job: ${currentJobId!.length > 14 ? '${currentJobId!.substring(0, 14)}…' : currentJobId}',
+                      style: tt.labelSmall?.copyWith(
+                          fontFamily: 'monospace',
+                          color: fg.withValues(alpha: 0.8)),
                     ),
-                  ),
+                  ] else if (lastJobOutcome != null) ...[
+                    Icon(
+                      lastJobOutcome == 'success'
+                          ? Icons.check_circle_rounded
+                          : lastJobOutcome == 'failed'
+                              ? Icons.cancel_rounded
+                              : Icons.hourglass_bottom_rounded,
+                      size: 13,
+                      color: fg.withValues(alpha: 0.7),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${lastJobOutcome == 'success' ? 'Completed' : lastJobOutcome == 'failed' ? 'Failed' : 'Waiting'}${lastServiceName != null ? ' · $lastServiceName' : ''}',
+                        style: tt.labelSmall?.copyWith(
+                            color: fg.withValues(alpha: 0.8)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ],
-              ),
-            ),
-          ],
-          if (lastError != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFDC2626).withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                lastError!,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFFDC2626),
-                  fontFamily: 'monospace',
-                ),
               ),
             ),
           ],
@@ -2625,20 +2516,9 @@ class _StatusHeroCard extends StatelessWidget {
   }
 }
 
-class _StatusStyle {
-  const _StatusStyle({
-    required this.icon,
-    required this.color,
-    required this.bg,
-    required this.border,
-    required this.label,
-  });
-  final IconData icon;
-  final Color color;
-  final Color bg;
-  final Color border;
-  final String label;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Device info card
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _DeviceInfoCard extends StatelessWidget {
   const _DeviceInfoCard({required this.config});
@@ -2646,338 +2526,187 @@ class _DeviceInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE8EDEB)),
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            children: [
-              Icon(Icons.phone_android_rounded, size: 14, color: Color(0xFF6B9E89)),
-              SizedBox(width: 6),
-              Text(
-                'Device',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF134235),
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: _DeviceInfoCell(
-                  label: 'Name',
-                  value: config.name,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _DeviceInfoCell(
-                  label: 'Device ID',
-                  value: config.deviceId.length > 12
-                      ? '${config.deviceId.substring(0, 12)}…'
-                      : config.deviceId,
-                  mono: true,
-                ),
-              ),
+              Icon(Icons.phone_android_rounded,
+                  size: 14, color: cs.onSurfaceVariant),
+              const SizedBox(width: 7),
+              Text('This Device',
+                  style: tt.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurfaceVariant,
+                      letterSpacing: 0.3)),
             ],
           ),
+          const SizedBox(height: 10),
+          _InfoRow(
+              icon: Icons.badge_rounded,
+              label: 'Name',
+              value: config.name),
+          const SizedBox(height: 5),
+          _InfoRow(
+              icon: Icons.fingerprint_rounded,
+              label: 'ID',
+              value: config.deviceId,
+              mono: true),
         ],
       ),
     );
   }
 }
 
-class _DeviceInfoCell extends StatelessWidget {
-  const _DeviceInfoCell({required this.label, required this.value, this.mono = false});
-  final String label;
-  final String value;
-  final bool mono;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF6B9E89),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF134235),
-            fontFamily: mono ? 'monospace' : null,
-          ),
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// _LicenseBanner — full-width hero banner with logo + app name + status badge
+// License banner (subscription owner branding)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _LicenseBanner extends StatefulWidget {
-  const _LicenseBanner({this.info});
-  final SubscriptionInfo? info;
+  const _LicenseBanner({
+    required this.subscriptionInfo,
+    required this.onReload,
+  });
+  final SubscriptionInfo subscriptionInfo;
+  final Future<void> Function() onReload;
 
   @override
   State<_LicenseBanner> createState() => _LicenseBannerState();
 }
 
-class _LicenseBannerState extends State<_LicenseBanner>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _fadeCtrl;
-  late Animation<double> _fadeAnim;
-  bool _imageLoaded = false;
-  bool _imageError  = false;
+class _LicenseBannerState extends State<_LicenseBanner> {
+  bool _imgError = false;
 
   @override
-  void initState() {
-    super.initState();
-    _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeIn);
-  }
-
-  @override
-  void didUpdateWidget(_LicenseBanner oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.info?.logoFullUrl != widget.info?.logoFullUrl) {
-      setState(() {
-        _imageLoaded = false;
-        _imageError = false;
-      });
-      _fadeCtrl.reset();
+  void didUpdateWidget(_LicenseBanner old) {
+    super.didUpdateWidget(old);
+    if (old.subscriptionInfo.logoFullUrl !=
+        widget.subscriptionInfo.logoFullUrl) {
+      setState(() => _imgError = false);
     }
   }
 
-  @override
-  void dispose() {
-    _fadeCtrl.dispose();
-    super.dispose();
-  }
-
-  void _onImageLoaded() {
-    if (!mounted || _imageLoaded) return;
-    setState(() => _imageLoaded = true);
-    _fadeCtrl.forward();
-  }
-
-  void _onImageError() {
-    if (!mounted) return;
-    setState(() => _imageError = true);
+  String _fmtDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final info     = widget.info;
-    final String?  logoUrl  = info?.logoFullUrl;
-    final String   appName  = info?.appName ?? 'dRecharge';
-
-    final bool isBlocked  = info != null &&
-        (info.state == 'expired' ||
-         info.state == 'inactive' ||
-         info.state == 'untracked');
-    final bool isExpiring = info?.isExpiring ?? false;
-    final bool isActive   = info?.state == 'active';
-
-    // ── Gradient background ────────────────────────────────────────────────
-    final List<Color> gradientColors = isBlocked
-        ? [const Color(0xFF7F1D1D), const Color(0xFF991B1B)]
-        : isExpiring
-        ? [const Color(0xFF78350F), const Color(0xFF92400E)]
-        : [const Color(0xFF134235), const Color(0xFF1B6B4D)];
-
-    // ── Status badge ──────────────────────────────────────────────────────
-    final Color statusColor = isBlocked
-        ? const Color(0xFFDC2626)
-        : isExpiring
-        ? const Color(0xFFD97706)
-        : const Color(0xFF16A34A);
-
-    final String statusLabel = info == null
-        ? 'Loading…'
-        : isBlocked
-        ? _blockedLabel(info.state)
-        : isExpiring
-        ? 'Expiring in ${info.daysUntilExpiry ?? 0}d'
-        : 'Active';
-
-    final IconData statusIcon = isBlocked
-        ? Icons.error_outline_rounded
-        : isExpiring
-        ? Icons.warning_amber_rounded
-        : Icons.verified_rounded;
+    final tt = Theme.of(context).textTheme;
+    final info = widget.subscriptionInfo;
+    final expiry = info.expiresAt;
+    final bool expired =
+        expiry != null && expiry.isBefore(DateTime.now());
+    final bool expiringSoon = !expired &&
+        expiry != null &&
+        expiry.isBefore(
+            DateTime.now().add(const Duration(days: 7)));
 
     return Container(
-      width: double.infinity,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: gradientColors,
+          colors: expired
+              ? const [Color(0xFF7F1D1D), Color(0xFF991B1B)]
+              : expiringSoon
+                  ? const [Color(0xFF78350F), Color(0xFF92400E)]
+                  : const [Color(0xFF134235), Color(0xFF1B6B4D)],
         ),
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: Stack(
+      padding: const EdgeInsets.all(16),
+      child: Row(
         children: [
-          // ── Logo as full-bleed background image ─────────────────────────
-          if (logoUrl != null && !_imageError)
-            FadeTransition(
-              opacity: _fadeAnim,
-              child: SizedBox(
-                width: double.infinity,
-                child: Image.network(
-                  logoUrl,
-                  fit: BoxFit.fitWidth,
-                  frameBuilder: (ctx, child, frame, wasSync) {
-                    if (frame != null) {
-                      WidgetsBinding.instance
-                          .addPostFrameCallback((_) => _onImageLoaded());
-                    }
-                    return child;
-                  },
-                  errorBuilder: (_, __, ___) {
-                    WidgetsBinding.instance
-                        .addPostFrameCallback((_) => _onImageError());
-                    return const SizedBox.shrink();
-                  },
+          if (info.logoFullUrl != null && !_imgError)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                info.logoFullUrl!,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) {
+                  WidgetsBinding.instance.addPostFrameCallback(
+                      (_) => setState(() => _imgError = true));
+                  return _logoPlaceholder();
+                },
+                loadingBuilder: (_, child, progress) => progress == null
+                    ? child
+                    : const _ShimmerPulse(
+                        width: 48, height: 48, radius: 10),
+              ),
+            )
+          else
+            _logoPlaceholder(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  info.appName ?? 'Licensed',
+                  style: tt.titleSmall?.copyWith(
+                      color: Colors.white, fontWeight: FontWeight.w700),
                 ),
-              ),
-            ),
-
-          // ── Shimmer while logo is loading ────────────────────────────────
-          if (logoUrl != null && !_imageLoaded && !_imageError)
-            Positioned.fill(
-              child: _ShimmerPulse(
-                baseColor:      Colors.white.withValues(alpha: 0.04),
-                highlightColor: Colors.white.withValues(alpha: 0.13),
-              ),
-            ),
-
-          // ── Foreground content ────────────────────────────────────────────
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Spacer(),
-
-                  // Status pill — only shown for blocked / expiring states
-                  if (!isActive || isExpiring)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.88),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.30),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(statusIcon, size: 11, color: Colors.white),
-                          const SizedBox(width: 4),
-                          Text(
-                            statusLabel,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              letterSpacing: 0.2,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                if (expiry != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    expired
+                        ? 'Subscription expired'
+                        : expiringSoon
+                            ? 'Expires ${_fmtDate(expiry)}'
+                            : 'Active until ${_fmtDate(expiry)}',
+                    style: tt.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.75)),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
+          _ReloadButton(onReload: widget.onReload),
         ],
       ),
     );
   }
 
-  String _blockedLabel(String state) => switch (state) {
-    'expired'   => 'Expired',
-    'inactive'  => 'Inactive',
-    'untracked' => 'Unregistered',
-    _           => 'Blocked',
-  };
-}
-
-// Small logo thumbnail used inside the banner content row
-class _LogoThumb extends StatelessWidget {
-  const _LogoThumb({this.logoUrl});
-  final String? logoUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(11),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: logoUrl != null
-          ? Image.network(
-              logoUrl!,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const _BoltIcon(),
-            )
-          : const _BoltIcon(),
-    );
-  }
-}
-
-class _BoltIcon extends StatelessWidget {
-  const _BoltIcon();
-  @override
-  Widget build(BuildContext context) => const Icon(
-        Icons.bolt_rounded,
-        color: Colors.white,
-        size: 24,
+  Widget _logoPlaceholder() => Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Icon(Icons.business_rounded,
+            color: Colors.white, size: 24),
       );
 }
 
-// ── Shimmer pulse animation ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Shimmer pulse (loading placeholder)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _ShimmerPulse extends StatefulWidget {
-  const _ShimmerPulse({
-    required this.baseColor,
-    required this.highlightColor,
-  });
-  final Color baseColor;
-  final Color highlightColor;
+  const _ShimmerPulse(
+      {required this.width, required this.height, this.radius = 8});
+  final double width;
+  final double height;
+  final double radius;
 
   @override
   State<_ShimmerPulse> createState() => _ShimmerPulseState();
@@ -2986,14 +2715,16 @@ class _ShimmerPulse extends StatefulWidget {
 class _ShimmerPulseState extends State<_ShimmerPulse>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
+  late Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    )..repeat(reverse: true);
+        vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.25, end: 0.65)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -3005,221 +2736,116 @@ class _ShimmerPulseState extends State<_ShimmerPulse>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _ctrl,
+      animation: _anim,
       builder: (_, __) => Container(
-        color: Color.lerp(
-          widget.baseColor,
-          widget.highlightColor,
-          Curves.easeInOut.transform(_ctrl.value),
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: _anim.value),
+          borderRadius: BorderRadius.circular(widget.radius),
         ),
       ),
     );
   }
 }
 
-
-
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-// _SubscriptionCard — compact: status + expiry progress bar + reload
+// Subscription card
 // ─────────────────────────────────────────────────────────────────────────────
-
 
 class _SubscriptionCard extends StatelessWidget {
-  const _SubscriptionCard({this.info, required this.onReload});
-  final SubscriptionInfo? info;
+  const _SubscriptionCard(
+      {required this.info, required this.onReload});
+  final SubscriptionInfo info;
   final Future<void> Function() onReload;
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
+  String _fmt(DateTime d) => '${d.day} ${_months[d.month - 1]}';
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final expiry = info.expiresAt;
+    final expired =
+        expiry != null && expiry.isBefore(DateTime.now());
+    final expiringSoon = !expired &&
+        expiry != null &&
+        expiry.isBefore(
+            DateTime.now().add(const Duration(days: 7)));
 
-    // Loading skeleton
-    if (info == null) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: cs.outlineVariant),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.shield_outlined, size: 18, color: cs.outline),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Checking licence…',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: cs.outline),
-              ),
-            ),
-            _ReloadButton(onReload: onReload),
-          ],
-        ),
-      );
-    }
-
-    final String state    = info!.state;
-    final bool isActive   = state == 'active';
-    final bool isExpiring = info!.isExpiring;
-    final bool isBlocked  = state == 'expired' || state == 'inactive' || state == 'untracked';
-
-    final Color statusColor = isBlocked
-        ? const Color(0xFFDC2626)
-        : isExpiring
-        ? const Color(0xFFD97706)
-        : const Color(0xFF1B6B4D);
-
-    final String statusLabel = switch (state) {
-      'active'    => isExpiring ? 'Expiring Soon' : 'Active',
-      'expired'   => 'Expired',
-      'inactive'  => 'Inactive',
-      'untracked' => 'Unregistered',
-      _           => 'Unknown',
-    };
-
-    // Expiry progress bar (days remaining / 365)
-    final double barFraction = (isActive || isExpiring) && info!.daysUntilExpiry != null
-        ? (info!.daysUntilExpiry! / 365.0).clamp(0.0, 1.0)
-        : 0.0;
-
-    final Color cardBg = isBlocked
-        ? const Color(0xFFFFF5F5)
-        : isExpiring
-        ? const Color(0xFFFFFBEB)
-        : cs.surfaceContainerLow;
-
-    final Color cardBorder = isBlocked
-        ? const Color(0xFFFECACA)
-        : isExpiring
-        ? const Color(0xFFFDE68A)
-        : cs.outlineVariant;
+    final Color statusColor = expired
+        ? cs.error
+        : expiringSoon
+            ? const Color(0xFFF59E0B)
+            : cs.primary;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cardBorder),
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(14),
+      child: Row(
         children: [
-          // ── Top row: label + status badge + reload ────────────────────
-          Row(
-            children: [
-              Icon(
-                isBlocked ? Icons.error_outline_rounded : Icons.shield_outlined,
-                size: 16,
-                color: statusColor,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Licence',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: statusColor.withOpacity(0.7),
-                  letterSpacing: 0.3,
-                ),
-              ),
-              const Spacer(),
-              // Status badge
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: statusColor.withOpacity(0.3)),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _ReloadButton(onReload: onReload),
-            ],
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.workspace_premium_rounded,
+                size: 20, color: statusColor),
           ),
-
-          // ── Expiry label + days ───────────────────────────────────────
-          if (info!.expiresAt != null) ...[
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text('Subscription',
+                    style: tt.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurfaceVariant,
+                        letterSpacing: 0.3)),
+                const SizedBox(height: 2),
                 Text(
-                  isBlocked ? 'Expired on' : 'Expires on',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-                Text(
-                  _formatDate(info!.expiresAt!),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: statusColor,
-                  ),
+                  expired
+                      ? 'Expired — contact your reseller'
+                      : expiry == null
+                          ? 'Lifetime access'
+                          : expiringSoon
+                              ? 'Expiring soon: ${_fmt(expiry)}'
+                              : 'Active until ${_fmt(expiry)}',
+                  style: tt.bodySmall?.copyWith(
+                      color: expired ? cs.error : cs.onSurface,
+                      fontWeight: FontWeight.w500),
                 ),
               ],
             ),
-          ],
-
-          // ── Progress bar ──────────────────────────────────────────────
-          if (barFraction > 0) ...[
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: barFraction,
-                minHeight: 6,
-                backgroundColor: cs.outlineVariant.withOpacity(0.35),
-                valueColor: AlwaysStoppedAnimation<Color>(statusColor),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              info!.daysUntilExpiry != null
-                  ? '${info!.daysUntilExpiry} days remaining'
-                  : '',
-              style: TextStyle(
-                fontSize: 10,
-                color: statusColor.withOpacity(0.75),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            onPressed: () => onReload(),
+            style: IconButton.styleFrom(
+                foregroundColor: cs.onSurfaceVariant,
+                padding: const EdgeInsets.all(8)),
+          ),
         ],
       ),
     );
   }
-
-  static String _formatDate(DateTime dt) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
-  }
-
-  static Future<void> _launchUrl(Uri uri) async {
-    const platform = MethodChannel('drecharge_agent/native');
-    try {
-      await platform.invokeMethod('openUrl', {'url': uri.toString()});
-    } catch (_) {}
-  }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reload button (used in license banner)
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _ReloadButton extends StatefulWidget {
   const _ReloadButton({required this.onReload});
@@ -3229,90 +2855,74 @@ class _ReloadButton extends StatefulWidget {
   State<_ReloadButton> createState() => _ReloadButtonState();
 }
 
-class _ReloadButtonState extends State<_ReloadButton>
-    with SingleTickerProviderStateMixin {
+class _ReloadButtonState extends State<_ReloadButton> {
   bool _loading = false;
-  late final AnimationController _spinCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _spinCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-  }
-
-  @override
-  void dispose() {
-    _spinCtrl.dispose();
-    super.dispose();
-  }
 
   Future<void> _tap() async {
     if (_loading) return;
     setState(() => _loading = true);
-    _spinCtrl.repeat();
     try {
       await widget.onReload();
     } finally {
-      if (mounted) {
-        _spinCtrl.stop();
-        _spinCtrl.reset();
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: _tap,
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: RotationTransition(
-          turns: _spinCtrl,
-          child: Icon(
-            Icons.refresh_rounded,
-            size: 16,
-            color: _loading ? cs.primary : cs.outline,
-          ),
-        ),
+    return IconButton(
+      icon: _loading
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white))
+          : const Icon(Icons.refresh_rounded,
+              color: Colors.white, size: 18),
+      onPressed: _loading ? null : _tap,
+      style: IconButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.white.withValues(alpha: 0.15),
+        padding: const EdgeInsets.all(8),
       ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Status dot indicator
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _StatusDot extends StatelessWidget {
-  const _StatusDot({required this.on, required this.label});
-  final bool on;
-  final String label;
+  const _StatusDot({
+    required this.processing,
+    required this.poweredOn,
+    required this.hasIssue,
+  });
+  final bool processing;
+  final bool poweredOn;
+  final bool hasIssue;
 
   @override
   Widget build(BuildContext context) {
-    final color = on ? const Color(0xFF1B6B4D) : const Color(0xFFDC2626);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: color,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+    final Color color = processing
+        ? const Color(0xFF3B82F6)
+        : hasIssue
+            ? const Color(0xFFF59E0B)
+            : poweredOn
+                ? const Color(0xFF22C55E)
+                : const Color(0xFF9CA3AF);
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Info row (label + value)
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
@@ -3321,7 +2931,6 @@ class _InfoRow extends StatelessWidget {
     required this.value,
     this.mono = false,
   });
-
   final IconData icon;
   final String label;
   final String value;
@@ -3330,23 +2939,25 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     return Row(
       children: [
-        Icon(icon, size: 16, color: cs.outline),
-        const SizedBox(width: 8),
-        Text(
-          '$label  ',
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: cs.outline),
-        ),
+        Icon(icon,
+            size: 13, color: cs.onSurfaceVariant.withValues(alpha: 0.6)),
+        const SizedBox(width: 7),
+        Text('$label  ',
+            style:
+                tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
         Expanded(
           child: Text(
             value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontFamily: mono ? 'monospace' : null,
-            ),
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            style: tt.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              fontFamily: mono ? 'monospace' : null,
+              color: cs.onSurface,
+            ),
           ),
         ),
       ],
@@ -3354,61 +2965,46 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Power toggle button
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Power Button — shown in the AppBar ───────────────────────────────────────
 class _PowerButton extends StatelessWidget {
-  const _PowerButton({required this.isPoweredOn, required this.onToggle});
+  const _PowerButton({
+    required this.isPoweredOn,
+    required this.onToggle,
+    this.disabled = false,
+    this.color,
+  });
   final bool isPoweredOn;
   final Future<void> Function() onToggle;
+  final bool disabled;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    // ON → bright green pill; OFF → red pill — both readable on the green AppBar
-    final onColor  = const Color(0xFF4ADE80);  // lighter green — pops on dark green bg
-    final offColor = const Color(0xFFFCA5A5);  // light red — pops on dark green bg
-    return Tooltip(
-      message: isPoweredOn ? 'Power OFF' : 'Power ON',
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: onToggle,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.power_settings_new_rounded,
-                size: 15,
-                color: isPoweredOn ? onColor : offColor,
-              ),
-              const SizedBox(width: 5),
-              Text(
-                isPoweredOn ? 'ON' : 'OFF',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: isPoweredOn ? onColor : offColor,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-        ),
+    final eff =
+        color ?? Theme.of(context).colorScheme.onSurface;
+    return IconButton(
+      icon: Icon(
+        isPoweredOn
+            ? Icons.power_settings_new_rounded
+            : Icons.power_off_rounded,
+        color:
+            disabled ? eff.withValues(alpha: 0.38) : eff,
+        size: 20,
+      ),
+      onPressed: disabled ? null : () => onToggle(),
+      style: IconButton.styleFrom(
+        backgroundColor: eff.withValues(alpha: 0.12),
+        padding: const EdgeInsets.all(10),
       ),
     );
   }
 }
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-// SettingsPage — backend URL, permissions, device registration
+// SettingsPage
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SettingsPage extends StatelessWidget {
@@ -3456,334 +3052,335 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     final registered = config != null;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings'), elevation: 0),
+      backgroundColor: cs.surfaceContainerLowest,
+      appBar: AppBar(
+        title: const Text('Settings'),
+        backgroundColor: cs.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-          // ── Permissions section ─────────────────────────────────────────
-          _SectionHeader(title: 'Permissions'),
-          Card(
-            elevation: 0,
-            color: cs.surfaceContainerLow,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: cs.outlineVariant),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _PermissionTile(
-                    icon: Icons.phone,
-                    title: 'Phone & Calls',
-                    subtitle: 'CALL_PHONE + READ_PHONE_STATE',
-                    granted: phoneGranted,
-                  ),
-                  const SizedBox(height: 10),
-                  _PermissionTile(
-                    icon: Icons.sms,
-                    title: 'SMS Read',
-                    subtitle: 'READ_SMS',
-                    granted: smsGranted,
-                  ),
-                  const SizedBox(height: 10),
-                  _PermissionTile(
-                    icon: Icons.accessibility_new,
-                    title: 'Accessibility Service',
-                    subtitle: 'Auto-fill USSD dialogs',
-                    granted: accessibilityEnabled,
-                  ),
-                  const SizedBox(height: 16),
-                  if (!phoneGranted || !smsGranted)
-                    OutlinedButton.icon(
-                      onPressed: onRequestPermissions,
-                      icon: const Icon(Icons.security),
-                      label: const Text('Grant Permissions'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    ),
-                  if (!accessibilityEnabled) ...[
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: onOpenAccessibility,
-                      icon: const Icon(Icons.accessibility_new),
-                      label: const Text('Open Accessibility Settings'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    ),
-                  ],
 
-                  const SizedBox(height: 20),
-                  const Divider(),
-                  const SizedBox(height: 12),
-                  Text(
-                    'System Restrictions',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: cs.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: () => NativeBridge().openAppInfo(),
-                    icon: const Icon(Icons.lock_open_rounded, size: 18),
-                    label: const Text('Allow Restricted Settings (Android 13+)'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () => NativeBridge().openBatterySettings(),
-                    icon: const Icon(Icons.battery_charging_full_rounded, size: 18),
-                    label: const Text('Exclude from Battery Saver'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
+          // ── Permissions ──────────────────────────────────────────────────
+          _SectionHeader(title: 'Permissions'),
+          _SettingsCard(
+            child: Column(
+              children: [
+                _PermissionTile(
+                  icon: Icons.phone_rounded,
+                  title: 'Phone & Calls',
+                  subtitle: 'CALL_PHONE + READ_PHONE_STATE',
+                  granted: phoneGranted,
+                ),
+                _SettingsDivider(),
+                _PermissionTile(
+                  icon: Icons.sms_rounded,
+                  title: 'SMS Read',
+                  subtitle: 'READ_SMS + RECEIVE_SMS',
+                  granted: smsGranted,
+                ),
+                _SettingsDivider(),
+                _PermissionTile(
+                  icon: Icons.accessibility_new_rounded,
+                  title: 'Accessibility Service',
+                  subtitle: 'Auto-interact with USSD dialogs',
+                  granted: accessibilityEnabled,
+                ),
+                if (!phoneGranted || !smsGranted) ...[
+                  _SettingsDivider(),
+                  _SettingsTile(
+                    icon: Icons.security_rounded,
+                    title: 'Grant Phone & SMS',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded,
+                        size: 13, color: cs.onSurfaceVariant),
+                    onTap: () => onRequestPermissions(),
                   ),
                 ],
-              ),
+                if (!accessibilityEnabled) ...[
+                  _SettingsDivider(),
+                  _SettingsTile(
+                    icon: Icons.accessibility_new_rounded,
+                    title: 'Enable Accessibility Service',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded,
+                        size: 13, color: cs.onSurfaceVariant),
+                    onTap: () => onOpenAccessibility(),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // ── Backend section ─────────────────────────────────────────────
-          _SectionHeader(title: 'Backend Server'),
-          Card(
-            elevation: 0,
-            color: cs.surfaceContainerLow,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: cs.outlineVariant),
+          const SizedBox(height: 6),
+          _SettingsCard(
+            child: Column(
+              children: [
+                _SettingsTile(
+                  icon: Icons.lock_open_rounded,
+                  title: 'Allow Restricted Settings',
+                  subtitle: 'Required on Android 13+',
+                  trailing: Icon(Icons.open_in_new_rounded,
+                      size: 13, color: cs.onSurfaceVariant),
+                  onTap: () => NativeBridge().openAppInfo(),
+                ),
+                _SettingsDivider(),
+                _SettingsTile(
+                  icon: Icons.battery_charging_full_rounded,
+                  title: 'Battery Optimization',
+                  subtitle: 'Exclude from battery saver',
+                  trailing: Icon(Icons.open_in_new_rounded,
+                      size: 13, color: cs.onSurfaceVariant),
+                  onTap: () => NativeBridge().openBatterySettings(),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(height: 20),
+
+          // ── Backend Server ───────────────────────────────────────────────
+          _SectionHeader(title: 'Backend Server'),
+          _SettingsCard(
             child: Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (backendConfigured) ...[
                     Row(
                       children: [
-                        Icon(Icons.check_circle, color: cs.primary, size: 16),
-                        const SizedBox(width: 8),
+                        Icon(Icons.check_circle_rounded,
+                            size: 13, color: cs.primary),
+                        const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             BackendService.currentBaseUrl,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                  fontFamily: 'monospace',
-                                ),
+                            style: tt.bodySmall?.copyWith(
+                                fontFamily: 'monospace',
+                                color: cs.onSurfaceVariant),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                   ],
                   if (registered)
                     Container(
                       padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
                         color: cs.tertiaryContainer,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.info_outline,
-                            color: cs.onTertiaryContainer,
-                            size: 14,
-                          ),
+                          Icon(Icons.info_outline_rounded,
+                              color: cs.onTertiaryContainer,
+                              size: 13),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Changing the backend will unlink this device.',
-                              style: TextStyle(
-                                color: cs.onTertiaryContainer,
-                                fontSize: 12,
-                              ),
+                              'Changing the URL will unlink this device.',
+                              style: tt.bodySmall?.copyWith(
+                                  color: cs.onTertiaryContainer),
                             ),
                           ),
                         ],
                       ),
                     ),
-                  if (registered) const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: saving ? null : onScanQr,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan QR from Admin Panel'),
+                    icon: const Icon(
+                        Icons.qr_code_scanner_rounded,
+                        size: 17),
+                    label: const Text('Scan QR Code'),
                     style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 48),
+                      minimumSize: const Size(double.infinity, 44),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   TextField(
                     controller: backendUrlController,
                     keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Server URL',
                       hintText: 'https://admin.example.com',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.link),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      prefixIcon:
+                          const Icon(Icons.link_rounded, size: 18),
+                      isDense: true,
+                      filled: true,
+                      fillColor: cs.surfaceContainerLow,
                     ),
                   ),
                   if (lastError != null) ...[
                     const SizedBox(height: 8),
-                    Text(
-                      lastError!,
-                      style: TextStyle(color: cs.error, fontSize: 12),
-                    ),
+                    Text(lastError!,
+                        style: tt.bodySmall
+                            ?.copyWith(color: cs.error)),
                   ],
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: FilledButton(
-                          onPressed: saving ? null : onSaveUrl,
-                          child: saving
-                              ? const _LoadingIndicator()
-                              : Text(
-                                  backendConfigured
-                                      ? 'Update URL'
-                                      : 'Verify & Save',
-                                ),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(
+                      flex: 3,
+                      child: FilledButton(
+                        onPressed: saving ? null : onSaveUrl,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(10)),
                         ),
+                        child: saving
+                            ? const _LoadingIndicator()
+                            : Text(backendConfigured
+                                ? 'Update URL'
+                                : 'Verify & Save'),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 2,
-                        child: OutlinedButton(
-                          onPressed: saving ? null : onResetUrl,
-                          child: const Text('Reset'),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: OutlinedButton(
+                        onPressed: saving ? null : onResetUrl,
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(10)),
                         ),
+                        child: const Text('Reset'),
                       ),
-                    ],
-                  ),
+                    ),
+                  ]),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
-          // ── Device Registration ─────────────────────────────────────────
-          _SectionHeader(title: registered ? 'Device' : 'Register Device'),
+          // ── Device ───────────────────────────────────────────────────────
+          _SectionHeader(
+              title: registered ? 'Device' : 'Register Device'),
           if (registered)
-            Card(
-              elevation: 0,
-              color: cs.surfaceContainerLow,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: cs.outlineVariant),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _InfoRow(
-                      icon: Icons.phone_android,
-                      label: 'Name',
-                      value: config!.name,
+            _SettingsCard(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      children: [
+                        _InfoRow(
+                            icon: Icons.phone_android_rounded,
+                            label: 'Name',
+                            value: config!.name),
+                        const SizedBox(height: 6),
+                        _InfoRow(
+                            icon: Icons.fingerprint_rounded,
+                            label: 'ID',
+                            value: config!.deviceId,
+                            mono: true),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    _InfoRow(
-                      icon: Icons.fingerprint,
-                      label: 'ID',
-                      value: config!.deviceId,
-                      mono: true,
-                    ),
-                    const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                      onPressed: onResetDevice,
-                      icon: const Icon(Icons.logout_rounded),
-                      label: const Text('Unlink Device'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: cs.error,
-                        side: BorderSide(color: cs.error),
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  _SettingsDivider(),
+                  _SettingsTile(
+                    icon: Icons.logout_rounded,
+                    title: 'Unlink Device',
+                    subtitle: 'Removes this device from the server',
+                    isDestructive: true,
+                    onTap: () => onResetDevice(),
+                  ),
+                ],
               ),
             )
           else if (backendConfigured)
-            Card(
-              elevation: 0,
-              color: cs.surfaceContainerLow,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: cs.outlineVariant),
-              ),
+            _SettingsCard(
               child: Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
-                    // Primary: scan QR for one-shot registration
                     FilledButton.icon(
                       onPressed: registering ? null : onScanQr,
-                      icon: const Icon(Icons.qr_code_scanner),
+                      icon: const Icon(
+                          Icons.qr_code_scanner_rounded,
+                          size: 17),
                       label: const Text('Scan QR to Register'),
                       style: FilledButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
+                        minimumSize: const Size(double.infinity, 46),
+                        shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(10)),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        const Expanded(child: Divider()),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            'or enter manually',
-                            style: TextStyle(color: cs.outline, fontSize: 12),
-                          ),
-                        ),
-                        const Expanded(child: Divider()),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12),
+                        child: Text('or manually',
+                            style: tt.bodySmall
+                                ?.copyWith(color: cs.outline)),
+                      ),
+                      const Expanded(child: Divider()),
+                    ]),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: deviceNameController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Device Name (optional)',
-                        hintText: 'Leave blank to use auto-detected name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.phone_android),
+                        hintText: 'Auto-detected if blank',
+                        border: OutlineInputBorder(
+                            borderRadius:
+                                BorderRadius.circular(10)),
+                        prefixIcon: const Icon(
+                            Icons.phone_android_rounded,
+                            size: 17),
+                        isDense: true,
+                        filled: true,
+                        fillColor: cs.surfaceContainerLow,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     TextField(
                       controller: tokenController,
                       minLines: 2,
                       maxLines: 4,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Registration Token',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.vpn_key),
+                        border: OutlineInputBorder(
+                            borderRadius:
+                                BorderRadius.circular(10)),
+                        prefixIcon: const Icon(
+                            Icons.vpn_key_rounded,
+                            size: 17),
                         alignLabelWithHint: true,
+                        filled: true,
+                        fillColor: cs.surfaceContainerLow,
                       ),
                     ),
                     if (lastError != null) ...[
                       const SizedBox(height: 8),
-                      Text(
-                        lastError!,
-                        style: TextStyle(color: cs.error, fontSize: 12),
-                      ),
+                      Text(lastError!,
+                          style: tt.bodySmall
+                              ?.copyWith(color: cs.error)),
                     ],
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     FilledButton(
                       onPressed: registering ? null : onRegister,
                       style: FilledButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 48),
+                        minimumSize: const Size(double.infinity, 46),
+                        shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(10)),
                       ),
                       child: registering
                           ? const _LoadingIndicator()
@@ -3794,18 +3391,22 @@ class SettingsPage extends StatelessWidget {
               ),
             )
           else
-            Card(
-              elevation: 0,
-              color: cs.surfaceContainerLow,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: cs.outlineVariant),
-              ),
+            _SettingsCard(
               child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(
-                  'Configure the backend server first, then register this device.',
-                  style: TextStyle(color: cs.outline),
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded,
+                        size: 16, color: cs.onSurfaceVariant),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Configure the backend server first.',
+                        style: tt.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -3817,8 +3418,103 @@ class SettingsPage extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared widgets
+// Shared settings widgets
 // ─────────────────────────────────────────────────────────────────────────────
+
+class _SettingsCard extends StatelessWidget {
+  const _SettingsCard({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: cs.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: child,
+    );
+  }
+}
+
+class _SettingsDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      indent: 16,
+      endIndent: 0,
+      color: Theme.of(context)
+          .colorScheme
+          .outlineVariant
+          .withValues(alpha: 0.4),
+    );
+  }
+}
+
+class _SettingsTile extends StatelessWidget {
+  const _SettingsTile({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.isDestructive = false,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final bool isDestructive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final Color fg = isDestructive ? cs.error : cs.onSurface;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon,
+                size: 18,
+                color: isDestructive
+                    ? cs.error
+                    : cs.onSurfaceVariant),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: tt.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: fg)),
+                  if (subtitle != null)
+                    Text(subtitle!,
+                        style: tt.bodySmall?.copyWith(
+                            color: isDestructive
+                                ? cs.error.withValues(alpha: 0.7)
+                                : cs.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.title});
@@ -3827,13 +3523,14 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 10),
+      padding: const EdgeInsets.only(left: 4, bottom: 8, top: 2),
       child: Text(
         title.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          letterSpacing: 1.2,
-          color: Theme.of(context).colorScheme.outline,
-        ),
+              letterSpacing: 1.1,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
       ),
     );
   }
@@ -3846,7 +3543,6 @@ class _PermissionTile extends StatelessWidget {
     required this.subtitle,
     required this.granted,
   });
-
   final IconData icon;
   final String title;
   final String subtitle;
@@ -3855,47 +3551,46 @@ class _PermissionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: granted ? cs.primaryContainer : cs.errorContainer,
-            borderRadius: BorderRadius.circular(10),
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: 16, vertical: 11),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: granted ? cs.primaryContainer : cs.errorContainer,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon,
+                size: 17,
+                color: granted ? cs.primary : cs.onErrorContainer),
           ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: granted ? cs.primary : cs.onErrorContainer,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: tt.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                Text(subtitle,
+                    style: tt.bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant)),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-              ),
-              Text(
-                subtitle,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-              ),
-            ],
+          Icon(
+            granted
+                ? Icons.check_circle_rounded
+                : Icons.cancel_rounded,
+            size: 18,
+            color: granted ? cs.primary : cs.error,
           ),
-        ),
-        Icon(
-          granted ? Icons.check_circle_rounded : Icons.cancel_rounded,
-          color: granted ? cs.primary : cs.error,
-          size: 22,
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -3908,13 +3603,14 @@ class _LoadingIndicator extends StatelessWidget {
     return const SizedBox(
       width: 18,
       height: 18,
-      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+      child: CircularProgressIndicator(
+          strokeWidth: 2, color: Colors.white),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QR Scanner page (unchanged)
+// QR Scanner page
 // ─────────────────────────────────────────────────────────────────────────────
 
 class QrScanPage extends StatefulWidget {
@@ -3945,12 +3641,21 @@ class _QrScanPageState extends State<QrScanPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
+      backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Scan Admin QR Code'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text('Scan QR Code',
+            style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w700)),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            icon: const Icon(Icons.flash_on),
+            icon: const Icon(Icons.flash_on_rounded,
+                color: Colors.white),
             onPressed: () => _controller.toggleTorch(),
             tooltip: 'Toggle torch',
           ),
@@ -3958,28 +3663,66 @@ class _QrScanPageState extends State<QrScanPage> {
       ),
       body: Stack(
         children: [
-          MobileScanner(controller: _controller, onDetect: _onDetect),
-          Center(
-            child: Container(
-              width: 260,
-              height: 260,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-                borderRadius: BorderRadius.circular(12),
-              ),
+          MobileScanner(
+              controller: _controller, onDetect: _onDetect),
+          ColorFiltered(
+            colorFilter: ColorFilter.mode(
+                Colors.black.withValues(alpha: 0.55),
+                BlendMode.srcOut),
+            child: Stack(
+              children: [
+                Container(color: Colors.transparent),
+                Center(
+                  child: Container(
+                    width: 256,
+                    height: 256,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const Positioned(
-            bottom: 48,
+          Center(
+            child: SizedBox(
+              width: 256,
+              height: 256,
+              child: CustomPaint(
+                  painter: _CornerFramePainter(color: cs.primary)),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
             left: 0,
             right: 0,
-            child: Text(
-              'Point at the QR code on your admin panel',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(24, 32, 24, 48),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Colors.black87, Colors.transparent],
+                ),
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2)),
+                ),
+                child: const Text(
+                  'Point at the QR code from Admin Panel → Devices',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500),
+                ),
               ),
             ),
           ),
@@ -3987,4 +3730,62 @@ class _QrScanPageState extends State<QrScanPage> {
       ),
     );
   }
+}
+
+class _CornerFramePainter extends CustomPainter {
+  _CornerFramePainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = color
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    const len = 26.0;
+    const r = 16.0;
+    // top-left
+    canvas.drawLine(const Offset(r, 0), const Offset(r + len, 0), p);
+    canvas.drawLine(const Offset(0, r), const Offset(0, r + len), p);
+    canvas.drawArc(const Rect.fromLTWH(0, 0, r * 2, r * 2),
+        3.14159, 3.14159 / 2, false, p);
+    // top-right
+    canvas.drawLine(
+        Offset(size.width - r - len, 0), Offset(size.width - r, 0), p);
+    canvas.drawLine(
+        Offset(size.width, r), Offset(size.width, r + len), p);
+    canvas.drawArc(
+        Rect.fromLTWH(size.width - r * 2, 0, r * 2, r * 2),
+        -3.14159 / 2,
+        3.14159 / 2,
+        false,
+        p);
+    // bottom-left
+    canvas.drawLine(Offset(0, size.height - r - len),
+        Offset(0, size.height - r), p);
+    canvas.drawLine(
+        Offset(r, size.height), Offset(r + len, size.height), p);
+    canvas.drawArc(
+        Rect.fromLTWH(0, size.height - r * 2, r * 2, r * 2),
+        3.14159 / 2,
+        3.14159 / 2,
+        false,
+        p);
+    // bottom-right
+    canvas.drawLine(Offset(size.width - r - len, size.height),
+        Offset(size.width - r, size.height), p);
+    canvas.drawLine(Offset(size.width, size.height - r - len),
+        Offset(size.width, size.height - r), p);
+    canvas.drawArc(
+        Rect.fromLTWH(
+            size.width - r * 2, size.height - r * 2, r * 2, r * 2),
+        0,
+        3.14159 / 2,
+        false,
+        p);
+  }
+
+  @override
+  bool shouldRepaint(_CornerFramePainter old) => old.color != color;
 }

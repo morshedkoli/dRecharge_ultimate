@@ -21,7 +21,13 @@
       "Bash(flutter build *)",
       "mcp__plugin_claude-mem_mcp-search__smart_outline",
       "mcp__ide__getDiagnostics",
-      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|jsx\\)$\")",
+      "Read(//c/Users/Morshed Al Main/.claude/plugins/cache/ui-ux-pro-max-skill/ui-ux-pro-max/2.5.0/**)",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"fintech agent utility mobile app modern material dark\" --design-system -p \"dRecharge Agent\" -f markdown)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\Morshed Al Main\\\\.claude\\\\plugins\\\\cache\\\\ui-ux-pro-max-skill\\\\ui-ux-pro-max\\\\2.5.0\" -Recurse -Filter \"*.py\")",
+      "Bash(Select-Object FullName)",
+      "Bash(python3 \"C:\\\\Users\\\\Morshed Al Main\\\\.claude\\\\plugins\\\\cache\\\\ui-ux-pro-max-skill\\\\ui-ux-pro-max\\\\2.5.0\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"fintech agent utility android app modern material dark\" --design-system -p \"dRecharge Agent\" -f markdown)",
+      "PowerShell(Select-String -Path \"f:\\\\jack\\\\new App\\\\finpay-admin\\\\drecharge_admin\\\\android\\\\lib\\\\src\\\\agent_app.dart\" -Pattern \"^class \" | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line\\)\" })"
     ]
   }
 }
