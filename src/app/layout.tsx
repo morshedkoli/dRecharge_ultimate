@@ -8,6 +8,11 @@ import SiteSettings from "@/lib/db/models/SiteSettings";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
 
+function sanitizeHexColor(value: unknown, fallback = "#134235") {
+  const color = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback;
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   try {
     await connectDB();
@@ -25,7 +30,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   await connectDB();
   const settings = await SiteSettings.findById("site_settings").lean();
-  const primaryColor = settings?.primaryColor || "#134235";
+  const primaryColor = sanitizeHexColor(settings?.primaryColor);
 
   return (
     <html lang="en" suppressHydrationWarning>

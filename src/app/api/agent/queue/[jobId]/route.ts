@@ -19,6 +19,10 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const service = await Service.findById(job.serviceId).lean();
+    const assignedServices: string[] = agentSession.device.assignedServices ?? [];
+    if (!assignedServices.includes(job.serviceId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const serviceName =
       (service as { name?: string } | null)?.name ||
       (job as { serviceName?: string }).serviceName ||

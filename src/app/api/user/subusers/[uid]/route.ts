@@ -4,6 +4,7 @@ import connectDB from "@/lib/db/mongoose";
 import User from "@/lib/db/models/User";
 import Transaction from "@/lib/db/models/Transaction";
 import { hashPassword } from "@/lib/auth/password";
+import { hashPin, isValidPin } from "@/lib/auth/pin";
 import { writeLog } from "@/lib/db/audit";
 import { withUserSession } from "@/lib/auth/session";
 
@@ -157,10 +158,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // ── Change PIN ──────────────────────────────────────────────────────────
     if (action === "adminChangePin") {
       const newPin = String(body.pin || "");
-      if (!/^\d{4,6}$/.test(newPin)) {
+      if (!isValidPin(newPin)) {
         return NextResponse.json({ error: "PIN must be 4–6 digits" }, { status: 400 });
       }
-      targetUser.pin = newPin;
+      targetUser.pinHash = await hashPin(newPin);
+      targetUser.pin = undefined;
       await targetUser.save();
       await writeLog({
         uid: session.sub,
@@ -223,6 +225,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         await Transaction.create(
           [
             {
+              _id: `TX_TRANSFER_${Date.now()}_${uid}`,
               userId: uid,
               type: type, // "topup" or "deduct"
               amount: numAmount,

@@ -9,6 +9,7 @@ import { getSession } from "@/lib/auth/session";
 import { withAdminSession } from "@/lib/auth/session";
 import { resolveJobUssdSteps } from "@/lib/ussd";
 import { checkSubscription } from "@/lib/subscription";
+import { hashPin, verifyPin } from "@/lib/auth/pin";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 
@@ -39,8 +40,8 @@ export async function POST(request: NextRequest) {
     }
 
     const isAdmin = ["admin", "super_admin", "support_admin"].includes(session.role);
-    const { serviceId, recipientNumber, amount: reqAmount } = await request.json();
-    const amount = reqAmount || 0;
+    const { serviceId, recipientNumber, amount: reqAmount, pin } = await request.json();
+    const amount = Number(reqAmount || 0);
 
     if (isAdmin) {
       if (!serviceId || !recipientNumber) {
@@ -70,11 +71,19 @@ export async function POST(request: NextRequest) {
 
     try {
       await dbSession.withTransaction(async () => {
-        if (!isAdmin) {
-          // Load the user and check effective balance (wallet + creditLimit)
-          const user = await User.findById(uid).session(dbSession);
-          if (!user) throw new Error("User not found");
+        const user = await User.findById(uid).session(dbSession);
+        if (!user || user.status !== "active") throw new Error("User not found or inactive");
 
+        const submittedPin = String(pin || "");
+        const pinOk = await verifyPin(submittedPin, user.pinHash, user.pin);
+        if (!pinOk) {
+          throw new Error(user.pinHash || user.pin ? "Invalid transaction PIN" : "Set a transaction PIN before creating transactions");
+        }
+
+        if (!isAdmin) {
+          if (user.walletLocked) {
+            throw new Error("Wallet is locked by another pending transaction");
+          }
           const effectiveBalance = user.walletBalance + (user.creditLimit ?? 0);
           if (effectiveBalance < amount) {
             throw new Error(
@@ -84,6 +93,15 @@ export async function POST(request: NextRequest) {
 
           // Deduct — balance may go negative (into credit territory)
           user.walletBalance = user.walletBalance - amount;
+          user.walletLocked = true;
+          if (user.pin && !user.pinHash) {
+            user.pinHash = await hashPin(user.pin);
+            user.pin = undefined;
+          }
+          await user.save({ session: dbSession });
+        } else if (user.pin && !user.pinHash) {
+          user.pinHash = await hashPin(user.pin);
+          user.pin = undefined;
           await user.save({ session: dbSession });
         }
 

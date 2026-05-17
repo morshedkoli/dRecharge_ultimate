@@ -235,7 +235,7 @@ export default function UserProfilePage() {
                 </h2>
                 <p className="text-sm text-gray-500">Create a 4-6 digit sequence used exclusively for approving outgoing funds.</p>
               </div>
-              {profile?.pin && (
+              {profile?.hasPin && (
                 <span className="bg-green-50 text-green-600 px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap">PIN Configured</span>
               )}
             </div>

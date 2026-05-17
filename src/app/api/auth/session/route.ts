@@ -80,6 +80,7 @@ export async function GET(request: NextRequest) {
     await connectDB();
     const user = await User.findById(payload.sub).lean();
     if (!user) return NextResponse.json({ user: null });
+    if (user.status !== "active") return NextResponse.json({ user: null }, { status: 401 });
 
     return NextResponse.json({
       user: {
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
         walletLocked: user.walletLocked,
         status: user.status,
         phoneNumber: user.phoneNumber,
-        pin: user.pin,
+        hasPin: Boolean(user.pinHash || user.pin),
         parentId: user.parentId,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,

@@ -8,6 +8,7 @@ import AgentDevice from "@/lib/db/models/AgentDevice";
 import { writeLog } from "@/lib/db/audit";
 import { notifyTransactionCompleted, notifyTransactionFailed, notifyTransactionWaiting } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
+import { evaluateSmsAgainstTemplates, loadFailureTemplates } from "@/lib/sms-template";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
@@ -65,6 +66,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     const {
       txId,
       rawSms,
+      rawSmsSource,
+      smsSenderNumber,
+      smsReceivedAt,
       parsedResult: clientResult,
       ussdStepsExecuted,
       serviceName: agentServiceName,
@@ -94,13 +98,37 @@ export async function POST(request: NextRequest, { params }: Params) {
     let failureReason: string | undefined;
     let finalParsedResult: { success: boolean; [key: string]: unknown } = { success: false };
     let requeuedDueToInfra = false;
+    let alreadyResolved = false;
+    const responseSource = rawSmsSource === "sms" ? "sms" : "ussd";
+    const smsReceivedAtDate =
+      typeof smsReceivedAt === "number" && Number.isFinite(smsReceivedAt)
+        ? new Date(smsReceivedAt)
+        : typeof smsReceivedAt === "string" && smsReceivedAt.trim()
+          ? new Date(smsReceivedAt)
+          : undefined;
 
     try {
       await dbSession.withTransaction(async () => {
         const job = await ExecutionJob.findById(jobId).session(dbSession);
-        const tx = await Transaction.findById(txId).session(dbSession);
-
-        if (!job || !tx) throw new Error("Job or transaction not found");
+        if (!job) throw new Error("Job not found");
+        const tx = await Transaction.findById(txId || job.txId).session(dbSession);
+        if (!tx) throw new Error("Transaction not found");
+        if (job.txId !== tx._id) throw new Error("Job and transaction do not match");
+        const assignedServices: string[] = agentSession.device.assignedServices ?? [];
+        if (!assignedServices.includes(job.serviceId)) throw new Error("Device is not assigned to this service");
+        if (!["processing", "waiting"].includes(job.status)) {
+          alreadyResolved = ["done", "failed", "cancelled"].includes(job.status);
+          if (alreadyResolved) {
+            await AgentDevice.findByIdAndUpdate(
+              agentSession.deviceId,
+              { currentJob: null, lastHeartbeat: new Date(), status: "online" },
+              { session: dbSession }
+            );
+            return;
+          }
+          throw new Error(`Cannot report result for job with status "${job.status}"`);
+        }
+        if (job.lockedByDevice !== agentSession.deviceId) throw new Error("Job is not locked by this device");
 
         // ── Infrastructure failure: requeue or escalate ──────────────────────────
         // When the agent app lost connectivity / accessibility, we should NOT
@@ -124,6 +152,7 @@ export async function POST(request: NextRequest, { params }: Params) {
             job.locked = false;
             (job as any).lockedAt = undefined;
             (job as any).lockedByDevice = undefined;
+            (job as any).lockedByUser = undefined;
             if (!job.executionLogs) (job as any).executionLogs = [];
             (job as any).executionLogs.push(infraLogEntry);
             await job.save({ session: dbSession });
@@ -149,61 +178,19 @@ export async function POST(request: NextRequest, { params }: Params) {
         // ── Template-based outcome determination ─────────────────────────────────
         // Only runs when we have a real USSD response OR infra-failure escalation.
         if (!requeuedDueToInfra && !isInfraFailure) {
-          // Load failure templates — prefer job snapshot, fall back to service
-          let failureTemplates: { template: string; message: string }[] =
-            (job.failureSmsTemplates as { template: string; message: string }[] | undefined) ?? [];
-          if (failureTemplates.length === 0) {
-            const svc = await Service.findById(job.serviceId).lean();
-            if (svc?.failureSmsTemplates?.length) {
-              failureTemplates = svc.failureSmsTemplates as { template: string; message: string }[];
-            }
-          }
-
-          const successFormat = (job.successSmsFormat as string | undefined) ?? "";
-          const requiresTrxId = templateRequiresTrxId(successFormat);
-
           if (hasUssdResponse) {
-            // ── 1. Try success template ────────────────────────────────────────
-            const sRegex = successFormat ? buildRegex(successFormat, job.recipientNumber, job.amount) : null;
-            const successMatch = sRegex ? rawSms.match(sRegex) : null;
-
-            if (successMatch) {
-              // Template matched. If template requires a trxId, it must be captured.
-              const capturedTrxId = successMatch.groups?.trxId;
-              if (requiresTrxId && !capturedTrxId) {
-                // Template has {trxId} but wasn't captured — treat as partial match → waiting
-                outcome = "waiting";
-                isSuccess = false;
-                failureReason = "Success template matched but transaction ID could not be extracted.";
-                finalParsedResult = { success: false, reason: failureReason };
-              } else {
-                // Clean success
-                outcome = "done";
-                isSuccess = true;
-                failureReason = undefined;
-                finalParsedResult = { success: true };
-                if (capturedTrxId) finalParsedResult.txRef = capturedTrxId;
-                if (successMatch.groups?.balance) finalParsedResult.balance = successMatch.groups.balance;
-              }
-            } else {
-              // ── 2. Try failure templates ─────────────────────────────────────
-              const failureMatch = matchFailureTemplates(
-                failureTemplates, rawSms, job.recipientNumber, job.amount
-              );
-              if (failureMatch) {
-                // Failure template matched → refund
-                outcome = "failed";
-                isSuccess = false;
-                failureReason = failureMatch.message;
-                finalParsedResult = { success: false, reason: failureReason };
-              } else {
-                // Neither template matched → manual review, no refund
-                outcome = "waiting";
-                isSuccess = false;
-                failureReason = "USSD response did not match any configured success or failure template.";
-                finalParsedResult = { success: false, reason: failureReason };
-              }
-            }
+            const failureTemplates = await loadFailureTemplates(job);
+            const result = evaluateSmsAgainstTemplates({
+              rawSms,
+              recipientNumber: job.recipientNumber,
+              amount: job.amount,
+              successSmsFormat: job.successSmsFormat,
+              failureSmsTemplates: failureTemplates,
+            });
+            outcome = result.outcome;
+            isSuccess = result.outcome === "done";
+            failureReason = result.failureReason;
+            finalParsedResult = result.parsedResult;
           } else {
             // USSD steps ran (stepsRan=true) but no response text captured,
             // OR we have no information at all. Manual review required.
@@ -224,7 +211,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         job.rawSms = rawSms ?? "";
         job.parsedResult = finalParsedResult;
         job.ussdStepsExecuted = ussdStepsExecuted || [];   // latest attempt steps
-        job.completedAt = new Date();
+        job.completedAt = outcome === "waiting" ? undefined : new Date();
 
         // Append this attempt to the execution log so admins can see full history
         const logEntry = {
@@ -233,6 +220,9 @@ export async function POST(request: NextRequest, { params }: Params) {
           outcome: outcome as string,
           failureReason: failureReason,
           deviceId: agentSession.deviceId,
+          responseSource,
+          senderNumber: typeof smsSenderNumber === "string" ? smsSenderNumber : undefined,
+          smsReceivedAt: smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime()) ? smsReceivedAtDate : undefined,
           stepsExecuted: ussdStepsExecuted || [],
           executedAt: new Date(),
         };
@@ -273,6 +263,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       });
     } finally {
       await dbSession.endSession();
+    }
+
+    if (alreadyResolved) {
+      return NextResponse.json({ success: true, alreadyResolved: true });
     }
 
     // Short-circuit: job was requeued, no notifications needed

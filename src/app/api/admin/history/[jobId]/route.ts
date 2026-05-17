@@ -6,6 +6,7 @@ import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
 import { notifyTransactionCancelled, notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
+import { evaluateSmsAgainstTemplates, loadFailureTemplates } from "@/lib/sms-template";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
@@ -44,6 +45,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         job.status = "cancelled";
         job.locked = false;
         job.completedAt = new Date();
+        if (!job.executionLogs) (job as any).executionLogs = [];
+        (job as any).executionLogs.push({
+          attempt: job.attempt,
+          ussdResponse: job.rawSms || "",
+          outcome: "cancelled",
+          failureReason: reason || "Admin cancelled",
+          deviceId: session.sub,
+          stepsExecuted: job.ussdStepsExecuted || [],
+          executedAt: new Date(),
+        });
         await job.save({ session: dbSession });
 
         tx.status = "failed";
@@ -84,7 +95,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 export async function PATCH(request: NextRequest, { params }: Params) {
   return withAdminSession(request, async (session) => {
     const { jobId } = await params;
-    const { txId, isSuccess, txRef, senderNumber, note } = await request.json();
+    const { txId, isSuccess, txRef, senderNumber, note, rawSms } = await request.json();
 
     await connectDB();
     const dbSession = await mongoose.startSession();
@@ -93,22 +104,64 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         const job = await ExecutionJob.findById(jobId).session(dbSession);
         const tx = await Transaction.findById(txId).session(dbSession);
         if (!job || !tx) throw new Error("Not found");
+        if (job.txId !== tx._id) throw new Error("Job and transaction do not match");
 
-        job.status = isSuccess ? "done" : "failed";
-        job.locked = false;
-        job.parsedResult = {
-          success: isSuccess,
+        let parsedResult = {
+          success: Boolean(isSuccess),
           txRef: txRef || undefined,
           senderNumber: senderNumber || undefined,
           reason: isSuccess
             ? (note || undefined)
             : (note || "Admin marked as failed"),
         };
+        let failureReason = note || "Admin marked as failed";
+
+        if (isSuccess) {
+          const responseText = String(rawSms || note || "").trim();
+          if (!responseText) {
+            throw new Error("Gateway SMS/USSD response is required to complete a job");
+          }
+          const templateResult = evaluateSmsAgainstTemplates({
+            rawSms: responseText,
+            recipientNumber: job.recipientNumber,
+            amount: job.amount,
+            successSmsFormat: job.successSmsFormat,
+            failureSmsTemplates: await loadFailureTemplates(job),
+          });
+          if (templateResult.outcome !== "done") {
+            throw new Error(templateResult.failureReason || "Gateway response did not match the service success template");
+          }
+          parsedResult = {
+            success: true,
+            txRef: templateResult.parsedResult.txRef || txRef || undefined,
+            senderNumber: senderNumber || undefined,
+            reason: undefined,
+          };
+          failureReason = "";
+          job.rawSms = responseText;
+        }
+
+        job.status = isSuccess ? "done" : "failed";
+        job.locked = false;
+        if (!isSuccess && rawSms) job.rawSms = String(rawSms);
+        job.parsedResult = parsedResult;
         job.completedAt = new Date();
+        if (!job.executionLogs) (job as any).executionLogs = [];
+        (job as any).executionLogs.push({
+          attempt: job.attempt,
+          ussdResponse: isSuccess ? (job.rawSms || rawSms || note || "") : (rawSms || job.rawSms || ""),
+          outcome: isSuccess ? "done" : "failed",
+          failureReason: isSuccess ? undefined : failureReason,
+          deviceId: session.sub,
+          responseSource: "sms",
+          senderNumber: senderNumber || undefined,
+          stepsExecuted: job.ussdStepsExecuted || [],
+          executedAt: new Date(),
+        });
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";
-        if (!isSuccess) (tx as any).failureReason = note || "Admin marked as failed";
+        if (!isSuccess) (tx as any).failureReason = failureReason;
         tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 

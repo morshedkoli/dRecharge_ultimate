@@ -3,32 +3,17 @@ import connectDB from "@/lib/db/mongoose";
 import ExecutionJob from "@/lib/db/models/ExecutionJob";
 import Transaction from "@/lib/db/models/Transaction";
 import User from "@/lib/db/models/User";
-import Service from "@/lib/db/models/Service";
 import { writeLog } from "@/lib/db/audit";
 import {
   notifyTransactionCompleted,
   notifyTransactionFailed,
+  notifyTransactionWaiting,
 } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
+import { evaluateSmsAgainstTemplates, loadFailureTemplates } from "@/lib/sms-template";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
-
-/** Build a regex from an SMS format template (mirrors result/route.ts). */
-function buildRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
-  if (!format?.trim()) return null;
-  let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  escaped = escaped.replace(/\s+/g, "\\s+");
-  const amountText = String(amount).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const amountWithOptionalSeparators = amountText.replace(/\\,/g, ",").replace(/\d/g, "$&[,]?");
-  escaped = escaped
-    .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .replace(/\\\{amount\\\}/g, `(?:${amountWithOptionalSeparators}(?:\\.0+)?|${amountText}(?:\\.0+)?)`)
-    .replace(/\\\{trxId\\\}/g, "(?<trxId>\\w+)")
-    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
-    .replace(/\\\{[^\\}]+\\\}/g, ".*?");
-  try { return new RegExp(escaped, "i"); } catch { return null; }
-}
 
 /**
  * POST /api/agent/queue/[jobId]/sms
@@ -47,7 +32,12 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const { jobId } = await params;
     const body = await request.json();
-    const { txId, rawSms } = body as { txId: string; rawSms: string };
+    const { txId, rawSms, smsSenderNumber, smsReceivedAt } = body as {
+      txId: string;
+      rawSms: string;
+      smsSenderNumber?: string;
+      smsReceivedAt?: number | string;
+    };
 
     if (!rawSms?.trim()) {
       return NextResponse.json({ error: "rawSms is required" }, { status: 400 });
@@ -56,9 +46,16 @@ export async function POST(request: NextRequest, { params }: Params) {
     await connectDB();
     const dbSession = await mongoose.startSession();
 
-    let outcome: string = "failed";
+    let outcome: string = "waiting";
     let failureReason: string | undefined;
     let finalParsedResult: { success: boolean; txRef?: string; amount?: number; reason?: string; balance?: string } = { success: false };
+    let finalTxId = txId;
+    const smsReceivedAtDate =
+      typeof smsReceivedAt === "number" && Number.isFinite(smsReceivedAt)
+        ? new Date(smsReceivedAt)
+        : typeof smsReceivedAt === "string" && smsReceivedAt.trim()
+          ? new Date(smsReceivedAt)
+          : undefined;
 
     try {
       await dbSession.withTransaction(async () => {
@@ -69,70 +66,53 @@ export async function POST(request: NextRequest, { params }: Params) {
 
         if (!job) throw new Error("Job not found");
         if (!tx) throw new Error("Transaction not found");
+        if (job.txId !== tx._id) throw new Error("Job and transaction do not match");
+        if (job.lockedByDevice !== agentSession.deviceId) throw new Error("Job is not locked by this device");
+        const assignedServices: string[] = agentSession.device.assignedServices ?? [];
+        if (!assignedServices.includes(job.serviceId)) throw new Error("Device is not assigned to this service");
+        finalTxId = tx._id;
 
         // Only process jobs that are awaiting SMS (processing / waiting)
         if (!["processing", "waiting"].includes(job.status)) {
           return; // already resolved — ignore duplicate SMS
         }
 
-        // Fetch failure templates
-        let failureTemplates: { template: string; message: string }[] =
-          (job.failureSmsTemplates as { template: string; message: string }[] | undefined) ?? [];
-        if (failureTemplates.length === 0) {
-          const svc = await Service.findById(job.serviceId).lean();
-          if (svc?.failureSmsTemplates?.length) {
-            failureTemplates = svc.failureSmsTemplates as { template: string; message: string }[];
-          }
-        }
-
-        const successFormat = (job.successSmsFormat as string | undefined) ?? "";
-
-        // 1. Try success template
-        const sRegex = buildRegex(successFormat, job.recipientNumber, job.amount);
-        const successMatch = sRegex ? rawSms.match(sRegex) : null;
-
-        if (successMatch) {
-          outcome = "done";
-          finalParsedResult = { success: true };
-          if (successMatch.groups?.trxId) finalParsedResult.txRef = successMatch.groups.trxId;
-          if (successMatch.groups?.balance) finalParsedResult.balance = successMatch.groups.balance;
-        } else {
-          // 2. Try failure templates
-          let failureMatched = false;
-          for (const ft of failureTemplates) {
-            const fRegex = buildRegex(ft.template, job.recipientNumber, job.amount);
-            if (fRegex && fRegex.test(rawSms)) {
-              outcome = "failed";
-              failureReason = ft.message;
-              finalParsedResult = { success: false, reason: ft.message };
-              failureMatched = true;
-              break;
-            }
-          }
-
-          if (!failureMatched) {
-            if (successFormat) {
-              // Has a success template but SMS didn't match either — keep waiting
-              // Return early without resolving the job yet
-              return;
-            }
-            // No templates configured — trust that SMS arrival means success
-            outcome = "done";
-            finalParsedResult = { success: true };
-          }
-        }
+        const failureTemplates = await loadFailureTemplates(job);
+        const result = evaluateSmsAgainstTemplates({
+          rawSms,
+          recipientNumber: job.recipientNumber,
+          amount: job.amount,
+          successSmsFormat: job.successSmsFormat,
+          failureSmsTemplates: failureTemplates,
+        });
+        outcome = result.outcome;
+        failureReason = result.failureReason;
+        finalParsedResult = result.parsedResult;
 
         // Persist resolution
         job.status = outcome as any;
         job.locked = false;
         job.rawSms = rawSms;
         job.parsedResult = finalParsedResult;
-        job.completedAt = new Date();
+        job.completedAt = outcome === "waiting" ? undefined : new Date();
+        if (!job.executionLogs) (job as any).executionLogs = [];
+        (job as any).executionLogs.push({
+          attempt: job.attempt,
+          ussdResponse: rawSms,
+          outcome,
+          failureReason,
+          deviceId: agentSession.deviceId,
+          responseSource: "sms",
+          senderNumber: smsSenderNumber,
+          smsReceivedAt: smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime()) ? smsReceivedAtDate : undefined,
+          stepsExecuted: job.ussdStepsExecuted || [],
+          executedAt: new Date(),
+        });
         await job.save({ session: dbSession });
 
-        tx.status = outcome === "done" ? "complete" : "failed";
+        tx.status = outcome === "done" ? "complete" : outcome === "failed" ? "failed" : "waiting";
         if (outcome === "failed" && failureReason) (tx as any).failureReason = failureReason;
-        tx.completedAt = new Date();
+        if (outcome !== "waiting") tx.completedAt = new Date();
         await tx.save({ session: dbSession });
 
         if (outcome === "failed") {
@@ -141,7 +121,7 @@ export async function POST(request: NextRequest, { params }: Params) {
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
             { session: dbSession }
           );
-        } else {
+        } else if (outcome === "done") {
           await User.findByIdAndUpdate(tx.userId, { walletLocked: false }, { session: dbSession });
         }
       });
@@ -150,11 +130,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     // Re-fetch for notifications
-    const tx = await Transaction.findById(txId || (await ExecutionJob.findById(jobId).lean())?.txId).lean();
+    const tx = await Transaction.findById(finalTxId || (await ExecutionJob.findById(jobId).lean())?.txId).lean();
 
     await writeLog({
-      action: outcome === "done" ? "TX_COMPLETED" : "TX_FAILED",
-      entityId: txId,
+      action: outcome === "done" ? "TX_COMPLETED" : outcome === "failed" ? "TX_FAILED" : "TX_WAITING",
+      entityId: finalTxId,
       severity: outcome === "done" ? "info" : "warn",
       meta: { jobId, rawSms, outcome, failureReason },
     });
@@ -165,6 +145,8 @@ export async function POST(request: NextRequest, { params }: Params) {
           await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");
         } else if (outcome === "failed") {
           await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
+        } else {
+          await notifyTransactionWaiting(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         }
       }
     } catch { /* non-critical */ }

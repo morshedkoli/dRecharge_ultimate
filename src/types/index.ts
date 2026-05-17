@@ -15,7 +15,7 @@ export interface AppUser {
   createdAt: Date | string;
   lastLoginAt: Date | string;
   phoneNumber?: string;
-  pin?: string;
+  hasPin?: boolean;
   parentId?: string;
   canManuallyCompleteJobs?: boolean;
 }
@@ -123,6 +123,9 @@ export interface ExecutionLog {
   outcome: string;             // "done" | "failed" | "waiting" | "queued"
   failureReason?: string;
   deviceId?: string;
+  responseSource?: "ussd" | "sms";
+  senderNumber?: string;
+  smsReceivedAt?: Date | string;
   stepsExecuted?: UssdStepResult[];
   executedAt: Date | string;
 }

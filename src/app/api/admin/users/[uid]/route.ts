@@ -12,6 +12,7 @@ import {
 import { withAdminSession } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
+import { hashPin, isValidPin } from "@/lib/auth/pin";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ uid: string }> };
@@ -42,7 +43,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     if (action === "setPin") {
-      user.pin = body.pin;
+      const newPin = String(body.pin || "");
+      if (!isValidPin(newPin)) {
+        return NextResponse.json({ error: "PIN must be 4-6 digits" }, { status: 400 });
+      }
+      user.pinHash = await hashPin(newPin);
+      user.pin = undefined;
       await user.save();
       return NextResponse.json({ success: true });
     }
@@ -232,10 +238,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // ── Admin change PIN ────────────────────────────────────────────────────
     if (action === "adminChangePin") {
       const newPin = String(body.pin || "");
-      if (!/^\d{4,6}$/.test(newPin)) {
+      if (!isValidPin(newPin)) {
         return NextResponse.json({ error: "PIN must be 4–6 digits" }, { status: 400 });
       }
-      user.pin = newPin;
+      user.pinHash = await hashPin(newPin);
+      user.pin = undefined;
       await user.save();
       await writeLog({
         uid: session.sub,
@@ -300,7 +307,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
         phoneNumber: user.phoneNumber,
-        pin: user.pin,
+        hasPin: Boolean(user.pinHash || user.pin),
         canManuallyCompleteJobs: user.canManuallyCompleteJobs || false,
       },
       transactions: transactions.map(t => ({ id: t._id, ...t })),

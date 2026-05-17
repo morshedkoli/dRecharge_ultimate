@@ -13,6 +13,11 @@ export async function GET(request: NextRequest, { params }: Params) {
     if (!agentSession) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { serviceId } = await params;
+    const assignedServices: string[] = agentSession.device.assignedServices ?? [];
+    if (!assignedServices.includes(serviceId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     await connectDB();
     const service = await Service.findById(serviceId).lean();
 

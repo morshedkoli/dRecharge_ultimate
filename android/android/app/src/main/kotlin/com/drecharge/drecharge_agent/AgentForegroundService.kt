@@ -25,6 +25,7 @@ import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.regex.Pattern
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -230,6 +231,9 @@ class AgentForegroundService : Service() {
         delay(1_000L)
 
         var rawSms        = ""
+        var rawSmsSource  = "ussd"
+        var smsSender     = ""
+        var smsReceivedAt = 0L
         var ussdSuccess   = false
         var ussdError     = ""
         var executedSteps : List<Map<String, Any>> = emptyList()
@@ -240,10 +244,28 @@ class AgentForegroundService : Service() {
             ussdSuccess   = ussdResult.success
             ussdError     = ussdResult.errorMessage ?: ""
 
-            val smsDeadlineMs = startMs + (smsTimeoutSec * 1_000L)
-            rawSms = waitForSms(smsDeadlineMs)
+            val responseStep = executedSteps.lastOrNull { it["type"] == "response" }
+            rawSms = responseStep?.get("value") as? String ?: ""
+
+            if (ussdSuccess && smsTimeoutSec > 0) {
+                updateNotification("Waiting for confirmation SMS…")
+                val sms = waitForConfirmationSms(
+                    sinceMs = (startMs - 2_000L).coerceAtLeast(0L),
+                    timeoutSec = smsTimeoutSec,
+                    jobJson = jobJson,
+                    recipientNumber = recipientNumber,
+                    amount = amount,
+                )
+                if (sms != null) {
+                    rawSms = sms.body
+                    rawSmsSource = "sms"
+                    smsSender = sms.address
+                    smsReceivedAt = sms.dateMs
+                }
+            }
         } catch (e: Exception) {
             ussdError = e.message ?: "Execution error"
+            ussdSuccess = false
         } finally {
             releaseScreenWake()
         }
@@ -261,6 +283,9 @@ class AgentForegroundService : Service() {
             recipientNumber,
             amount,
             rawSms,
+            rawSmsSource,
+            smsSender,
+            smsReceivedAt,
             parsedResult,
             executedSteps,
         )
@@ -298,17 +323,106 @@ class AgentForegroundService : Service() {
             )
         }
 
-    // ─── SMS wait ────────────────────────────────────────────────────────────
+    private data class SmsCandidate(
+        val address: String,
+        val body: String,
+        val dateMs: Long,
+    )
 
-    private suspend fun waitForSms(deadlineMs: Long): String {
-        val sinceMs = System.currentTimeMillis() - 5_000L
-        while (System.currentTimeMillis() < deadlineMs) {
-            val messages = SmsReader.readRecentSms(applicationContext, sinceMs, 5)
-            if (messages.isNotEmpty()) return messages.first()["body"] as? String ?: ""
+    private suspend fun waitForConfirmationSms(
+        sinceMs: Long,
+        timeoutSec: Int,
+        jobJson: JSONObject,
+        recipientNumber: String,
+        amount: Double,
+    ): SmsCandidate? {
+        val deadline = System.currentTimeMillis() + timeoutSec.coerceAtLeast(1) * 1000L
+        var fallback: SmsCandidate? = null
+
+        while (System.currentTimeMillis() <= deadline) {
+            val messages = readRecentSms(sinceMs, 20)
+            val templateMatch = messages.firstOrNull { smsMatchesConfiguredTemplate(it.body, jobJson) }
+            if (templateMatch != null) return templateMatch
+
+            if (fallback == null) {
+                fallback = messages.firstOrNull { looksRelatedToJob(it.body, recipientNumber, amount) }
+                    ?: messages.firstOrNull()
+            }
             delay(SMS_POLL_INTERVAL_MS)
         }
-        return ""
+
+        return fallback
     }
+
+    private fun readRecentSms(sinceMs: Long, maxMessages: Int): List<SmsCandidate> = try {
+        SmsReader.readRecentSms(this, sinceMs, maxMessages).map {
+            SmsCandidate(
+                address = it["address"]?.toString() ?: "",
+                body = it["body"]?.toString() ?: "",
+                dateMs = (it["dateMs"] as? Number)?.toLong() ?: it["dateMs"]?.toString()?.toLongOrNull() ?: 0L,
+            )
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    private fun smsMatchesConfiguredTemplate(body: String, jobJson: JSONObject): Boolean {
+        val successTemplate = jobJson.optString("successSmsFormat", "")
+        if (templateMatches(body, successTemplate)) return true
+
+        val failures = jobJson.optJSONArray("failureSmsTemplates") ?: return false
+        for (i in 0 until failures.length()) {
+            val template = failures.optJSONObject(i)?.optString("template", "") ?: ""
+            if (templateMatches(body, template)) return true
+        }
+        return false
+    }
+
+    private fun templateMatches(body: String, template: String): Boolean {
+        val trimmed = template.trim()
+        if (trimmed.isEmpty()) return false
+
+        val matcher = Pattern.compile("\\{[^}]+\\}").matcher(trimmed)
+        val regex = StringBuilder()
+        var index = 0
+        while (matcher.find()) {
+            appendTemplateLiteral(regex, trimmed.substring(index, matcher.start()))
+            regex.append(".*?")
+            index = matcher.end()
+        }
+        appendTemplateLiteral(regex, trimmed.substring(index))
+
+        return try {
+            Pattern.compile(regex.toString(), Pattern.CASE_INSENSITIVE or Pattern.DOTALL)
+                .matcher(body)
+                .find()
+        } catch (_: Exception) {
+            body.contains(trimmed, ignoreCase = true)
+        }
+    }
+
+    private fun appendTemplateLiteral(regex: StringBuilder, literal: String) {
+        var index = 0
+        val whitespace = Pattern.compile("\\s+").matcher(literal)
+        while (whitespace.find()) {
+            if (whitespace.start() > index) {
+                regex.append(Pattern.quote(literal.substring(index, whitespace.start())))
+            }
+            regex.append("\\s+")
+            index = whitespace.end()
+        }
+        if (index < literal.length) {
+            regex.append(Pattern.quote(literal.substring(index)))
+        }
+    }
+
+    private fun looksRelatedToJob(body: String, recipientNumber: String, amount: Double): Boolean {
+        val amountText = if (amount % 1.0 == 0.0) amount.toLong().toString() else amount.toString()
+        return (recipientNumber.isNotBlank() && body.contains(recipientNumber)) ||
+            (amountText.isNotBlank() && body.contains(amountText))
+    }
+
+
 
     // ─── HTTP helpers ────────────────────────────────────────────────────────
 
@@ -327,6 +441,9 @@ class AgentForegroundService : Service() {
         recipientNumber: String,
         amount: Double,
         rawSms: String,
+        rawSmsSource: String,
+        smsSender: String,
+        smsReceivedAt: Long,
         parsedResult: JSONObject,
         executedSteps: List<Map<String, Any>>,
     ) {
@@ -338,10 +455,18 @@ class AgentForegroundService : Service() {
             put("recipientNumber",    recipientNumber)
             put("amount",             amount)
             put("rawSms",             rawSms)
+            put("rawSmsSource",       rawSmsSource)
+            if (smsSender.isNotBlank()) put("smsSenderNumber", smsSender)
+            if (smsReceivedAt > 0L) put("smsReceivedAt", smsReceivedAt)
             put("parsedResult",       parsedResult)
             put("ussdStepsExecuted",  stepsArray)
         }
-        httpPost("${config.baseUrl}/api/agent/queue/$jobId/result", config.jwtToken, body)
+        repeat(8) { attempt ->
+            if (httpPost("${config.baseUrl}/api/agent/queue/$jobId/result", config.jwtToken, body) != null) {
+                return
+            }
+            Thread.sleep((2_000L * (attempt + 1)).coerceAtMost(10_000L))
+        }
     }
 
     private fun sendHeartbeat(config: AgentConfig) {

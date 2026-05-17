@@ -117,6 +117,16 @@ export async function PATCH(request: NextRequest) {
         job.locked = false;
         job.parsedResult = { success: false, reason: reason || "Admin force-failed" };
         job.completedAt = new Date();
+        if (!job.executionLogs) (job as any).executionLogs = [];
+        (job as any).executionLogs.push({
+          attempt: job.attempt,
+          ussdResponse: job.rawSms || "",
+          outcome: "failed",
+          failureReason: reason || "Admin force-failed",
+          deviceId: session.sub,
+          stepsExecuted: job.ussdStepsExecuted || [],
+          executedAt: new Date(),
+        });
         await job.save({ session: dbSession });
 
         tx.status = "failed";

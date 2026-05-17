@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { verifySessionToken, SessionPayload } from "./jwt";
+import connectDB from "@/lib/db/mongoose";
+import User from "@/lib/db/models/User";
 
 export async function getSession(
   request: NextRequest
@@ -26,6 +28,22 @@ export function requireAdmin(session: SessionPayload): void {
   }
 }
 
+async function getCurrentActiveSession(request: NextRequest): Promise<SessionPayload | null> {
+  const session = await getSession(request);
+  if (!session) return null;
+
+  await connectDB();
+  const user = await User.findById(session.sub).select("role status displayName email username").lean();
+  if (!user || user.status !== "active") return null;
+
+  return {
+    sub: user._id,
+    email: user.email || user.username || session.email,
+    role: user.role,
+    displayName: user.displayName,
+  };
+}
+
 export function apiError(message: string, status: number) {
   const { NextResponse } = require("next/server");
   return NextResponse.json({ error: message }, { status });
@@ -37,7 +55,7 @@ export async function withAdminSession(
 ): Promise<Response> {
   const { NextResponse } = require("next/server");
   try {
-    const session = await getSession(request);
+    const session = await getCurrentActiveSession(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     requireAdmin(session);
     return await handler(session);
@@ -56,7 +74,7 @@ export async function withUserSession(
 ): Promise<Response> {
   const { NextResponse } = require("next/server");
   try {
-    const session = await getSession(request);
+    const session = await getCurrentActiveSession(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     return await handler(session);
   } catch (err) {

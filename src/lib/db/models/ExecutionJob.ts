@@ -42,6 +42,9 @@ export interface IExecutionJob extends Document<string> {
     outcome: string;            // "done" | "failed" | "waiting" | "queued" (requeued)
     failureReason?: string;
     deviceId?: string;
+    responseSource?: "ussd" | "sms";
+    senderNumber?: string;
+    smsReceivedAt?: Date;
     stepsExecuted?: object[];
     executedAt: Date;
   }[];
@@ -99,6 +102,9 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
           outcome:      { type: String },
           failureReason:{ type: String },
           deviceId:     { type: String },
+          responseSource:{ type: String },
+          senderNumber:  { type: String },
+          smsReceivedAt: { type: Date },
           stepsExecuted:[{ type: Schema.Types.Mixed }],
           executedAt:   { type: Date },
         },

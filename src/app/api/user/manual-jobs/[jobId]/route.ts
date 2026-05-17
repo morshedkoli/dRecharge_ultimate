@@ -5,6 +5,7 @@ import Transaction from "@/lib/db/models/Transaction";
 import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
 import { getSession } from "@/lib/auth/session";
+import { evaluateSmsAgainstTemplates, loadFailureTemplates } from "@/lib/sms-template";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const { jobId } = await params;
   const body = await request.json();
-  const { action, status, txRef, reason } = body;
+  const { action, status, txRef, reason, rawSms } = body;
 
   await connectDB();
   
@@ -59,15 +60,51 @@ export async function POST(request: NextRequest, { params }: Params) {
         if (!tx) throw new Error("Transaction not found");
 
         const isSuccess = status === "done";
+        let parsedResult = {
+          success: isSuccess,
+          txRef: isSuccess ? txRef : undefined,
+          reason: isSuccess ? undefined : (reason || "Manually marked as failed"),
+        };
+
+        if (isSuccess) {
+          const responseText = String(rawSms || reason || "").trim();
+          if (!responseText) {
+            throw new Error("Gateway SMS/USSD response is required to complete a job");
+          }
+          const templateResult = evaluateSmsAgainstTemplates({
+            rawSms: responseText,
+            recipientNumber: job.recipientNumber,
+            amount: job.amount,
+            successSmsFormat: job.successSmsFormat,
+            failureSmsTemplates: await loadFailureTemplates(job),
+          });
+          if (templateResult.outcome !== "done") {
+            throw new Error(templateResult.failureReason || "Gateway response did not match the service success template");
+          }
+          parsedResult = {
+            success: true,
+            txRef: templateResult.parsedResult.txRef || txRef || undefined,
+            reason: undefined,
+          };
+          job.rawSms = responseText;
+        }
         
         job.status = isSuccess ? "done" : "failed";
         job.locked = false;
-        job.parsedResult = { 
-          success: isSuccess, 
-          txRef: isSuccess ? txRef : undefined,
-          reason: isSuccess ? undefined : (reason || "Manually marked as failed") 
-        };
+        if (!isSuccess && rawSms) job.rawSms = String(rawSms);
+        job.parsedResult = parsedResult;
         job.completedAt = new Date();
+        if (!job.executionLogs) (job as any).executionLogs = [];
+        (job as any).executionLogs.push({
+          attempt: job.attempt,
+          ussdResponse: isSuccess ? (job.rawSms || rawSms || "") : (rawSms || job.rawSms || ""),
+          outcome: isSuccess ? "done" : "failed",
+          failureReason: isSuccess ? undefined : (reason || "Manually marked as failed"),
+          deviceId: session.sub,
+          responseSource: "sms",
+          stepsExecuted: job.ussdStepsExecuted || [],
+          executedAt: new Date(),
+        });
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";

@@ -106,7 +106,7 @@ interface CompleteFormData {
   txRef: string;
   transactionNumber: string;
   senderNumber: string;
-  note: string;
+  rawSms: string;
 }
 
 function CompleteJobDialog({
@@ -125,7 +125,7 @@ function CompleteJobDialog({
     txRef: "",
     transactionNumber: "",
     senderNumber: "",
-    note: "",
+    rawSms: "",
   });
 
   if (!open) return null;
@@ -203,17 +203,17 @@ function CompleteJobDialog({
             />
           </div>
 
-          {/* Note */}
+          {/* Gateway response */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-2">
-              Admin Note <span className="text-on-surface-variant/50 normal-case tracking-normal font-normal">(optional)</span>
+              Gateway SMS/USSD Response <span className="text-red-500">*</span>
             </label>
             <textarea
-              name="note"
-              value={form.note}
+              name="rawSms"
+              value={form.rawSms}
               onChange={handleChange}
               rows={2}
-              placeholder="e.g. Verified via agent SMS..."
+              placeholder="Paste the provider response that matches the service success template"
               className="w-full px-4 py-3 rounded-xl border border-outline-variant bg-surface-container/30 text-sm font-manrope text-on-surface placeholder-on-surface-variant/40 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 focus:border-emerald-400 transition-all resize-none"
             />
           </div>
@@ -229,10 +229,10 @@ function CompleteJobDialog({
           </button>
           <button
             onClick={() => {
-              if (!form.transactionNumber.trim() || !form.senderNumber.trim()) return;
+              if (!form.transactionNumber.trim() || !form.senderNumber.trim() || !form.rawSms.trim()) return;
               onConfirm(form);
             }}
-            disabled={!form.transactionNumber.trim() || !form.senderNumber.trim()}
+            disabled={!form.transactionNumber.trim() || !form.senderNumber.trim() || !form.rawSms.trim()}
             className="flex-1 py-3 rounded-xl text-sm font-bold font-manrope text-white bg-emerald-600 hover:bg-emerald-700 shadow-md shadow-emerald-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Mark as Complete
@@ -289,7 +289,7 @@ function JobCard({
           isSuccess: true,
           txRef: formData?.transactionNumber || undefined,
           senderNumber: formData?.senderNumber || undefined,
-          note: formData?.note || undefined,
+          rawSms: formData?.rawSms || undefined,
         }),
       });
       const data = await res.json();

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db/mongoose";
 import User from "@/lib/db/models/User";
 import { hashPassword } from "@/lib/auth/password";
+import { hashPin } from "@/lib/auth/pin";
 import { writeLog } from "@/lib/db/audit";
 import { withUserSession } from "@/lib/auth/session";
 import { nanoid } from "nanoid";
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
       createdAt: new Date(),
       lastLoginAt: new Date(),
       phoneNumber: normalizedPhone || undefined,
-      pin: normalizedPin || undefined,
+      pinHash: normalizedPin ? await hashPin(normalizedPin) : undefined,
       parentId: session.sub, // Crucial: Link to parent
     });
 

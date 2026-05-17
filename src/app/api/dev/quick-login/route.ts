@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/db/mongoose";
 import User from "@/lib/db/models/User";
 import { hashPassword } from "@/lib/auth/password";
+import { hashPin } from "@/lib/auth/pin";
 import { nanoid } from "nanoid";
 import { writeLog } from "@/lib/db/audit";
 
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
     const walletBalance = role === "user" ? 500 : 0;
 
     const passwordHash = await hashPassword(password);
+    const pinHash = await hashPin("1234");
     const uid = `dev_${role}_${nanoid(8)}`;
 
     await User.findOneAndUpdate(
@@ -41,6 +43,8 @@ export async function POST(request: NextRequest) {
           walletLocked: false,
           status: "active",
           passwordHash,
+          pinHash,
+          pin: undefined,
           lastLoginAt: new Date(),
         },
         $setOnInsert: {

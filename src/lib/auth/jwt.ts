@@ -1,8 +1,10 @@
 import { SignJWT, jwtVerify } from "jose";
 
-const SESSION_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "fallback-secret-change-this-in-production"
-);
+if (!process.env.JWT_SECRET) {
+  throw new Error("JWT_SECRET must be defined");
+}
+
+const SESSION_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 
 const AGENT_SECRET_PREFIX = "agent-"; // per-device secrets are stored in DB
 

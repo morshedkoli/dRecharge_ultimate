@@ -23,6 +23,12 @@ export async function POST(req: NextRequest) {
       if (!file) {
         return NextResponse.json({ error: "No image file provided" }, { status: 400 });
       }
+      if (!file.type.startsWith("image/")) {
+        return NextResponse.json({ error: "Only image uploads are allowed" }, { status: 400 });
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        return NextResponse.json({ error: "Image must be 5MB or smaller" }, { status: 413 });
+      }
 
       // Convert the incoming web File blob to a base64 string
       const arrayBuffer = await file.arrayBuffer();

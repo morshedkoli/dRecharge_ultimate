@@ -74,8 +74,7 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
   const requiredRecipientLength = service.recipientLength || 11;
   const isAmountValid = amountStr.trim() !== "" && (isAdmin ? amount >= 0 : amount > 0);
   const isValid = recipient.length === requiredRecipientLength && isAmountValid && !isOverBalance;
-  const effectivePin = profile?.pin?.trim() || "1234";
-  const requiredPinLength = effectivePin.length;
+  const hasPin = Boolean(profile?.hasPin);
 
   function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -89,18 +88,18 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
     e.preventDefault();
     setPinError("");
 
-    if (pinInput.length !== requiredPinLength) {
-      setPinError(`PIN must be ${requiredPinLength} digits.`);
+    if (!/^\d{4,6}$/.test(pinInput)) {
+      setPinError("PIN must be 4-6 digits.");
       return;
     }
-    if (pinInput !== effectivePin) {
-      setPinError("Invalid PIN. Please try again.");
+    if (!hasPin) {
+      setPinError("Set your transaction PIN from profile before creating transactions.");
       return;
     }
 
     setSubmitting(true);
     try {
-      await initiateTransaction({ serviceId, recipientNumber: recipient.trim(), amount });
+      await initiateTransaction({ serviceId, recipientNumber: recipient.trim(), amount, pin: pinInput });
       toast.success("Transaction queued successfully!");
       setPreviewOpen(false);
       router.push("/admin/history");
@@ -285,7 +284,7 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
                     type="password"
                     required
                     inputMode="numeric"
-                    maxLength={requiredPinLength}
+                    maxLength={6}
                     value={pinInput}
                     onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
                     placeholder="••••"
@@ -298,16 +297,16 @@ export default function AdminRechargeServicePage({ params }: { params: Promise<{
                     <Info className="w-3.5 h-3.5" />{pinError}
                   </p>
                 )}
-                {!profile?.pin && !pinError && (
+                {!hasPin && !pinError && (
                   <p className="text-on-surface-variant/60 text-[10px] mt-3 text-center font-bold uppercase tracking-wider">
-                    Default PIN is 1234
+                    Set your transaction PIN from profile first
                   </p>
                 )}
               </div>
 
               <button
                 type="submit"
-                disabled={submitting || pinInput.length !== requiredPinLength}
+                  disabled={submitting || !/^\d{4,6}$/.test(pinInput)}
                 className="w-full bg-primary text-white font-bold font-manrope py-4 rounded-2xl hover:bg-primary-dim active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center premium-shadow"
               >
                 {submitting ? (

@@ -80,8 +80,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
   const isOverBalance = amount > effectiveBalance;
   const requiredRecipientLength = service.recipientLength || 11;
   const isValid = recipient.length === requiredRecipientLength && amount > 0 && !isOverBalance;
-  const effectivePin = profile?.pin?.trim() || "1234";
-  const requiredPinLength = effectivePin.length;
+  const hasPin = Boolean(profile?.hasPin);
 
   function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -95,13 +94,13 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
     e.preventDefault();
     setPinError("");
 
-    if (pinInput.length !== requiredPinLength) {
-      setPinError(`PIN must be ${requiredPinLength} digits.`);
+    if (!/^\d{4,6}$/.test(pinInput)) {
+      setPinError("PIN must be 4-6 digits.");
       return;
     }
 
-    if (pinInput !== effectivePin) {
-      setPinError("Invalid PIN entered. Please try again.");
+    if (!hasPin) {
+      setPinError("Set your transaction PIN from profile before creating transactions.");
       return;
     }
 
@@ -111,6 +110,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
         serviceId,
         recipientNumber: recipient.trim(),
         amount: amount,
+        pin: pinInput,
       });
       toast.success("Transaction requested successfully!");
       setPreviewOpen(false);
@@ -301,7 +301,7 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                     type="password" 
                     required 
                     inputMode="numeric"
-                    maxLength={requiredPinLength}
+                    maxLength={6}
                     value={pinInput} 
                     onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))} 
                     placeholder="••••" 
@@ -310,14 +310,14 @@ export default function ServiceExecutionPage({ params }: { params: Promise<{ ser
                   />
                 </div>
                 {pinError && <p className="text-red-500 text-xs font-bold mt-3 text-center flex items-center justify-center gap-1 font-manrope"><Info className="w-3.5 h-3.5" />{pinError}</p>}
-                {!profile?.pin && !pinError && <p className="text-on-surface-variant/60 text-[10px] mt-3 text-center font-bold uppercase tracking-wider">Default unconfigured PIN is 1234</p>}
-                {!!profile?.pin && !pinError && <p className="text-on-surface-variant/60 text-[10px] mt-3 text-center font-bold uppercase tracking-wider">Enter your {requiredPinLength}-digit transaction PIN</p>}
+                {!hasPin && !pinError && <p className="text-on-surface-variant/60 text-[10px] mt-3 text-center font-bold uppercase tracking-wider">Set your transaction PIN from profile first</p>}
+                {hasPin && !pinError && <p className="text-on-surface-variant/60 text-[10px] mt-3 text-center font-bold uppercase tracking-wider">Enter your transaction PIN</p>}
               </div>
 
               <div>
                 <button 
                   type="submit" 
-                  disabled={submitting || pinInput.length !== requiredPinLength}
+                  disabled={submitting || !/^\d{4,6}$/.test(pinInput)}
                   className="w-full bg-primary text-white font-bold font-manrope py-4 rounded-2xl hover:bg-primary-dim active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center premium-shadow"
                 >
                   {submitting ? (

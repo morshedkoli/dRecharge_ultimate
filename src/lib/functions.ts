@@ -99,6 +99,7 @@ export const initiateTransaction = (data: {
   serviceId: string;
   recipientNumber: string;
   amount: number;
+  pin: string;
 }) =>
   apiFetch<{ success: boolean; txId: string; jobId: string }>("/api/admin/transactions", {
     method: "POST",
