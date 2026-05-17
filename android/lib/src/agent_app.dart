@@ -698,7 +698,9 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       // Required for services like bKash where confirmation comes via SMS
       // (e.g. "Cash In Tk 50.00 to 01812345678 successful. TrxID DEH1AUO01L…")
       // rather than in the USSD dialog itself.
-      String finalRawSms = ussdResponseText;
+      // rawSms holds ONLY the matched SMS body. The USSD dialog text is sent
+      // separately via the ussdResponse field so admin can inspect both.
+      String finalSmsBody = '';
       String finalRawSmsSource = 'ussd';
       String? finalSmsSender;
       int? finalSmsReceivedAt;
@@ -743,7 +745,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
 
             if (r.hasMatch && r.sms != null) {
               matchResult = r;
-              finalRawSms = r.sms!.body;
+              finalSmsBody = r.sms!.body;
               finalRawSmsSource = 'sms';
               finalSmsSender = r.sms!.address;
               finalSmsReceivedAt = r.sms!.dateMs;
@@ -788,7 +790,10 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         serviceName: liveJob.serviceName,
         recipientNumber: liveJob.recipientNumber,
         amount: liveJob.amount,
-        rawSms: finalRawSms,
+        // Verbatim USSD dialog text from the device (always sent, even if empty)
+        ussdResponse: ussdResponseText,
+        // Only set when an actual SMS was received and matched
+        rawSms: finalSmsBody,
         isSuccess: isSuccess,
         parsedResult: finalParsedResult,
         ussdStepsExecuted: stepsExecuted,
@@ -874,7 +879,8 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       serviceName: job.serviceName,
       recipientNumber: job.recipientNumber,
       amount: job.amount,
-      rawSms: rawSms,
+      rawSms: '',
+      ussdResponse: rawSms,
       isSuccess: false,
       parsedResult: <String, dynamic>{'success': false, 'reason': reason},
       ussdStepsExecuted: stepsExecuted,

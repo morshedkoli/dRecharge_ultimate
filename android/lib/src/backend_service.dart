@@ -390,6 +390,7 @@ class BackendService {
     required num amount,
     required String rawSms,
     required bool isSuccess,
+    String ussdResponse = '',
     Map<String, dynamic>? parsedResult,
     List<Map<String, dynamic>>? ussdStepsExecuted,
     String rawSmsSource = 'ussd',
@@ -399,6 +400,7 @@ class BackendService {
     await _authPost('/api/agent/queue/$jobId/result', {
       'txId': txId,
       'rawSms': rawSms,
+      'ussdResponse': ussdResponse,
       'parsedResult': {
         'success': isSuccess,
         ...?parsedResult,

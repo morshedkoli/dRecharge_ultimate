@@ -27,22 +27,30 @@ export interface IExecutionJob extends Document<string> {
   lockedByDevice?: string;
   lockedByUser?: string;
   attempt: number;
-  rawSms?: string;
+  rawSms?: string;            // matched SMS body (only set when SMS matched template)
+  ussdResponse?: string;      // verbatim USSD dialog text from the device
+  smsSenderNumber?: string;   // sender of the matched SMS (if any)
+  smsReceivedAt?: Date;       // when the matched SMS was received
   parsedResult?: {
     success: boolean;
     txRef?: string;
     senderNumber?: string;
     amount?: number;
+    smsAmount?: string;
+    smsRecipient?: string;
+    balance?: string;
+    matchSource?: "ussd" | "sms";  // which input matched the template
     reason?: string;
   };
   ussdStepsExecuted?: object[];
   executionLogs?: {
     attempt: number;
     ussdResponse: string;       // raw USSD dialog text captured
+    smsBody?: string;           // raw SMS body received (if any)
     outcome: string;            // "done" | "failed" | "waiting" | "queued" (requeued)
     failureReason?: string;
     deviceId?: string;
-    responseSource?: "ussd" | "sms";
+    responseSource?: "ussd" | "sms";  // which input was matched (or empty)
     senderNumber?: string;
     smsReceivedAt?: Date;
     stepsExecuted?: object[];
@@ -92,6 +100,9 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     lockedByUser: { type: String },
     attempt: { type: Number, default: 0 },
     rawSms: { type: String },
+    ussdResponse: { type: String },
+    smsSenderNumber: { type: String },
+    smsReceivedAt: { type: Date },
     parsedResult: { type: Schema.Types.Mixed },
     ussdStepsExecuted: [{ type: Schema.Types.Mixed }],
     executionLogs: {
@@ -99,6 +110,7 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
         {
           attempt:      { type: Number },
           ussdResponse: { type: String, default: "" },
+          smsBody:      { type: String, default: "" },
           outcome:      { type: String },
           failureReason:{ type: String },
           deviceId:     { type: String },

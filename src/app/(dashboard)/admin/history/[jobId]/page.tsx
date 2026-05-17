@@ -330,11 +330,16 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
       {/* ── USSD Response (Phone Dialog Preview) ─────────────────────────── */}
       {(() => {
-        // Use the latest log's ussdResponse first, then fall back to job.rawSms
+        // Prefer the dedicated ussdResponse field, then the latest log,
+        // then fall back to job.rawSms for legacy data.
         const latestLog = job.executionLogs && job.executionLogs.length > 0
           ? [...job.executionLogs].reverse()[0]
           : null;
-        const ussdText = latestLog?.ussdResponse || job.rawSms || "";
+        const ussdText =
+          (job as any).ussdResponse ||
+          latestLog?.ussdResponse ||
+          (!latestLog?.smsBody ? job.rawSms : "") ||
+          "";
         if (!ussdText.trim()) return null;
 
         // Detect success/failure from parsedResult or status
@@ -446,6 +451,55 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
         );
       })()}
 
+      {/* ── Matched SMS ──────────────────────────────────────────────────── */}
+      {(() => {
+        const latestLog = job.executionLogs && job.executionLogs.length > 0
+          ? [...job.executionLogs].reverse()[0]
+          : null;
+        const smsText =
+          latestLog?.smsBody ||
+          // Legacy: rawSms was used as the matched evidence; if responseSource is "sms" or matchSource is "sms", show it here
+          (latestLog?.responseSource === "sms" || job.parsedResult?.matchSource === "sms"
+            ? job.rawSms
+            : "") ||
+          "";
+        if (!smsText.trim()) return null;
+
+        const sender = (job as any).smsSenderNumber || latestLog?.senderNumber || "";
+        const isSuccess = job.parsedResult?.success === true || job.status === "done";
+        const isFailed  = job.status === "failed" || (job.parsedResult?.success === false && job.status !== "waiting");
+
+        return (
+          <Card title="Matched SMS" icon={MessageSquare} iconBg={isSuccess ? "bg-[#E8F1EE]" : isFailed ? "bg-red-50" : "bg-amber-50"}>
+            {sender && (
+              <Field icon={Phone} label="From" value={<span className="font-mono">{sender}</span>} />
+            )}
+            <div className="py-3">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/60 font-manrope mb-2">SMS Body</p>
+              <pre className="bg-surface-container/50 border border-black/[0.04] rounded-xl px-4 py-3.5 text-xs font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed">
+                {smsText}
+              </pre>
+            </div>
+            {job.parsedResult && (job.parsedResult.txRef || (job.parsedResult as any).smsAmount || (job.parsedResult as any).smsRecipient || (job.parsedResult as any).balance) && (
+              <div className="py-2 grid grid-cols-2 gap-x-4">
+                {job.parsedResult.txRef && (
+                  <Field icon={Hash} label="Transaction ID" value={<span className="font-mono">{job.parsedResult.txRef}</span>} />
+                )}
+                {(job.parsedResult as any).smsAmount && (
+                  <Field icon={CreditCard} label="Amount (from SMS)" value={<span className="font-mono">{(job.parsedResult as any).smsAmount}</span>} />
+                )}
+                {(job.parsedResult as any).smsRecipient && (
+                  <Field icon={Phone} label="Recipient (from SMS)" value={<span className="font-mono">{(job.parsedResult as any).smsRecipient}</span>} />
+                )}
+                {(job.parsedResult as any).balance && (
+                  <Field icon={CreditCard} label="Balance" value={<span className="font-mono">{(job.parsedResult as any).balance}</span>} />
+                )}
+              </div>
+            )}
+          </Card>
+        );
+      })()}
+
       {/* ── Execution History ─────────────────────────────────────────────── */}
       {job.executionLogs && job.executionLogs.length > 0 ? (
         <Card title={`Execution History (${job.executionLogs.length} attempt${job.executionLogs.length !== 1 ? "s" : ""})`} icon={Terminal} iconBg="bg-violet-50">
@@ -482,6 +536,22 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
                     </pre>
                   )}
                 </div>
+
+                {/* Matched SMS body (when present) */}
+                {log.smsBody && (
+                  <div className="mb-3">
+                    <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/40 font-manrope mb-1.5 flex items-center gap-1.5">
+                      <MessageSquare className="w-2.5 h-2.5" />
+                      SMS Received
+                      {log.senderNumber && (
+                        <span className="font-mono text-[10px] text-on-surface-variant/60 normal-case tracking-normal">from {log.senderNumber}</span>
+                      )}
+                    </p>
+                    <pre className="bg-blue-50/40 border border-blue-100/60 rounded-xl px-4 py-3 text-xs font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed">
+                      {log.smsBody}
+                    </pre>
+                  </div>
+                )}
 
                 {/* Failure/waiting reason */}
                 {log.failureReason && (

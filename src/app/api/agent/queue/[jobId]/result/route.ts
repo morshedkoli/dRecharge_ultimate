@@ -29,6 +29,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const {
       txId,
       rawSms,
+      ussdResponse: bodyUssdResponse,
       rawSmsSource,
       smsSenderNumber,
       smsReceivedAt,
@@ -43,16 +44,43 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const dbSession = await mongoose.startSession();
 
+    // Extract USSD dialog text:
+    //   1. Prefer the explicit ussdResponse field from the agent
+    //   2. Fall back to the last "response" step in ussdStepsExecuted
+    //   3. Final fallback: if rawSmsSource === "ussd", rawSms holds the dialog text
+    const extractUssdResponse = (): string => {
+      if (typeof bodyUssdResponse === "string" && bodyUssdResponse.trim()) {
+        return bodyUssdResponse.trim();
+      }
+      if (Array.isArray(ussdStepsExecuted)) {
+        for (let i = ussdStepsExecuted.length - 1; i >= 0; i--) {
+          const step = ussdStepsExecuted[i] as { type?: string; value?: string };
+          if (step?.type === "response" && typeof step.value === "string" && step.value.trim()) {
+            return step.value.trim();
+          }
+        }
+      }
+      if (rawSmsSource === "ussd" && typeof rawSms === "string" && rawSms.trim()) {
+        return rawSms.trim();
+      }
+      return "";
+    };
+
+    const ussdResponseText = extractUssdResponse();
+    // smsBody is only what came over SMS — never the USSD dialog
+    const smsBodyText =
+      rawSmsSource === "sms" && typeof rawSms === "string" && rawSms.trim()
+        ? rawSms.trim()
+        : "";
+
     // Determine whether USSD steps actually ran on the device
     const stepsRan = Array.isArray(ussdStepsExecuted) && ussdStepsExecuted.length > 0;
-    const hasUssdResponse = typeof rawSms === "string" && rawSms.trim().length > 0;
+    const hasAnyResponse = ussdResponseText.length > 0 || smsBodyText.length > 0;
 
     // Infrastructure failure: agent couldn't even dial USSD.
-    // This happens when the app loses accessibility/phone permission mid-job,
-    // or when the USSD call itself never connected.
-    // Detection: no steps ran AND no USSD response AND agent reported failure.
+    // Detection: no steps ran AND no response captured AND agent reported failure.
     const isInfraFailure =
-      !hasUssdResponse &&
+      !hasAnyResponse &&
       !stepsRan &&
       clientResult?.success === false;
 
@@ -116,6 +144,9 @@ export async function POST(request: NextRequest, { params }: Params) {
             (job as any).lockedAt = undefined;
             (job as any).lockedByDevice = undefined;
             (job as any).lockedByUser = undefined;
+            // Persist whatever we captured so admin can inspect retries
+            if (ussdResponseText) (job as any).ussdResponse = ussdResponseText;
+            if (smsBodyText) job.rawSms = smsBodyText;
             if (!job.executionLogs) (job as any).executionLogs = [];
             (job as any).executionLogs.push(infraLogEntry);
             await job.save({ session: dbSession });
@@ -139,31 +170,69 @@ export async function POST(request: NextRequest, { params }: Params) {
         }
 
         // ── Template-based outcome determination ─────────────────────────────────
-        // Only runs when we have a real USSD response OR infra-failure escalation.
+        // Evaluate templates against BOTH the USSD dialog text and the SMS body.
+        // Either input can confirm/fail the job — we try USSD first (immediate
+        // confirmation), then SMS (async confirmation for SMS-only services).
         if (!requeuedDueToInfra && !isInfraFailure) {
-          if (hasUssdResponse) {
+          if (hasAnyResponse) {
             const [successSmsFormat, failureTemplates] = await Promise.all([
               loadSuccessFormat(job),
               loadFailureTemplates(job),
             ]);
-            const result = evaluateSmsAgainstTemplates({
-              rawSms,
-              recipientNumber: job.recipientNumber,
-              amount: job.amount,
-              successSmsFormat,
-              failureSmsTemplates: failureTemplates,
-            });
+
+            // Try USSD dialog text first
+            let evaluatedSource: "ussd" | "sms" | null = null;
+            let result =
+              ussdResponseText.length > 0
+                ? evaluateSmsAgainstTemplates({
+                    rawSms: ussdResponseText,
+                    recipientNumber: job.recipientNumber,
+                    amount: job.amount,
+                    successSmsFormat,
+                    failureSmsTemplates: failureTemplates,
+                  })
+                : null;
+            if (result && result.outcome !== "waiting") {
+              evaluatedSource = "ussd";
+            }
+
+            // If USSD didn't conclusively match, try the SMS body
+            if ((!result || result.outcome === "waiting") && smsBodyText.length > 0) {
+              const smsResult = evaluateSmsAgainstTemplates({
+                rawSms: smsBodyText,
+                recipientNumber: job.recipientNumber,
+                amount: job.amount,
+                successSmsFormat,
+                failureSmsTemplates: failureTemplates,
+              });
+              if (smsResult.outcome !== "waiting" || !result) {
+                result = smsResult;
+                if (smsResult.outcome !== "waiting") evaluatedSource = "sms";
+              }
+            }
+
+            if (!result) {
+              // Shouldn't happen because hasAnyResponse is true, but be safe.
+              result = {
+                outcome: "waiting",
+                parsedResult: { success: false, reason: "No response to evaluate" },
+                failureReason: "No response to evaluate",
+              };
+            }
+
             outcome = result.outcome;
             isSuccess = result.outcome === "done";
             failureReason = result.failureReason;
-            finalParsedResult = result.parsedResult;
+            finalParsedResult = {
+              ...result.parsedResult,
+              ...(evaluatedSource ? { matchSource: evaluatedSource } : {}),
+            };
           } else {
-            // USSD steps ran (stepsRan=true) but no response text captured,
-            // OR we have no information at all. Manual review required.
+            // USSD steps ran but nothing captured. Manual review required.
             outcome = "waiting";
             isSuccess = false;
             failureReason = stepsRan
-              ? "USSD steps executed but no response dialog text was captured."
+              ? "USSD steps executed but no response dialog text or SMS was captured."
               : "No USSD response received and no steps executed.";
             finalParsedResult = { success: false, reason: failureReason };
           }
@@ -174,7 +243,15 @@ export async function POST(request: NextRequest, { params }: Params) {
         // ── Persist final outcome ────────────────────────────────────────────────
         job.status = outcome;
         job.locked = false;
-        job.rawSms = rawSms ?? "";
+        // Store dialog text and SMS body separately so admin can see both.
+        (job as any).ussdResponse = ussdResponseText;
+        job.rawSms = smsBodyText;
+        if (typeof smsSenderNumber === "string" && smsSenderNumber.trim()) {
+          (job as any).smsSenderNumber = smsSenderNumber.trim();
+        }
+        if (smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime())) {
+          (job as any).smsReceivedAt = smsReceivedAtDate;
+        }
         job.parsedResult = finalParsedResult;
         job.ussdStepsExecuted = ussdStepsExecuted || [];   // latest attempt steps
         job.completedAt = outcome === "waiting" ? undefined : new Date();
@@ -182,7 +259,8 @@ export async function POST(request: NextRequest, { params }: Params) {
         // Append this attempt to the execution log so admins can see full history
         const logEntry = {
           attempt: job.attempt,
-          ussdResponse: rawSms ?? "",
+          ussdResponse: ussdResponseText,
+          smsBody: smsBodyText,
           outcome: outcome as string,
           failureReason: failureReason,
           deviceId: agentSession.deviceId,

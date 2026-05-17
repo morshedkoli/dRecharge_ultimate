@@ -92,16 +92,24 @@ export async function POST(request: NextRequest, { params }: Params) {
         failureReason = result.failureReason;
         finalParsedResult = result.parsedResult;
 
-        // Persist resolution
+        // Persist resolution — keep the existing ussdResponse intact,
+        // this endpoint only delivers the SMS body.
         job.status = outcome as any;
         job.locked = false;
         job.rawSms = rawSms;
-        job.parsedResult = finalParsedResult;
+        if (typeof smsSenderNumber === "string" && smsSenderNumber.trim()) {
+          (job as any).smsSenderNumber = smsSenderNumber.trim();
+        }
+        if (smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime())) {
+          (job as any).smsReceivedAt = smsReceivedAtDate;
+        }
+        job.parsedResult = { ...finalParsedResult, matchSource: "sms" as const };
         job.completedAt = outcome === "waiting" ? undefined : new Date();
         if (!job.executionLogs) (job as any).executionLogs = [];
         (job as any).executionLogs.push({
           attempt: job.attempt,
-          ussdResponse: rawSms,
+          ussdResponse: (job as any).ussdResponse ?? "",
+          smsBody: rawSms,
           outcome,
           failureReason,
           deviceId: agentSession.deviceId,

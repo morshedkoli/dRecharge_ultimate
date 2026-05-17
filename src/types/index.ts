@@ -76,11 +76,18 @@ export interface ExecutionJob {
   lockedAt?: Date | string;
   lockedByDevice?: string;
   attempt: number;
-  rawSms?: string;
+  rawSms?: string;            // matched SMS body
+  ussdResponse?: string;      // verbatim USSD dialog text from the device
+  smsSenderNumber?: string;
+  smsReceivedAt?: Date | string;
   parsedResult?: {
     success: boolean;
     txRef?: string;
     amount?: number;
+    smsAmount?: string;
+    smsRecipient?: string;
+    balance?: string;
+    matchSource?: "ussd" | "sms";
     reason?: string;
   };
   ussdStepsExecuted?: UssdStepResult[];
@@ -120,6 +127,7 @@ export interface UssdStepResult {
 export interface ExecutionLog {
   attempt: number;
   ussdResponse: string;        // raw USSD dialog text from device
+  smsBody?: string;            // raw SMS body received (if any)
   outcome: string;             // "done" | "failed" | "waiting" | "queued"
   failureReason?: string;
   deviceId?: string;
