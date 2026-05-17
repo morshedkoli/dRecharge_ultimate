@@ -14,6 +14,19 @@ export interface SmsTemplateResult {
 }
 
 /**
+ * Build a regex pattern for {recipientNumber} that allows operator-masked digits.
+ * bKash and many BD operators replace middle digits with "X" in confirmation SMS,
+ * e.g. stored "01811628121" → SMS shows "0181XXXX121".
+ * Each digit in the stored number is allowed to appear as itself OR as "X"/"x".
+ */
+function buildRecipientPattern(recipientNumber: string): string {
+  return recipientNumber
+    .split("")
+    .map(c => /\d/.test(c) ? `[${c}Xx]` : c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("");
+}
+
+/**
  * Build a regex pattern for the {amount} placeholder that handles:
  * - Optional thousands comma separators  (50 → 50 or 1,500)
  * - bKash-style two-decimal SMS amounts  (50 stored → 50.00 in SMS)
@@ -58,7 +71,7 @@ export function buildSmsTemplateRegex(
   escaped = escaped.replace(/\s+/g, "\\s+");
 
   escaped = escaped
-    .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .replace(/\\\{recipientNumber\\\}/g, buildRecipientPattern(recipientNumber))
     .replace(/\\\{amount\\\}/g, buildAmountPattern(amount))
     .replace(/\\\{trxId\\\}/g, "(?<txRef>\\w+)")
     .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
@@ -69,6 +82,15 @@ export function buildSmsTemplateRegex(
   } catch {
     return null;
   }
+}
+
+export async function loadSuccessFormat(
+  job: { serviceId: string; successSmsFormat?: string }
+): Promise<string> {
+  if (job.successSmsFormat?.trim()) return job.successSmsFormat;
+  // Template may have been added to the service after the job was created — fall back to service.
+  const service = await Service.findById(job.serviceId).lean();
+  return service?.successSmsFormat ?? "";
 }
 
 export async function loadFailureTemplates(
