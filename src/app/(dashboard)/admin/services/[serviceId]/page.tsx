@@ -320,59 +320,46 @@ function UssdStepBuilder({
 }
 
 // ── Client-side SMS template matching (mirrors server sms-template.ts) ───────
+// Templates are FORMAT patterns — {amount} and {recipientNumber} match any
+// value and capture it from the SMS. One template covers all users/amounts.
 
-function buildAmountPattern(amount: number): string {
-  const str = String(amount);
-  const dotIdx = str.indexOf(".");
-  const intStr = dotIdx >= 0 ? str.slice(0, dotIdx) : str;
-  const intPattern = intStr
-    .split("")
-    .map((c, i) => (/\d/.test(c) && i < intStr.length - 1 ? `${c}[,]?` : c))
-    .join("");
-  if (dotIdx < 0) return `${intPattern}(?:\\.[0-9]+)?`;
-  const decStr = str.slice(dotIdx + 1);
-  const sigDec = decStr.replace(/0+$/, "");
-  if (!sigDec) return `${intPattern}(?:\\.[0-9]+)?`;
-  return `${intPattern}\\.${sigDec}[0-9]*`;
-}
-
-function buildTemplateRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
+function buildTemplateRegex(format: string): RegExp | null {
   if (!format?.trim()) return null;
   let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   escaped = escaped.replace(/\s+/g, "\\s+");
   escaped = escaped
-    .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .replace(/\\\{amount\\\}/g, buildAmountPattern(amount))
-    .replace(/\\\{trxId\\\}/g, "(?<txRef>\\w+)")
-    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
-    .replace(/\\\{[^\\}]+\\\}/g, ".*?");
+    .replace(/\\\{amount\\\}/g,          "(?<smsAmount>[0-9,]+(?:\\.[0-9]+)?)")
+    .replace(/\\\{recipientNumber\\\}/g, "(?<smsRecipient>[0-9Xx+]{6,20})")
+    .replace(/\\\{trxId\\\}/g,           "(?<txRef>\\w+)")
+    .replace(/\\\{balance\\\}/g,         "(?<balance>[0-9,.]+)")
+    .replace(/\\\{[^\\}]+\\\}/g,         ".*?");
   try { return new RegExp(escaped, "i"); } catch { return null; }
 }
 
 type SmsTestOutcome =
-  | { outcome: "success"; txRef?: string; balance?: string }
+  | { outcome: "success"; txRef?: string; balance?: string; smsAmount?: string; smsRecipient?: string }
   | { outcome: "failure"; failureMessage: string }
   | { outcome: "no_match" };
 
 function testSmsAgainstTemplates(params: {
   rawSms: string;
-  recipientNumber: string;
-  amount: number;
   successSmsFormat: string;
   failureSmsTemplates: { template: string; message: string }[];
 }): SmsTestOutcome {
   const sms = params.rawSms.trim();
-  const successRegex = buildTemplateRegex(params.successSmsFormat, params.recipientNumber, params.amount);
+  const successRegex = buildTemplateRegex(params.successSmsFormat);
   const successMatch = successRegex ? sms.match(successRegex) : null;
   if (successMatch) {
     return {
       outcome: "success",
-      txRef: successMatch.groups?.txRef,
-      balance: successMatch.groups?.balance,
+      txRef:        successMatch.groups?.txRef,
+      balance:      successMatch.groups?.balance,
+      smsAmount:    successMatch.groups?.smsAmount?.trim(),
+      smsRecipient: successMatch.groups?.smsRecipient?.trim(),
     };
   }
   for (const ft of params.failureSmsTemplates) {
-    const failRegex = buildTemplateRegex(ft.template, params.recipientNumber, params.amount);
+    const failRegex = buildTemplateRegex(ft.template);
     if (failRegex?.test(sms)) return { outcome: "failure", failureMessage: ft.message };
   }
   return { outcome: "no_match" };
@@ -403,17 +390,11 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
 
   // ── SMS Tester state ────────────────────────────────────────────────────────
   const [testSms, setTestSms] = useState("");
-  const [testAmount, setTestAmount] = useState("");
-  const [testRecipient, setTestRecipient] = useState("");
   const [testResult, setTestResult] = useState<SmsTestOutcome | null>(null);
 
   function handleTestSms() {
-    const amount = parseFloat(testAmount) || 0;
-    const recipient = testRecipient.trim() || "01800000000";
     setTestResult(testSmsAgainstTemplates({
       rawSms: testSms,
-      recipientNumber: recipient,
-      amount,
       successSmsFormat,
       failureSmsTemplates,
     }));
@@ -853,35 +834,13 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
               value={testSms}
               onChange={(e) => { setTestSms(e.target.value); setTestResult(null); }}
               rows={3}
-              placeholder="Paste a real SMS from the operator here — e.g. Cash In Tk 50.00 to 01812345678 successful. Fee Tk 0.00. Balance Tk 1,234.56. TrxID ABC123XYZ at 17/05/2026 12:19"
+              placeholder="Paste a real SMS from the operator — e.g. Cash In Tk 50.00 to 0181XXXX121 successful. Fee Tk 0.00. Balance Tk 1,234.56. TrxID ABC123XYZ at 17/05/2026 12:19"
               className={`${monoCls} resize-y leading-relaxed`}
             />
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">
-                  Test Amount
-                </label>
-                <input
-                  type="number"
-                  value={testAmount}
-                  onChange={(e) => { setTestAmount(e.target.value); setTestResult(null); }}
-                  placeholder="e.g. 50"
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">
-                  Test Recipient Number
-                </label>
-                <input
-                  value={testRecipient}
-                  onChange={(e) => { setTestRecipient(e.target.value); setTestResult(null); }}
-                  placeholder="e.g. 01812345678"
-                  className={inputCls}
-                />
-              </div>
-            </div>
+            <p className="text-xs text-on-surface-variant/60 -mt-2">
+              Tip: paste the actual SMS exactly as received — amount and recipient are matched by format, not exact values.
+            </p>
 
             <button
               type="button"
@@ -894,7 +853,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
             </button>
 
             {testResult && (
-              <div className={`rounded-xl border p-4 space-y-1 ${
+              <div className={`rounded-xl border p-4 space-y-2 ${
                 testResult.outcome === "success"
                   ? "bg-[#E8F1EE] border-primary/20"
                   : testResult.outcome === "failure"
@@ -907,12 +866,12 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
                       <CheckCircle2 className="w-5 h-5 shrink-0" />
                       Matched <strong>success template</strong> — job will be marked <strong>complete</strong>
                     </div>
-                    {(testResult.txRef || testResult.balance) && (
-                      <div className="flex gap-4 ml-7 text-xs text-primary/70 font-manrope font-semibold">
-                        {testResult.txRef && <span>TrxID captured: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.txRef}</code></span>}
-                        {testResult.balance && <span>Balance captured: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.balance}</code></span>}
-                      </div>
-                    )}
+                    <div className="flex flex-wrap gap-3 ml-7 text-xs text-primary/70 font-manrope font-semibold">
+                      {testResult.smsAmount    && <span>Amount: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.smsAmount}</code></span>}
+                      {testResult.smsRecipient && <span>Recipient: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.smsRecipient}</code></span>}
+                      {testResult.txRef        && <span>TrxID: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.txRef}</code></span>}
+                      {testResult.balance      && <span>Balance: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.balance}</code></span>}
+                    </div>
                   </>
                 )}
                 {testResult.outcome === "failure" && (

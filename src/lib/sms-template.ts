@@ -6,76 +6,45 @@ export interface SmsTemplateResult {
   outcome: TemplateOutcome;
   parsedResult: {
     success: boolean;
-    txRef?: string;
-    balance?: string;
+    txRef?: string;       // transaction ID captured from SMS via {trxId}
+    balance?: string;     // balance captured from SMS via {balance}
+    smsAmount?: string;   // amount captured from SMS via {amount}
+    smsRecipient?: string;// recipient captured from SMS via {recipientNumber} (may be masked)
     reason?: string;
   };
   failureReason?: string;
 }
 
 /**
- * Build a regex pattern for {recipientNumber} that allows operator-masked digits.
- * bKash and many BD operators replace middle digits with "X" in confirmation SMS,
- * e.g. stored "01811628121" → SMS shows "0181XXXX121".
- * Each digit in the stored number is allowed to appear as itself OR as "X"/"x".
+ * Converts a service SMS template into a regex that works for ANY user/amount/recipient.
+ *
+ * Design: templates are FORMAT patterns, not value validators. The agent already
+ * associates the SMS with the correct job (temporal binding — the SMS arrives
+ * while executing that specific USSD). The server's job is to recognise the
+ * shape of the message ("this looks like a bKash success") and capture the
+ * dynamic values from it.
+ *
+ * Placeholder resolution:
+ *   {amount}          → (?<smsAmount>[0-9,]+(?:\.[0-9]+)?)   captures any amount
+ *   {recipientNumber} → (?<smsRecipient>[0-9Xx+]{6,20})      captures any masked phone
+ *   {trxId}           → (?<txRef>\w+)                        captures transaction ID
+ *   {balance}         → (?<balance>[0-9,.]+)                 captures account balance
+ *   {anything_else}   → .*?                                  wildcard
+ *
+ * Literal text is regex-escaped and whitespace is normalised to \s+.
  */
-function buildRecipientPattern(recipientNumber: string): string {
-  return recipientNumber
-    .split("")
-    .map(c => /\d/.test(c) ? `[${c}Xx]` : c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("");
-}
-
-/**
- * Build a regex pattern for the {amount} placeholder that handles:
- * - Optional thousands comma separators  (50 → 50 or 1,500)
- * - bKash-style two-decimal SMS amounts  (50 stored → 50.00 in SMS)
- * - Trailing decimal zeros               (50.5 stored → 50.50 in SMS)
- */
-function buildAmountPattern(amount: number): string {
-  const str = String(amount);
-  const dotIdx = str.indexOf(".");
-
-  // Integer part: allow optional comma after every digit except the last
-  const intStr = dotIdx >= 0 ? str.slice(0, dotIdx) : str;
-  const intPattern = intStr
-    .split("")
-    .map((c, i) => (/\d/.test(c) && i < intStr.length - 1 ? `${c}[,]?` : c))
-    .join("");
-
-  if (dotIdx < 0) {
-    // Whole number: SMS may show .00 / .0 etc. — allow any decimal suffix
-    return `${intPattern}(?:\\.[0-9]+)?`;
-  }
-
-  const decStr = str.slice(dotIdx + 1);
-  // Strip trailing zeros from the stored decimal
-  const sigDec = decStr.replace(/0+$/, "");
-
-  if (!sigDec) {
-    // e.g. amount = 50.00 → treat as whole number
-    return `${intPattern}(?:\\.[0-9]+)?`;
-  }
-
-  // e.g. amount = 50.5 → SMS shows 50.50 → allow trailing zeros
-  return `${intPattern}\\.${sigDec}[0-9]*`;
-}
-
-export function buildSmsTemplateRegex(
-  format: string,
-  recipientNumber: string,
-  amount: number
-): RegExp | null {
+export function buildSmsTemplateRegex(format: string): RegExp | null {
   if (!format?.trim()) return null;
+
   let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   escaped = escaped.replace(/\s+/g, "\\s+");
 
   escaped = escaped
-    .replace(/\\\{recipientNumber\\\}/g, buildRecipientPattern(recipientNumber))
-    .replace(/\\\{amount\\\}/g, buildAmountPattern(amount))
-    .replace(/\\\{trxId\\\}/g, "(?<txRef>\\w+)")
-    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
-    .replace(/\\\{[^\\}]+\\\}/g, ".*?");
+    .replace(/\\\{amount\\\}/g,          "(?<smsAmount>[0-9,]+(?:\\.[0-9]+)?)")
+    .replace(/\\\{recipientNumber\\\}/g, "(?<smsRecipient>[0-9Xx+]{6,20})")
+    .replace(/\\\{trxId\\\}/g,           "(?<txRef>\\w+)")
+    .replace(/\\\{balance\\\}/g,         "(?<balance>[0-9,.]+)")
+    .replace(/\\\{[^\\}]+\\\}/g,         ".*?");
 
   try {
     return new RegExp(escaped, "i");
@@ -84,15 +53,21 @@ export function buildSmsTemplateRegex(
   }
 }
 
+/**
+ * Load successSmsFormat from the service as a fallback when the job's own
+ * field is blank (template configured after the job was created).
+ */
 export async function loadSuccessFormat(
   job: { serviceId: string; successSmsFormat?: string }
 ): Promise<string> {
   if (job.successSmsFormat?.trim()) return job.successSmsFormat;
-  // Template may have been added to the service after the job was created — fall back to service.
   const service = await Service.findById(job.serviceId).lean();
   return service?.successSmsFormat ?? "";
 }
 
+/**
+ * Load failure templates from the service when the job has none of its own.
+ */
 export async function loadFailureTemplates(
   job: {
     serviceId: string;
@@ -101,45 +76,63 @@ export async function loadFailureTemplates(
 ): Promise<{ template: string; message: string }[]> {
   const jobTemplates = job.failureSmsTemplates ?? [];
   if (jobTemplates.length > 0) return jobTemplates;
-
   const service = await Service.findById(job.serviceId).lean();
   return (service?.failureSmsTemplates ?? []) as { template: string; message: string }[];
 }
 
+/**
+ * Evaluate an incoming SMS against the configured success and failure templates.
+ *
+ * Returns:
+ *   done    → SMS matched success template  (job complete)
+ *   failed  → SMS matched a failure template (job failed, refund wallet)
+ *   waiting → SMS didn't match anything     (manual admin review)
+ *
+ * `recipientNumber` and `amount` are accepted for call-site compatibility but
+ * are NOT used for matching — the templates are format-based and work for any
+ * user, any amount, any recipient without hardcoding specific values.
+ */
 export function evaluateSmsAgainstTemplates(args: {
   rawSms: string;
-  recipientNumber: string;
-  amount: number;
   successSmsFormat?: string;
   failureSmsTemplates?: { template: string; message: string }[];
+  // kept for backward-compat; not used in regex matching
+  recipientNumber?: string;
+  amount?: number;
 }): SmsTemplateResult {
   const rawSms = args.rawSms.trim();
   const successSmsFormat = args.successSmsFormat ?? "";
-  const successRegex = buildSmsTemplateRegex(successSmsFormat, args.recipientNumber, args.amount);
+
+  const successRegex = buildSmsTemplateRegex(successSmsFormat);
   const successMatch = successRegex ? rawSms.match(successRegex) : null;
 
   if (successMatch) {
     const parsedResult: SmsTemplateResult["parsedResult"] = { success: true };
-    const txRef = successMatch.groups?.txRef;
-    const balance = successMatch.groups?.balance;
+    const { txRef, balance, smsAmount, smsRecipient } = successMatch.groups ?? {};
 
+    // If template requires a transaction ID but regex couldn't capture one,
+    // send to waiting — the SMS structure is unexpected.
     if (successSmsFormat.includes("{trxId}") && !txRef) {
       const reason = "Success template matched but transaction ID could not be extracted.";
       return { outcome: "waiting", parsedResult: { success: false, reason }, failureReason: reason };
     }
 
-    if (txRef) parsedResult.txRef = txRef;
-    if (balance) parsedResult.balance = balance;
+    if (txRef)        parsedResult.txRef        = txRef;
+    if (balance)      parsedResult.balance       = balance;
+    if (smsAmount)    parsedResult.smsAmount     = smsAmount.trim();
+    if (smsRecipient) parsedResult.smsRecipient  = smsRecipient.trim();
+
     return { outcome: "done", parsedResult };
   }
 
-  for (const template of args.failureSmsTemplates ?? []) {
-    const failureRegex = buildSmsTemplateRegex(template.template, args.recipientNumber, args.amount);
+  // Check each failure template
+  for (const tmpl of args.failureSmsTemplates ?? []) {
+    const failureRegex = buildSmsTemplateRegex(tmpl.template);
     if (failureRegex?.test(rawSms)) {
       return {
         outcome: "failed",
-        parsedResult: { success: false, reason: template.message },
-        failureReason: template.message,
+        parsedResult: { success: false, reason: tmpl.message },
+        failureReason: tmpl.message,
       };
     }
   }
@@ -147,4 +140,3 @@ export function evaluateSmsAgainstTemplates(args: {
   const reason = "SMS/USSD response did not match any configured success or failure template.";
   return { outcome: "waiting", parsedResult: { success: false, reason }, failureReason: reason };
 }
-
