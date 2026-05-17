@@ -714,6 +714,14 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
           liveJob.failureSmsTemplates.isNotEmpty ||
           liveJob.smsTimeout > 0;
 
+      // Track the most recent transactional SMS seen during polling, so we can
+      // forward it to the server even when the agent's local matching can't
+      // recognise it. The server's regex is more capable (it has special handling
+      // for {amount}, {recipientNumber}, {trxId}, {balance}) and may match SMSes
+      // the agent doesn't. Sending the raw body lets the server be the source of
+      // truth for the final outcome.
+      SmsEntry? latestCandidateSms;
+
       if (matchResult == null && hasSmsTemplate) {
         final int timeoutMs =
             (liveJob.smsTimeout * 1000).clamp(5000, 120000);
@@ -738,6 +746,23 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
               maxMessages: 20,
             );
 
+            // Keep the most recent SMS that arrived in our window. We filter
+            // for likely transactional senders (short codes / alphanumeric IDs
+            // rather than full phone numbers) so personal texts don't pollute
+            // the report.
+            for (final sms in recentSms) {
+              if (sms.dateMs < ussdCompletedMs - 5000) continue;
+              final addr = sms.address.trim();
+              final looksLikeShortCode =
+                  addr.isNotEmpty &&
+                  (addr.length <= 8 || RegExp(r'[A-Za-z]').hasMatch(addr));
+              if (!looksLikeShortCode) continue;
+              if (latestCandidateSms == null ||
+                  sms.dateMs > latestCandidateSms!.dateMs) {
+                latestCandidateSms = sms;
+              }
+            }
+
             final r = BackendService.matchIncomingSms(
               messages: recentSms,
               job: liveJob,
@@ -761,7 +786,18 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
           }
         }
 
-        if (matchResult == null) {
+        // Fallback: agent's local regex couldn't recognise any SMS, but we did
+        // receive one from a likely-transactional sender. Forward it to the
+        // server — its regex is more capable and may resolve the outcome.
+        if (matchResult == null && latestCandidateSms != null) {
+          finalSmsBody = latestCandidateSms!.body;
+          finalRawSmsSource = 'sms';
+          finalSmsSender = latestCandidateSms!.address;
+          finalSmsReceivedAt = latestCandidateSms!.dateMs;
+          _appendLog(
+            'ℹ SMS received from ${latestCandidateSms!.address} — server will evaluate',
+          );
+        } else if (matchResult == null) {
           _appendLog(
             '⏱ SMS timeout — submitting USSD response for manual review',
           );
