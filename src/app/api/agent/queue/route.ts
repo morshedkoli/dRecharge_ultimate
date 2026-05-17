@@ -4,6 +4,7 @@ import ExecutionJob from "@/lib/db/models/ExecutionJob";
 import Service from "@/lib/db/models/Service";
 import { extractAgentSession } from "../_auth";
 import { resolveJobUssdSteps } from "@/lib/ussd";
+import { loadSuccessFormat, loadFailureTemplates } from "@/lib/sms-template";
 
 // GET /api/agent/queue — fetch next queued job
 export async function GET(request: NextRequest) {
@@ -58,6 +59,13 @@ export async function GET(request: NextRequest) {
       amount: job.amount,
     });
 
+    // Resolve SMS templates with service fallback so agent always gets the format
+    // even when the job was created before the template was configured on the service.
+    const [successSmsFormat, failureSmsTemplates] = await Promise.all([
+      loadSuccessFormat(job),
+      loadFailureTemplates(job),
+    ]);
+
     return NextResponse.json({
       job: {
         jobId: job._id,
@@ -70,8 +78,8 @@ export async function GET(request: NextRequest) {
         ussdSteps,
         simSlot: job.simSlot ?? 1,
         smsTimeout: job.smsTimeout ?? 30,
-        successSmsFormat: job.successSmsFormat,
-        failureSmsTemplates: job.failureSmsTemplates ?? [],
+        successSmsFormat,
+        failureSmsTemplates,
         status: job.status,
         locked: job.locked,
         attempt: job.attempt,

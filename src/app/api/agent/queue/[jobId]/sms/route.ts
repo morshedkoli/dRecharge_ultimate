@@ -10,7 +10,7 @@ import {
   notifyTransactionWaiting,
 } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
-import { evaluateSmsAgainstTemplates, loadFailureTemplates } from "@/lib/sms-template";
+import { evaluateSmsAgainstTemplates, loadFailureTemplates, loadSuccessFormat } from "@/lib/sms-template";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
@@ -77,12 +77,15 @@ export async function POST(request: NextRequest, { params }: Params) {
           return; // already resolved — ignore duplicate SMS
         }
 
-        const failureTemplates = await loadFailureTemplates(job);
+        const [successSmsFormat, failureTemplates] = await Promise.all([
+          loadSuccessFormat(job),
+          loadFailureTemplates(job),
+        ]);
         const result = evaluateSmsAgainstTemplates({
           rawSms,
           recipientNumber: job.recipientNumber,
           amount: job.amount,
-          successSmsFormat: job.successSmsFormat,
+          successSmsFormat,
           failureSmsTemplates: failureTemplates,
         });
         outcome = result.outcome;

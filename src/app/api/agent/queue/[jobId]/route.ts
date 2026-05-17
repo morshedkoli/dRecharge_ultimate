@@ -4,6 +4,7 @@ import ExecutionJob from "@/lib/db/models/ExecutionJob";
 import Service from "@/lib/db/models/Service";
 import { extractAgentSession } from "../../_auth";
 import { resolveJobUssdSteps } from "@/lib/ussd";
+import { loadSuccessFormat, loadFailureTemplates } from "@/lib/sms-template";
 
 type Params = { params: Promise<{ jobId: string }> };
 
@@ -34,6 +35,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       amount: job.amount,
     });
 
+    // Resolve SMS templates with service fallback so the live job fetch
+    // always returns the format even for jobs created before it was configured.
+    const [successSmsFormat, failureSmsTemplates] = await Promise.all([
+      loadSuccessFormat(job),
+      loadFailureTemplates(job),
+    ]);
+
     return NextResponse.json({
       job: {
         jobId: job._id,
@@ -46,8 +54,8 @@ export async function GET(request: NextRequest, { params }: Params) {
         ussdSteps,
         simSlot: job.simSlot ?? 1,
         smsTimeout: job.smsTimeout ?? 30,
-        successSmsFormat: job.successSmsFormat,
-        failureSmsTemplates: job.failureSmsTemplates ?? [],
+        successSmsFormat,
+        failureSmsTemplates,
         status: job.status,
         locked: job.locked,
         lockedByDevice: job.lockedByDevice,

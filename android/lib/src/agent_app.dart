@@ -703,8 +703,14 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       String? finalSmsSender;
       int? finalSmsReceivedAt;
 
+      // Poll for SMS whenever: a template is configured (server or job level),
+      // OR smsTimeout > 0 (service is declared as SMS-only, e.g. bKash).
+      // The second condition covers the race where the agent APK was built before
+      // the template was added — the server now returns the resolved format, but
+      // an older APK may receive an empty string if the job was queued earlier.
       final bool hasSmsTemplate = (liveJob.successSmsFormat ?? '').isNotEmpty ||
-          liveJob.failureSmsTemplates.isNotEmpty;
+          liveJob.failureSmsTemplates.isNotEmpty ||
+          liveJob.smsTimeout > 0;
 
       if (matchResult == null && hasSmsTemplate) {
         final int timeoutMs =
