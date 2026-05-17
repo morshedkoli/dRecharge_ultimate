@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, ListOrdered, Inbox,
   Terminal, Smartphone, ScrollText, BarChart3, ShieldAlert, Tag,
   Zap, X, LogOut, ChevronLeft, ChevronRight, Bell, ListChecks, Settings,
-  MessageSquare, Send,
+  MessageSquare, Send, UserCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAdminStats } from "@/lib/hooks/admin/useAdminStats";
@@ -48,6 +48,7 @@ const NAV_GROUPS = [
       { href: "/admin/sms",        label: "SMS Inbox",  icon: MessageSquare },
       { href: "/admin/logs",       label: "Audit Logs", icon: ShieldAlert },
       { href: "/admin/settings",   label: "Settings",   icon: Settings },
+      { href: "/admin/profile",    label: "Profile",    icon: UserCircle },
     ],
   },
   {

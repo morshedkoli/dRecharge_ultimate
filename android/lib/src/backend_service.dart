@@ -379,6 +379,9 @@ class BackendService {
   }
 
   /// Report the result of a job.
+  ///
+  /// [rawSmsSource] should be "sms" when [rawSms] is an actual handset SMS,
+  /// or "ussd" (default) when it is the USSD dialog text.
   static Future<void> reportJobResult({
     required String jobId,
     required String txId,
@@ -389,6 +392,9 @@ class BackendService {
     required bool isSuccess,
     Map<String, dynamic>? parsedResult,
     List<Map<String, dynamic>>? ussdStepsExecuted,
+    String rawSmsSource = 'ussd',
+    String? smsSenderNumber,
+    int? smsReceivedAt,
   }) async {
     await _authPost('/api/agent/queue/$jobId/result', {
       'txId': txId,
@@ -401,6 +407,9 @@ class BackendService {
       'recipientNumber': recipientNumber,
       'amount': amount,
       'ussdStepsExecuted': ussdStepsExecuted ?? [],
+      'rawSmsSource': rawSmsSource,
+      if (smsSenderNumber != null) 'smsSenderNumber': smsSenderNumber,
+      if (smsReceivedAt != null) 'smsReceivedAt': smsReceivedAt,
     });
   }
 

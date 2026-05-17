@@ -9,7 +9,7 @@ import {
   Tag, Smartphone, MessageSquare, Zap, Settings, Loader2,
   CheckCircle2, AlertCircle, Info, Lock, Plus, Trash2,
   PhoneCall, Hash, Keyboard, Timer, GripVertical, Eye,
-  ChevronRight, ArrowRight,
+  ArrowRight, FlaskConical,
 } from "lucide-react";
 import Link from "next/link";
 import { ImageUpload } from "@/components/admin/ImageUpload";
@@ -319,6 +319,65 @@ function UssdStepBuilder({
   );
 }
 
+// ── Client-side SMS template matching (mirrors server sms-template.ts) ───────
+
+function buildAmountPattern(amount: number): string {
+  const str = String(amount);
+  const dotIdx = str.indexOf(".");
+  const intStr = dotIdx >= 0 ? str.slice(0, dotIdx) : str;
+  const intPattern = intStr
+    .split("")
+    .map((c, i) => (/\d/.test(c) && i < intStr.length - 1 ? `${c}[,]?` : c))
+    .join("");
+  if (dotIdx < 0) return `${intPattern}(?:\\.[0-9]+)?`;
+  const decStr = str.slice(dotIdx + 1);
+  const sigDec = decStr.replace(/0+$/, "");
+  if (!sigDec) return `${intPattern}(?:\\.[0-9]+)?`;
+  return `${intPattern}\\.${sigDec}[0-9]*`;
+}
+
+function buildTemplateRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
+  if (!format?.trim()) return null;
+  let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  escaped = escaped.replace(/\s+/g, "\\s+");
+  escaped = escaped
+    .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .replace(/\\\{amount\\\}/g, buildAmountPattern(amount))
+    .replace(/\\\{trxId\\\}/g, "(?<txRef>\\w+)")
+    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
+    .replace(/\\\{[^\\}]+\\\}/g, ".*?");
+  try { return new RegExp(escaped, "i"); } catch { return null; }
+}
+
+type SmsTestOutcome =
+  | { outcome: "success"; txRef?: string; balance?: string }
+  | { outcome: "failure"; failureMessage: string }
+  | { outcome: "no_match" };
+
+function testSmsAgainstTemplates(params: {
+  rawSms: string;
+  recipientNumber: string;
+  amount: number;
+  successSmsFormat: string;
+  failureSmsTemplates: { template: string; message: string }[];
+}): SmsTestOutcome {
+  const sms = params.rawSms.trim();
+  const successRegex = buildTemplateRegex(params.successSmsFormat, params.recipientNumber, params.amount);
+  const successMatch = successRegex ? sms.match(successRegex) : null;
+  if (successMatch) {
+    return {
+      outcome: "success",
+      txRef: successMatch.groups?.txRef,
+      balance: successMatch.groups?.balance,
+    };
+  }
+  for (const ft of params.failureSmsTemplates) {
+    const failRegex = buildTemplateRegex(ft.template, params.recipientNumber, params.amount);
+    if (failRegex?.test(sms)) return { outcome: "failure", failureMessage: ft.message };
+  }
+  return { outcome: "no_match" };
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function ServiceEditorPage({ params }: { params: Promise<{ serviceId: string }> }) {
   const { serviceId } = use(params);
@@ -341,6 +400,24 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
 
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+
+  // ── SMS Tester state ────────────────────────────────────────────────────────
+  const [testSms, setTestSms] = useState("");
+  const [testAmount, setTestAmount] = useState("");
+  const [testRecipient, setTestRecipient] = useState("");
+  const [testResult, setTestResult] = useState<SmsTestOutcome | null>(null);
+
+  function handleTestSms() {
+    const amount = parseFloat(testAmount) || 0;
+    const recipient = testRecipient.trim() || "01800000000";
+    setTestResult(testSmsAgainstTemplates({
+      rawSms: testSms,
+      recipientNumber: recipient,
+      amount,
+      successSmsFormat,
+      failureSmsTemplates,
+    }));
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -630,15 +707,27 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
         <div className="space-y-6">
           <div className="flex gap-3 bg-blue-50 border border-blue-100 rounded-xl p-4">
             <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
-            <div className="text-sm text-blue-800 space-y-1">
-              <p className="font-bold font-manrope">How SMS parsing works</p>
-              <p>Paste the full confirmation SMS from the operator. Replace dynamic parts with variables. The agent matches incoming SMS against this template.</p>
-              <div className="flex items-center gap-2 flex-wrap mt-2">
-                <span className="text-xs font-bold text-blue-600 uppercase tracking-widest font-manrope">Variables:</span>
-                {["{recipientNumber}", "{amount}", "{trxId}", "{balance}"].map((v) => (
-                  <VarChip key={v} v={v} color="blue" />
-                ))}
+            <div className="text-sm text-blue-800 space-y-2">
+              <p className="font-bold font-manrope">How SMS confirmation works for all services</p>
+              <p className="text-xs">After USSD execution, the agent waits for a real SMS from the operator (up to <strong>SMS Timeout</strong> seconds). Paste the exact confirmation SMS — replace dynamic parts with variables. The agent matches every incoming SMS against these templates.</p>
+              <div className="space-y-1.5 mt-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-blue-600 uppercase tracking-widest font-manrope">Captured variables:</span>
+                  {["{recipientNumber}", "{amount}", "{trxId}", "{balance}"].map((v) => (
+                    <VarChip key={v} v={v} color="blue" />
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-blue-400 uppercase tracking-widest font-manrope">Wildcard (any value):</span>
+                  {["{fee}", "{date}", "{time}", "{name}"].map((v) => (
+                    <VarChip key={v} v={v} color="blue" />
+                  ))}
+                  <span className="text-[10px] text-blue-500 font-manrope">— any <code className="font-mono bg-blue-100 px-1 rounded">{"{custom}"}</code> placeholder also works</span>
+                </div>
               </div>
+              <p className="text-[10px] text-blue-600 font-manrope bg-blue-100/60 rounded-lg px-3 py-2 font-semibold">
+                bKash example: <code className="font-mono">Cash In Tk {"{amount}"} to {"{recipientNumber}"} successful. Fee Tk {"{fee}"}. Balance Tk {"{balance}"}. TrxID {"{trxId}"} at {"{date}"}</code>
+              </p>
             </div>
           </div>
 
@@ -648,7 +737,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
             </FieldLabel>
             <textarea value={successSmsFormat}
               onChange={(e) => { setSuccessSmsFormat(e.target.value); mark(); }} rows={3}
-              placeholder={`e.g. Send money to {recipientNumber} successful. Amount: {amount}. TrxID: {trxId} Balance: {balance}`}
+              placeholder={`e.g. Cash In Tk {amount} to {recipientNumber} successful. Fee Tk {fee}. Balance Tk {balance}. TrxID {trxId} at {date}`}
               className={`${monoCls} resize-y leading-relaxed`} />
             {successSmsFormat && (
               <div className="mt-2 flex items-center gap-1.5 text-xs text-primary font-manrope font-semibold">
@@ -744,6 +833,105 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
               <div className="mt-3 flex items-center gap-1.5 text-xs text-red-600 font-manrope font-semibold">
                 <AlertCircle className="w-3.5 h-3.5" />
                 {failureSmsTemplates.filter(ft => ft.template.trim()).length} failure template{failureSmsTemplates.filter(ft => ft.template.trim()).length !== 1 ? "s" : ""} configured
+              </div>
+            )}
+          </div>
+
+          {/* ── Live SMS Template Tester ───────────────────────────────── */}
+          <div className="border-t border-black/[0.04] pt-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-violet-50 rounded-xl">
+                <FlaskConical className="w-4 h-4 text-violet-600" />
+              </div>
+              <div>
+                <p className="text-sm font-bold font-manrope text-on-surface">Test Your Templates</p>
+                <p className="text-xs text-on-surface-variant/70 mt-0.5">Paste a real SMS to verify your templates match before activating</p>
+              </div>
+            </div>
+
+            <textarea
+              value={testSms}
+              onChange={(e) => { setTestSms(e.target.value); setTestResult(null); }}
+              rows={3}
+              placeholder="Paste a real SMS from the operator here — e.g. Cash In Tk 50.00 to 01812345678 successful. Fee Tk 0.00. Balance Tk 1,234.56. TrxID ABC123XYZ at 17/05/2026 12:19"
+              className={`${monoCls} resize-y leading-relaxed`}
+            />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">
+                  Test Amount
+                </label>
+                <input
+                  type="number"
+                  value={testAmount}
+                  onChange={(e) => { setTestAmount(e.target.value); setTestResult(null); }}
+                  placeholder="e.g. 50"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-manrope mb-1.5">
+                  Test Recipient Number
+                </label>
+                <input
+                  value={testRecipient}
+                  onChange={(e) => { setTestRecipient(e.target.value); setTestResult(null); }}
+                  placeholder="e.g. 01812345678"
+                  className={inputCls}
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleTestSms}
+              disabled={!testSms.trim()}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white text-sm font-bold font-manrope rounded-xl hover:bg-violet-700 disabled:opacity-40 transition-colors"
+            >
+              <FlaskConical className="w-4 h-4" />
+              Run SMS Match Test
+            </button>
+
+            {testResult && (
+              <div className={`rounded-xl border p-4 space-y-1 ${
+                testResult.outcome === "success"
+                  ? "bg-[#E8F1EE] border-primary/20"
+                  : testResult.outcome === "failure"
+                  ? "bg-red-50 border-red-200"
+                  : "bg-amber-50 border-amber-200"
+              }`}>
+                {testResult.outcome === "success" && (
+                  <>
+                    <div className="flex items-center gap-2 text-primary font-bold text-sm font-manrope">
+                      <CheckCircle2 className="w-5 h-5 shrink-0" />
+                      Matched <strong>success template</strong> — job will be marked <strong>complete</strong>
+                    </div>
+                    {(testResult.txRef || testResult.balance) && (
+                      <div className="flex gap-4 ml-7 text-xs text-primary/70 font-manrope font-semibold">
+                        {testResult.txRef && <span>TrxID captured: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.txRef}</code></span>}
+                        {testResult.balance && <span>Balance captured: <code className="font-mono bg-primary/10 px-1.5 rounded">{testResult.balance}</code></span>}
+                      </div>
+                    )}
+                  </>
+                )}
+                {testResult.outcome === "failure" && (
+                  <>
+                    <div className="flex items-center gap-2 text-red-700 font-bold text-sm font-manrope">
+                      <XCircle className="w-5 h-5 shrink-0" />
+                      Matched <strong>failure template</strong> — job will be marked <strong>failed</strong> and wallet refunded
+                    </div>
+                    <p className="text-xs text-red-600 ml-7 font-manrope">
+                      User message: <em>&quot;{testResult.failureMessage}&quot;</em>
+                    </p>
+                  </>
+                )}
+                {testResult.outcome === "no_match" && (
+                  <div className="flex items-center gap-2 text-amber-700 font-bold text-sm font-manrope">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    No template matched — job would go to <strong>waiting</strong> (manual admin review). Check your template format.
+                  </div>
+                )}
               </div>
             )}
           </div>

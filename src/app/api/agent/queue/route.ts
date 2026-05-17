@@ -15,13 +15,14 @@ export async function GET(request: NextRequest) {
 
     await connectDB();
 
-    // Auto-recover stuck jobs: if a job has been processing for >5 minutes, reset it to queued
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    // Auto-recover stuck jobs: if a job has been processing for >10 minutes, reset it to queued.
+    // 10 min accounts for USSD execution + up to 2-min SMS polling window.
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     await ExecutionJob.updateMany(
       {
         status: "processing",
         locked: true,
-        lockedAt: { $lt: fiveMinutesAgo },
+        lockedAt: { $lt: tenMinutesAgo },
       },
       {
         $set: { status: "queued", locked: false },

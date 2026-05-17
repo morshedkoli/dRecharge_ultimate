@@ -668,6 +668,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       }
 
       // ── Extract USSD Response Text ─────────────────────────────────────────
+      final int ussdCompletedMs = DateTime.now().millisecondsSinceEpoch;
       final Map<String, dynamic>? ussdResponseStep = stepsExecuted
           .cast<Map<String, dynamic>?>()
           .lastWhere(
@@ -677,34 +678,102 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       final String ussdResponseText =
           ussdResponseStep?['value'] as String? ?? '';
 
-      // We no longer wait for a real SMS. The USSD text itself is evaluated.
-      SmsMatchResult? quickResult;
-
+      // ── Step 1: Try matching the USSD dialog text immediately ──────────────
+      // Works for services that embed success/failure in the USSD response dialog.
+      SmsMatchResult? matchResult;
       if (ussdResponseText.isNotEmpty) {
         final mockSms = SmsEntry(
           address: 'USSD',
           body: ussdResponseText,
-          dateMs: DateTime.now().millisecondsSinceEpoch,
+          dateMs: ussdCompletedMs,
         );
-        quickResult = BackendService.matchIncomingSms(
+        final r = BackendService.matchIncomingSms(
           messages: [mockSms],
           job: liveJob,
         );
+        if (r.hasMatch) matchResult = r;
       }
 
-      // Report result to server immediately.
-      final immediateParsedResult =
-          (quickResult != null && quickResult.hasMatch)
+      // ── Step 2: Wait for real SMS if USSD text didn't match ────────────────
+      // Required for services like bKash where confirmation comes via SMS
+      // (e.g. "Cash In Tk 50.00 to 01812345678 successful. TrxID DEH1AUO01L…")
+      // rather than in the USSD dialog itself.
+      String finalRawSms = ussdResponseText;
+      String finalRawSmsSource = 'ussd';
+      String? finalSmsSender;
+      int? finalSmsReceivedAt;
+
+      final bool hasSmsTemplate = (liveJob.successSmsFormat ?? '').isNotEmpty ||
+          liveJob.failureSmsTemplates.isNotEmpty;
+
+      if (matchResult == null && hasSmsTemplate) {
+        final int timeoutMs =
+            (liveJob.smsTimeout * 1000).clamp(5000, 120000);
+        final int pollEnd = ussdCompletedMs + timeoutMs;
+
+        if (mounted) {
+          setState(
+            () => _status = 'Waiting for SMS… (${liveJob.smsTimeout}s)',
+          );
+        }
+        _appendLog(
+          '⏳ ${liveJob.serviceName} — waiting for SMS (${liveJob.smsTimeout}s)',
+        );
+
+        while (DateTime.now().millisecondsSinceEpoch < pollEnd) {
+          await Future.delayed(const Duration(seconds: 2));
+
+          try {
+            // Read SMS received around the time USSD was sent (5s buffer)
+            final recentSms = await _nativeBridge.readRecentSms(
+              sinceMs: ussdCompletedMs - 5000,
+              maxMessages: 20,
+            );
+
+            final r = BackendService.matchIncomingSms(
+              messages: recentSms,
+              job: liveJob,
+            );
+
+            if (r.hasMatch && r.sms != null) {
+              matchResult = r;
+              finalRawSms = r.sms!.body;
+              finalRawSmsSource = 'sms';
+              finalSmsSender = r.sms!.address;
+              finalSmsReceivedAt = r.sms!.dateMs;
+              _appendLog(
+                r.isSuccess
+                    ? '✓ SMS matched — success'
+                    : '✗ SMS matched — failure (${r.failureReason ?? ""})',
+              );
+              break;
+            }
+          } catch (e) {
+            _appendLog('SMS poll error: $e');
+          }
+        }
+
+        if (matchResult == null) {
+          _appendLog(
+            '⏱ SMS timeout — submitting USSD response for manual review',
+          );
+        }
+      }
+
+      // ── Step 3: Report result to server ────────────────────────────────────
+      final bool isSuccess = matchResult?.isSuccess ?? false;
+      final Map<String, dynamic> finalParsedResult =
+          (matchResult != null && matchResult.hasMatch)
           ? <String, dynamic>{
-              'success': quickResult.isSuccess,
-              if (quickResult.failureReason != null)
-                'reason': quickResult.failureReason,
+              'success': matchResult.isSuccess,
+              if (matchResult.failureReason != null)
+                'reason': matchResult.failureReason,
             }
           : <String, dynamic>{
               'success': false,
               'reason': ussdResponseText.isNotEmpty
-                  ? 'USSD response did not match any template.'
-                  : 'No USSD response received.',
+                  ? 'No matching SMS or USSD response received.'
+                  : 'No USSD response and no SMS received.',
             };
 
       await BackendService.reportJobResult(
@@ -713,38 +782,39 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
         serviceName: liveJob.serviceName,
         recipientNumber: liveJob.recipientNumber,
         amount: liveJob.amount,
-        rawSms: ussdResponseText, // the server also treats this as the SMS text
-        isSuccess: quickResult?.isSuccess ?? false,
-        parsedResult: immediateParsedResult,
+        rawSms: finalRawSms,
+        isSuccess: isSuccess,
+        parsedResult: finalParsedResult,
         ussdStepsExecuted: stepsExecuted,
+        rawSmsSource: finalRawSmsSource,
+        smsSenderNumber: finalSmsSender,
+        smsReceivedAt: finalSmsReceivedAt,
       );
       await _nativeBridge.releaseWakeLock().catchError((_) {});
 
-      // ── Store last USSD response for the dashboard preview ─────────────
-      final String outcome = quickResult != null && quickResult.hasMatch
-          ? (quickResult.isSuccess ? 'success' : 'failed')
+      // ── Store last response for dashboard preview ──────────────────────────
+      final String outcome = matchResult != null && matchResult.hasMatch
+          ? (matchResult.isSuccess ? 'success' : 'failed')
           : (ussdResponseText.isNotEmpty ? 'unrecognized' : 'failed');
       if (mounted) {
         setState(() {
-          _lastUssdResponse = ussdResponseText.isNotEmpty
-              ? ussdResponseText
-              : null;
+          _lastUssdResponse =
+              ussdResponseText.isNotEmpty ? ussdResponseText : null;
           _lastJobOutcome = outcome;
-          _lastServiceName = liveJob.serviceName.isNotEmpty
-              ? liveJob.serviceName
-              : null;
+          _lastServiceName =
+              liveJob.serviceName.isNotEmpty ? liveJob.serviceName : null;
         });
       }
 
-      if (quickResult != null && quickResult.hasMatch) {
+      if (matchResult != null && matchResult.hasMatch) {
         _appendLog(
-          quickResult.isSuccess
+          matchResult.isSuccess
               ? '✓ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}'
               : '✗ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount}',
         );
       } else {
         _appendLog(
-          '⏳ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount} — Unrecognized response',
+          '⏳ ${liveJob.serviceName} → ${liveJob.recipientNumber} · ৳${liveJob.amount} — sent for review',
         );
       }
 
@@ -802,6 +872,7 @@ class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
       isSuccess: false,
       parsedResult: <String, dynamic>{'success': false, 'reason': reason},
       ussdStepsExecuted: stepsExecuted,
+      rawSmsSource: 'ussd',
     );
     _appendLog(
       '✗ ${job.serviceName} → ${job.recipientNumber} · ৳${job.amount}',

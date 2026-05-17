@@ -16,43 +16,6 @@ type Params = { params: Promise<{ jobId: string }> };
 // Maximum infra-failure retries before escalating to "waiting"
 const MAX_INFRA_RETRIES = 5;
 
-/** Build a regex from an SMS/USSD format template. */
-function buildRegex(format: string, recipientNumber: string, amount: number): RegExp | null {
-  if (!format?.trim()) return null;
-  let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  escaped = escaped.replace(/\s+/g, "\\s+");
-  const amountText = String(amount).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const amountWithOptionalSeparators = amountText.replace(/\\,/g, ",").replace(/\d/g, "$&[,]?");
-  escaped = escaped
-    .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .replace(/\\\{amount\\\}/g, `(?:${amountWithOptionalSeparators}(?:\\.0+)?|${amountText}(?:\\.0+)?)`)
-    .replace(/\\\{trxId\\\}/g, "(?<trxId>\\w+)")
-    .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
-    .replace(/\\\{[^\\}]+\\\}/g, ".*?");
-  try { return new RegExp(escaped, "i"); } catch { return null; }
-}
-
-/** True if the success template contains a {trxId} placeholder. */
-function templateRequiresTrxId(format: string): boolean {
-  return format.includes("{trxId}");
-}
-
-/** Try to match rawSms against each failure template. Returns first match. */
-function matchFailureTemplates(
-  templates: { template: string; message: string }[],
-  rawSms: string,
-  recipientNumber: string,
-  amount: number,
-): { message: string } | null {
-  for (const ft of templates) {
-    const regex = buildRegex(ft.template, recipientNumber, amount);
-    if (regex && regex.test(rawSms)) {
-      return { message: ft.message };
-    }
-  }
-  return null;
-}
-
 type FinalJobOutcome = "done" | "failed" | "waiting" | "queued";
 
 // POST /api/agent/queue/[jobId]/result

@@ -13,6 +13,41 @@ export interface SmsTemplateResult {
   failureReason?: string;
 }
 
+/**
+ * Build a regex pattern for the {amount} placeholder that handles:
+ * - Optional thousands comma separators  (50 → 50 or 1,500)
+ * - bKash-style two-decimal SMS amounts  (50 stored → 50.00 in SMS)
+ * - Trailing decimal zeros               (50.5 stored → 50.50 in SMS)
+ */
+function buildAmountPattern(amount: number): string {
+  const str = String(amount);
+  const dotIdx = str.indexOf(".");
+
+  // Integer part: allow optional comma after every digit except the last
+  const intStr = dotIdx >= 0 ? str.slice(0, dotIdx) : str;
+  const intPattern = intStr
+    .split("")
+    .map((c, i) => (/\d/.test(c) && i < intStr.length - 1 ? `${c}[,]?` : c))
+    .join("");
+
+  if (dotIdx < 0) {
+    // Whole number: SMS may show .00 / .0 etc. — allow any decimal suffix
+    return `${intPattern}(?:\\.[0-9]+)?`;
+  }
+
+  const decStr = str.slice(dotIdx + 1);
+  // Strip trailing zeros from the stored decimal
+  const sigDec = decStr.replace(/0+$/, "");
+
+  if (!sigDec) {
+    // e.g. amount = 50.00 → treat as whole number
+    return `${intPattern}(?:\\.[0-9]+)?`;
+  }
+
+  // e.g. amount = 50.5 → SMS shows 50.50 → allow trailing zeros
+  return `${intPattern}\\.${sigDec}[0-9]*`;
+}
+
 export function buildSmsTemplateRegex(
   format: string,
   recipientNumber: string,
@@ -21,14 +56,10 @@ export function buildSmsTemplateRegex(
   if (!format?.trim()) return null;
   let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   escaped = escaped.replace(/\s+/g, "\\s+");
-  const amountText = String(amount).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const amountWithOptionalSeparators = amountText
-    .replace(/\\,/g, ",")
-    .replace(/\d/g, "$&[,]?");
 
   escaped = escaped
     .replace(/\\\{recipientNumber\\\}/g, recipientNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .replace(/\\\{amount\\\}/g, `(?:${amountWithOptionalSeparators}(?:\\.0+)?|${amountText}(?:\\.0+)?)`)
+    .replace(/\\\{amount\\\}/g, buildAmountPattern(amount))
     .replace(/\\\{trxId\\\}/g, "(?<txRef>\\w+)")
     .replace(/\\\{balance\\\}/g, "(?<balance>[0-9,.]+)")
     .replace(/\\\{[^\\}]+\\\}/g, ".*?");
