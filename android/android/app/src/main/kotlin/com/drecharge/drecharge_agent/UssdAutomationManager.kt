@@ -246,16 +246,27 @@ object UssdAutomationManager {
         val signature = collectTexts(root).joinToString("\n").trim()
         if (signature.isNotEmpty() && signature == activeSession.lastSignature) return
         activeSession.lastSignature = signature
-        // Always remember the last non-empty dialog so completeSession can
-        // recover it if the result screen fires a delayed/missed event.
-        if (signature.isNotEmpty()) {
+
+        // Only cache the dialog as a possible "final response" when it looks
+        // like a result screen — i.e. the OS USSD dialog has NO input field.
+        // Intermediate prompts (Enter PIN, Enter amount, etc.) always have an
+        // EditText and a Send button, and we should never report those as the
+        // USSD response.
+        val hasInputField = findFirstNodeByClass(root, "android.widget.EditText") != null
+        if (signature.isNotEmpty() && !hasInputField) {
             activeSession.lastDialogText = signature
         }
 
         if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
-            // We've completed all inputs, this is the final USSD pop-up!
-            completeSession(success = true, errorMessage = null, finalMessage = signature)
-            return
+            // All inputs sent — the next dialog that has NO input field is the
+            // real result. Ignore any transient re-display of the input prompt
+            // so we don't mis-record "Enter Menu PIN…" as the response; keep
+            // listening for events until the real result fires or the final
+            // timeout closes the session.
+            if (!hasInputField) {
+                completeSession(success = true, errorMessage = null, finalMessage = signature)
+            }
+            return // input-field case: just wait for the next event
         }
 
         val nextValue = activeSession.flowSegments[activeSession.nextStepIndex]
@@ -420,15 +431,20 @@ object UssdAutomationManager {
 
         // Resolve the dialog text to record:
         //   1. The caller's explicit finalMessage (happy path — accessibility event fired)
-        //   2. The session's lastDialogText (event fired earlier but completion was raced)
-        //   3. The accessibility service's current rootInActiveWindow text (last-ditch)
+        //   2. The session's lastDialogText — only set from a dialog that had NO
+        //      input field, so this is guaranteed to be a result screen
+        //   3. The accessibility service's current rootInActiveWindow text, but
+        //      ONLY if that window has no EditText (else it's an input prompt,
+        //      not the final response)
         val resolvedResponse = when {
             !finalMessage.isNullOrEmpty() -> finalMessage
             activeSession.lastDialogText.isNotEmpty() -> activeSession.lastDialogText
             else -> {
                 try {
                     val root = UssdAccessibilityService.instance?.rootInActiveWindow
-                    if (root != null) collectTexts(root).joinToString("\n").trim().ifEmpty { null } else null
+                    if (root != null && findFirstNodeByClass(root, "android.widget.EditText") == null) {
+                        collectTexts(root).joinToString("\n").trim().ifEmpty { null }
+                    } else null
                 } catch (_: Exception) { null }
             }
         }
