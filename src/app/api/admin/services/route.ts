@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   return withAdminSession(request, async (session) => {
     const body = await request.json();
     const {
-      name, icon, description, isActive, categoryId,
+      name, icon, description, isActive, categoryId, providerId,
       ussdSteps, pin, simSlot, recipientLength, successSmsFormat,
       failureSmsTemplates, smsTimeout,
     } = body;
@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       description: description || "",
       isActive: isActive !== false,
       categoryId: categoryId || null,
+      providerId: providerId || null,
       ussdSteps: normalizeStructuredUssdSteps(ussdSteps),
       pin: pin || "",
       simSlot: simSlot || 1,

@@ -131,6 +131,7 @@ export const createService = (data: {
   description?: string;
   isActive?: boolean;
   categoryId?: string;
+  providerId?: string;
   ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
@@ -151,6 +152,7 @@ export const saveService = (data: {
   description?: string;
   isActive?: boolean;
   categoryId?: string;
+  providerId?: string;
   ussdSteps?: UssdStep[];
   pin: string;
   simSlot: number;
@@ -184,6 +186,25 @@ export async function updateCategory(data: { categoryId: string; name: string; l
 
 export async function deleteCategory(categoryId: string) {
   return apiFetch(`/api/admin/categories/${categoryId}`, { method: "DELETE" });
+}
+
+// ─── Service Providers ────────────────────────────────────────────────────────
+export async function createProvider(data: { name: string; logo: string }) {
+  return apiFetch<{ success: boolean; providerId: string }>("/api/admin/providers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateProvider(data: { providerId: string; name: string; logo: string }) {
+  return apiFetch(`/api/admin/providers/${data.providerId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name: data.name, logo: data.logo }),
+  });
+}
+
+export async function deleteProvider(providerId: string) {
+  return apiFetch(`/api/admin/providers/${providerId}`, { method: "DELETE" });
 }
 
 // ─── Device Management ─────────────────────────────────────────────────────────

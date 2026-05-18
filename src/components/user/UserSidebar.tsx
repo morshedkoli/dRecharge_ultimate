@@ -1,33 +1,20 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRouter } from "next/navigation";
 import { useSiteSettings } from "@/lib/hooks/useSiteSettings";
-import { useAuth } from "@/lib/hooks/useAuth";
-import { toast } from "sonner";
-import { LayoutDashboard, Zap, History, X, User, Users, HelpCircle, LogOut } from "lucide-react";
+import { LayoutDashboard, Zap, History, X, Users, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Dashboard", href: "/user/dashboard", icon: LayoutDashboard },
-  { name: "Services", href: "/user/services", icon: Zap },
-  { name: "History", href: "/user/history", icon: History },
-  { name: "My Users", href: "/user/subusers", icon: Users },
-  { name: "Profile", href: "/user/profile", icon: User },
+  { name: "Services",  href: "/user/services",  icon: Zap },
+  { name: "History",   href: "/user/history",   icon: History },
+  { name: "My Users",  href: "/user/subusers",  icon: Users },
 ];
 
 export function UserSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
-  const { user } = useAuth();
   const { settings } = useSiteSettings();
-  const router = useRouter();
-
-  async function handleLogout() {
-    
-    await fetch("/api/auth/session", { method: "DELETE" });
-    toast.success("Signed out");
-    router.push("/login");
-  }
 
   const SidebarContent = (
     <aside className="w-64 shrink-0 bg-surface-container h-full flex flex-col py-8 px-6">
@@ -64,26 +51,12 @@ export function UserSidebar({ open, onClose }: { open: boolean; onClose: () => v
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="mt-auto pt-6 flex flex-col gap-1 border-t border-black/5">
-        <div className="mb-4 px-4 py-3 rounded-xl bg-white/50 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 text-primary font-bold text-xs">
-            {user?.email?.slice(0, 2).toUpperCase() ?? "US"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-[#134235] font-manrope truncate">{user?.displayName || user?.email?.split("@")[0] || "User"}</p>
-            <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold">Member</p>
-          </div>
-        </div>
-
+      {/* Footer — support link only; profile & sign-out now live in the topbar */}
+      <div className="mt-auto pt-6 border-t border-black/5">
         <Link href="#" className="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:text-[#134235] transition-colors">
           <HelpCircle className="w-4 h-4" />
           <span className="font-manrope text-xs font-semibold">Support</span>
         </Link>
-        <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:text-red-600 transition-colors text-left w-full">
-          <LogOut className="w-4 h-4" />
-          <span className="font-manrope text-xs font-semibold">Sign Out</span>
-        </button>
       </div>
     </aside>
   );

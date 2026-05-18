@@ -1,13 +1,10 @@
 "use client";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useAuth } from "@/lib/hooks/useAuth";
-import { toast } from "sonner";
+import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, ListOrdered, Inbox,
-  Terminal, Smartphone, ScrollText, BarChart3, ShieldAlert, Tag,
-  Zap, X, LogOut, ChevronLeft, ChevronRight, Bell, ListChecks, Settings,
-  MessageSquare, Send, UserCircle,
+  Terminal, Smartphone, BarChart3,
+  Zap, X, ChevronLeft, ChevronRight, Settings,
+  MessageSquare, Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAdminStats } from "@/lib/hooks/admin/useAdminStats";
@@ -42,21 +39,10 @@ const NAV_GROUPS = [
     label: "Management",
     items: [
       { href: "/admin/users",      label: "Users",      icon: Users,          badge: "totalUsers"    as const },
-      { href: "/admin/categories", label: "Categories", icon: Tag },
       { href: "/admin/services",   label: "Services",   icon: Terminal },
       { href: "/admin/devices",    label: "Devices",    icon: Smartphone,     badge: "activeDevices" as const },
       { href: "/admin/sms",        label: "SMS Inbox",  icon: MessageSquare },
-      { href: "/admin/logs",       label: "Audit Logs", icon: ShieldAlert },
       { href: "/admin/settings",   label: "Settings",   icon: Settings },
-      { href: "/admin/profile",    label: "Profile",    icon: UserCircle },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { href: "/admin/logs",   label: "Logs",  icon: ScrollText },
-
-      { href: "/admin/notice", label: "Notices", icon: Bell },
     ],
   },
 ] as const;
@@ -80,14 +66,6 @@ function SidebarBody({
   const pathname   = usePathname();
   const { stats }  = useAdminStats();
   const { settings } = useSiteSettings();
-  const { user }   = useAuth();
-  const router     = useRouter();
-
-  async function handleSignOut() {
-    await fetch("/api/auth/session", { method: "DELETE" });
-    toast.success("Signed out");
-    router.push("/login");
-  }
 
   const badgeMap: Record<string, number> = {
     totalUsers:      stats.totalUsers      ?? 0,
@@ -95,8 +73,6 @@ function SidebarBody({
     jobsInQueue:     stats.jobsInQueue     ?? 0,
     activeDevices:   stats.activeDevices   ?? 0,
   };
-
-  const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? "AD";
 
   return (
     <Sidebar className={cn("transition-all duration-200", collapsed ? "w-[68px]" : "w-64")}>
@@ -162,18 +138,10 @@ function SidebarBody({
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarItem
-          onClick={handleSignOut}
-          icon={LogOut}
-          className={cn("text-red-600 hover:bg-red-50 hover:text-red-700", collapsed && "justify-center")}
-        >
-          {!collapsed && "Sign Out"}
-        </SidebarItem>
-        
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-md py-2 text-xs font-semibold text-on-surface-variant/50 transition-colors hover:bg-surface-container"
+            className="flex w-full items-center justify-center gap-2 rounded-md py-2 text-xs font-semibold text-on-surface-variant/50 transition-colors hover:bg-surface-container"
           >
             {collapsed ? <ChevronRight className="h-4 w-4" /> : (
               <><ChevronLeft className="h-4 w-4" /> Collapse</>

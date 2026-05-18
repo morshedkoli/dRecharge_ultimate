@@ -1,311 +1,467 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useProfile } from "@/lib/hooks/user/useProfile";
 import { toast } from "sonner";
-import { User, Lock, KeyRound, Save, Mail, Phone, Info, AtSign, CreditCard } from "lucide-react";
+import {
+  User, Lock, KeyRound, Save, Mail, Phone, Info, AtSign, CreditCard, Loader2,
+} from "lucide-react";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function patchSelf(uid: string, body: object) {
+  const res = await fetch(`/api/admin/users/${uid}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
 
 export default function UserProfilePage() {
   const { user } = useAuth();
   const { profile, loading: profileLoading, refetch } = useProfile();
 
-  // Password State
+  // ── Editable identity fields ───────────────────────────────────────────────
+  const [displayName, setDisplayName] = useState("");
+  const [username, setUsername]       = useState("");
+  const [email, setEmail]             = useState("");
+  const [phone, setPhone]             = useState("");
+
+  // Per-field saving flags
+  const [savingName, setSavingName]         = useState(false);
+  const [savingUsername, setSavingUsername] = useState(false);
+  const [savingEmail, setSavingEmail]       = useState(false);
+  const [savingPhone, setSavingPhone]       = useState(false);
+
+  // Email change requires current password
+  const [emailPassword, setEmailPassword] = useState("");
+
+  // Password change
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
 
-  // Username State
-  const [newUsername, setNewUsername] = useState("");
-  const [usernameLoading, setUsernameLoading] = useState(false);
-
-  // PIN State
+  // PIN
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [pinLoading, setPinLoading] = useState(false);
 
-  async function handlePasswordChange(e: React.FormEvent) {
-    e.preventDefault();
+  // Sync state with profile
+  useEffect(() => {
+    if (profile) {
+      setDisplayName(profile.displayName || "");
+      setUsername(profile.username || "");
+      setEmail(profile.email || "");
+      setPhone(profile.phoneNumber || "");
+    }
+  }, [profile]);
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+  async function handleNameSave() {
     if (!user) return;
-    if (newPassword !== confirmPassword) {
-      toast.error("New passwords do not match!");
-      return;
-    }
-    if (newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters.");
-      return;
-    }
-    
-    setPasswordLoading(true);
+    const v = displayName.trim();
+    if (v.length < 2) { toast.error("Name must be at least 2 characters"); return; }
+    setSavingName(true);
     try {
-      const res = await fetch(`/api/admin/users/${user.uid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ action: "changePassword", currentPassword, newPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update password");
-      toast.success("Password updated successfully!");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to update password");
+      await patchSelf(user.uid, { action: "selfChangeName", displayName: v });
+      toast.success("Name updated");
+      await refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed");
     } finally {
-      setPasswordLoading(false);
+      setSavingName(false);
     }
   }
 
-  async function handleUsernameChange(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleUsernameSave() {
     if (!user) return;
-    if (!/^[a-z0-9_]{3,20}$/.test(newUsername)) {
+    const v = username.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(v)) {
       toast.error("Username must be 3–20 chars: letters, numbers, underscores only");
       return;
     }
-    setUsernameLoading(true);
+    setSavingUsername(true);
     try {
-      const res = await fetch(`/api/admin/users/${user.uid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ action: "changeUsername", username: newUsername }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update username");
-      toast.success("Username updated! You can now login with it.");
-      setNewUsername("");
+      await patchSelf(user.uid, { action: "changeUsername", username: v });
+      toast.success("Username updated");
       await refetch();
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to update username");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed");
     } finally {
-      setUsernameLoading(false);
+      setSavingUsername(false);
+    }
+  }
+
+  async function handleEmailSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    const v = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { toast.error("Enter a valid email"); return; }
+    if (!emailPassword) { toast.error("Enter your current password to confirm"); return; }
+    setSavingEmail(true);
+    try {
+      await patchSelf(user.uid, { action: "selfChangeEmail", email: v, currentPassword: emailPassword });
+      toast.success("Email updated");
+      setEmailPassword("");
+      await refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSavingEmail(false);
+    }
+  }
+
+  async function handlePhoneSave() {
+    if (!user) return;
+    const v = phone.trim();
+    if (v && !/^[+\d][\d\s\-]{5,19}$/.test(v)) {
+      toast.error("Phone number format is invalid");
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      await patchSelf(user.uid, { action: "selfChangePhone", phoneNumber: v });
+      toast.success(v ? "Phone updated" : "Phone removed");
+      await refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSavingPhone(false);
+    }
+  }
+
+  async function handlePasswordChange(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    if (newPassword !== confirmPassword) { toast.error("Passwords do not match"); return; }
+    if (newPassword.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    setPasswordLoading(true);
+    try {
+      await patchSelf(user.uid, { action: "changePassword", currentPassword, newPassword });
+      toast.success("Password updated");
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setPasswordLoading(false);
     }
   }
 
   async function handlePinChange(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return;
-    if (newPin !== confirmPin) {
-      toast.error("PINs do not match!");
-      return;
-    }
-    if (newPin.length < 4 || newPin.length > 6) {
-      toast.error("PIN must be 4-6 digits.");
-      return;
-    }
-
+    if (newPin !== confirmPin) { toast.error("PINs do not match"); return; }
+    if (newPin.length < 4 || newPin.length > 6) { toast.error("PIN must be 4–6 digits"); return; }
     setPinLoading(true);
     try {
-      const res = await fetch(`/api/admin/users/${user.uid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ action: "setPin", pin: newPin }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update PIN");
-      toast.success("Transaction PIN updated successfully!");
-      setNewPin("");
-      setConfirmPin("");
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to update PIN");
+      await patchSelf(user.uid, { action: "setPin", pin: newPin });
+      toast.success("PIN updated");
+      setNewPin(""); setConfirmPin("");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed");
     } finally {
       setPinLoading(false);
     }
   }
 
+  // ── Dirty flags so Save buttons only enable when changed ───────────────────
+  const nameDirty     = displayName.trim() !== (profile?.displayName ?? "").trim();
+  const usernameDirty = username.trim().toLowerCase() !== (profile?.username ?? "").trim().toLowerCase();
+  const emailDirty    = email.trim().toLowerCase() !== (profile?.email ?? "").trim().toLowerCase();
+  const phoneDirty    = (phone.trim() || "") !== ((profile?.phoneNumber ?? "").trim());
+
   if (profileLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <div className="max-w-4xl mx-auto space-y-6 p-4 md:p-6 pb-12">
       {/* Header */}
-      <div className="bg-gradient-to-br from-indigo-900 to-indigo-800 rounded-3xl p-8 sm:p-10 text-white shadow-lg relative overflow-hidden mb-8">
-        <div className="relative z-10">
-          <h1 className="text-3xl font-extrabold mb-3">Security & Profile</h1>
-          <p className="text-indigo-200 text-sm leading-relaxed max-w-xl">
-            Manage your personal data, update your master password, and enforce numeric constraints for out-going transactions.
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#134235] via-[#1a5446] to-[#247060] p-6 md:p-8 text-white premium-shadow">
+        <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-white/5 blur-2xl" />
+        <div className="relative space-y-2">
+          <h1 className="font-headline text-3xl md:text-4xl font-extrabold leading-tight">Profile & Security</h1>
+          <p className="text-white/80 text-sm max-w-lg">
+            Update your personal details, change your sign-in credentials, and manage your transaction PIN.
           </p>
         </div>
-        <div className="absolute right-0 top-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3" />
-        <div className="absolute left-10 bottom-0 w-40 h-40 bg-indigo-500/20 rounded-full blur-2xl translate-y-1/4" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Contact info Block */}
-        <div className="md:col-span-1 space-y-6">
-          <div className="bg-white border border-gray-100 rounded-3xl p-6 shadow-sm">
-            <h2 className="text-sm font-bold text-gray-900 mb-6 flex items-center gap-2">
-              <User className="w-4 h-4 text-orange-500" /> Profile Information
-            </h2>
-            
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><User className="w-3.5 h-3.5"/> Full Name</p>
-                <p className="font-bold text-gray-900">{profile?.displayName || "Unknown User"}</p>
-              </div>
-              
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><AtSign className="w-3.5 h-3.5"/> Username</p>
-                <p className="font-mono text-gray-900 bg-gray-50 px-2 py-1 rounded inline-block text-sm">{profile?.username || <span className="text-gray-400 italic font-sans font-normal">not set</span>}</p>
-              </div>
-
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Mail className="w-3.5 h-3.5"/> Email Address</p>
-                <p className="font-medium text-gray-700 break-all">{user?.email || <span className="text-gray-400 italic">not set</span>}</p>
-              </div>
-              
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5"/> Phone Number</p>
-                <p className="font-mono text-gray-900 bg-gray-50 px-2 py-1 rounded inline-block text-sm">{profile?.phoneNumber || "Not assigned"}</p>
-              </div>
-
-              {/* Credit Limit — read-only */}
-              <div className="pt-4 border-t border-gray-100">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                  <CreditCard className="w-3.5 h-3.5 text-orange-400" /> Credit Limit
-                </p>
-                {(profile?.creditLimit ?? 0) > 0 ? (
-                  <p className="font-bold text-orange-600 text-lg">৳{(profile?.creditLimit ?? 0).toLocaleString()}</p>
-                ) : (
-                  <p className="font-mono text-gray-400 text-sm italic">No credit assigned</p>
-                )}
-                <p className="text-[10px] text-gray-400 mt-1">Assigned by admin. Spend this when wallet balance is ৳0.</p>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* ── Account snapshot (read-only) ─────────────────────────────── */}
+        <aside className="bg-white border border-black/5 rounded-2xl p-6 premium-shadow space-y-4 lg:col-span-1">
+          <div className="flex items-center gap-3 pb-4 border-b border-black/[0.04]">
+            <div className="w-12 h-12 rounded-xl bg-primary text-on-primary font-bold flex items-center justify-center text-lg font-manrope">
+              {(profile?.displayName || profile?.email || "U").slice(0, 2).toUpperCase()}
             </div>
-            
-            <div className="mt-6 pt-5 border-t border-gray-100 text-xs text-gray-400 space-y-1 font-medium">
-              <p>Role: <span className="uppercase text-indigo-500">{profile?.role}</span></p>
-              <p>Account ID: <span className="font-mono text-[10px] break-all">{user?.uid}</span></p>
+            <div className="min-w-0">
+              <p className="font-bold text-[#134235] font-manrope truncate">{profile?.displayName || "—"}</p>
+              <p className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">{profile?.role}</p>
             </div>
           </div>
-        </div>
 
-        {/* Security Forms block */}
-        <div className="md:col-span-2 space-y-6">
-
-          {/* Username Change Form */}
-          <div className="bg-white border border-gray-100 rounded-3xl p-6 sm:p-8 shadow-sm">
-            <div className="mb-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
-                <AtSign className="w-5 h-5 text-blue-500" /> Username
-              </h2>
-              <p className="text-sm text-gray-500">Set a username to login with instead of (or alongside) your email.</p>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between gap-2 pb-2 border-b border-black/[0.03]">
+              <span className="text-on-surface-variant text-xs font-bold uppercase tracking-wider">Account ID</span>
+              <span className="font-mono text-[10px] text-on-surface truncate">{user?.uid}</span>
             </div>
-            <form onSubmit={handleUsernameChange} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">New Username</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-mono text-sm select-none">@</span>
+            <div className="pt-1">
+              <p className="text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1 flex items-center gap-1.5">
+                <CreditCard className="w-3.5 h-3.5 text-primary" /> Credit Limit
+              </p>
+              {(profile?.creditLimit ?? 0) > 0 ? (
+                <p className="font-bold text-primary text-lg">৳{(profile?.creditLimit ?? 0).toLocaleString()}</p>
+              ) : (
+                <p className="font-mono text-on-surface-variant/60 text-xs italic">No credit assigned</p>
+              )}
+              <p className="text-[10px] text-on-surface-variant/70 mt-1">Assigned by admin. Spend when wallet is ৳0.</p>
+            </div>
+          </div>
+        </aside>
+
+        {/* ── Editable identity ───────────────────────────────────────── */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="bg-white border border-black/5 rounded-2xl p-6 sm:p-8 premium-shadow">
+            <h2 className="font-headline font-bold text-lg text-[#134235] mb-1 flex items-center gap-2">
+              <User className="w-5 h-5 text-primary" /> Personal Details
+            </h2>
+            <p className="text-sm text-on-surface-variant mb-6">
+              Each field saves independently — change one, click Save, and you&rsquo;re done.
+            </p>
+
+            <div className="space-y-5">
+              {/* Full name */}
+              <EditableField
+                label="Full Name"
+                icon={User}
+                input={
                   <input
                     type="text"
-                    required
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-                    placeholder="your_username"
-                    maxLength={20}
-                    disabled={usernameLoading}
-                    className="w-full pl-8 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-base font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-colors disabled:opacity-60"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Your name"
+                    maxLength={60}
+                    disabled={savingName}
+                    className={inputCls}
                   />
-                </div>
-                <p className="text-xs text-gray-400 mt-1.5">3–20 chars · letters, numbers, underscores only</p>
+                }
+                button={
+                  <SaveButton onClick={handleNameSave} loading={savingName} disabled={!nameDirty || displayName.trim().length < 2} />
+                }
+              />
+
+              {/* Username */}
+              <EditableField
+                label="Username"
+                icon={AtSign}
+                hint="3–20 chars · letters, numbers, underscores"
+                input={
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant/60 font-mono text-sm select-none">@</span>
+                    <input
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                      placeholder="your_username"
+                      maxLength={20}
+                      disabled={savingUsername}
+                      className={`${inputCls} pl-8 font-mono`}
+                    />
+                  </div>
+                }
+                button={
+                  <SaveButton onClick={handleUsernameSave} loading={savingUsername} disabled={!usernameDirty || username.length < 3} />
+                }
+              />
+
+              {/* Phone */}
+              <EditableField
+                label="Phone Number"
+                icon={Phone}
+                hint="Leave blank to remove"
+                input={
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+8801700000000"
+                    disabled={savingPhone}
+                    className={inputCls}
+                  />
+                }
+                button={
+                  <SaveButton onClick={handlePhoneSave} loading={savingPhone} disabled={!phoneDirty} />
+                }
+              />
+
+              {/* Email — needs password */}
+              <div className="rounded-xl border border-black/5 bg-surface-container/30 p-4 space-y-3">
+                <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope">
+                  <Mail className="w-3.5 h-3.5 text-primary" /> Email Address
+                </label>
+                <form onSubmit={handleEmailSave} className="space-y-3">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    disabled={savingEmail}
+                    className={inputCls}
+                  />
+                  {emailDirty && (
+                    <>
+                      <div className="flex items-start gap-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2">
+                        <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        <span>Email is used for sign-in and recovery — confirm with your password.</span>
+                      </div>
+                      <input
+                        type="password"
+                        value={emailPassword}
+                        onChange={(e) => setEmailPassword(e.target.value)}
+                        placeholder="Current password"
+                        disabled={savingEmail}
+                        className={inputCls}
+                      />
+                    </>
+                  )}
+                  <div className="flex justify-end">
+                    <SaveButton
+                      type="submit"
+                      loading={savingEmail}
+                      disabled={!emailDirty || !emailPassword || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())}
+                    />
+                  </div>
+                </form>
               </div>
-              <button type="submit" disabled={usernameLoading || newUsername.length < 3}
-                className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50">
-                {usernameLoading ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
-                Save Username
-              </button>
-            </form>
+            </div>
           </div>
 
-          {/* PIN Setup Form */}
-          <div className="bg-white border border-gray-100 rounded-3xl p-6 sm:p-8 shadow-sm">
-            <div className="mb-6 flex justify-between items-start">
+          {/* PIN */}
+          <div className="bg-white border border-black/5 rounded-2xl p-6 sm:p-8 premium-shadow">
+            <div className="flex items-start justify-between mb-6">
               <div>
-                <h2 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
-                  <KeyRound className="w-5 h-5 text-indigo-500" /> Transaction PIN
+                <h2 className="font-headline font-bold text-lg text-[#134235] flex items-center gap-2">
+                  <KeyRound className="w-5 h-5 text-primary" /> Transaction PIN
                 </h2>
-                <p className="text-sm text-gray-500">Create a 4-6 digit sequence used exclusively for approving outgoing funds.</p>
+                <p className="text-sm text-on-surface-variant">A 4–6 digit code used to approve outgoing funds.</p>
               </div>
               {profile?.hasPin && (
-                <span className="bg-green-50 text-green-600 px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap">PIN Configured</span>
+                <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap font-manrope">PIN set</span>
               )}
             </div>
-
-            <form onSubmit={handlePinChange}>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <form onSubmit={handlePinChange} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">New PIN</label>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">New PIN</label>
                   <input type="password" required maxLength={6}
-                    value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/[^0-9]/g, ''))} 
+                    value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/[^0-9]/g, ""))}
                     placeholder="••••" disabled={pinLoading}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-lg tracking-[0.25em] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" />
+                    className={`${inputCls} text-lg tracking-[0.25em]`} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Confirm PIN</label>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">Confirm PIN</label>
                   <input type="password" required maxLength={6}
-                    value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/[^0-9]/g, ''))} 
+                    value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/[^0-9]/g, ""))}
                     placeholder="••••" disabled={pinLoading}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-lg tracking-[0.25em] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" />
+                    className={`${inputCls} text-lg tracking-[0.25em]`} />
                 </div>
               </div>
-              <button type="submit" disabled={pinLoading || !newPin || !confirmPin}
-                className="inline-flex items-center justify-center gap-2 bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50">
-                {pinLoading ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
-                Save PIN Record
-              </button>
+              <div className="flex justify-end">
+                <SaveButton type="submit" loading={pinLoading} disabled={!newPin || !confirmPin} />
+              </div>
             </form>
           </div>
 
-          {/* Change Password Form */}
-          <div className="bg-white border border-gray-100 rounded-3xl p-6 sm:p-8 shadow-sm">
-            <h2 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
-              <Lock className="w-5 h-5 text-orange-500" /> Account Password
+          {/* Password */}
+          <div className="bg-white border border-black/5 rounded-2xl p-6 sm:p-8 premium-shadow">
+            <h2 className="font-headline font-bold text-lg text-[#134235] flex items-center gap-2 mb-1">
+              <Lock className="w-5 h-5 text-primary" /> Account Password
             </h2>
-            <p className="text-sm text-gray-500 mb-6">Update the master credential that grants basic login access to this account.</p>
-
+            <p className="text-sm text-on-surface-variant mb-6">Update the master credential used to sign in.</p>
             <form onSubmit={handlePasswordChange} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Current Password</label>
-                <input type="password" required
-                  value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={passwordLoading}
-                  className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition-colors" />
+                <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">Current Password</label>
+                <input type="password" required value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={passwordLoading}
+                  className={inputCls} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">New Password</label>
-                  <input type="password" required minLength={6}
-                    value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={passwordLoading}
-                    className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition-colors" />
+                  <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">New Password</label>
+                  <input type="password" required minLength={6} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={passwordLoading}
+                    className={inputCls} />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Confirm New Password</label>
-                  <input type="password" required minLength={6}
-                    value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={passwordLoading}
-                    className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition-colors" />
+                  <label className="block text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">Confirm New Password</label>
+                  <input type="password" required minLength={6} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={passwordLoading}
+                    className={inputCls} />
                 </div>
               </div>
-              
-              <div className="pt-4 flex items-center justify-between border-t border-gray-100 mt-6">
-                <p className="text-xs text-gray-400 font-medium max-w-[200px]"><Info className="w-3.5 h-3.5 inline mr-1" /> Re-authentication required for modifications.</p>
-                <button type="submit" disabled={passwordLoading || !currentPassword || !newPassword}
-                  className="inline-flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3 px-6 rounded-xl hover:bg-orange-600 transition-all disabled:opacity-50">
-                  {passwordLoading ? "Updating..." : "Update Password"}
-                </button>
+              <div className="flex justify-end">
+                <SaveButton type="submit" loading={passwordLoading} disabled={!currentPassword || !newPassword} label="Update Password" />
               </div>
             </form>
           </div>
-          
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Reusable bits ────────────────────────────────────────────────────────────
+
+const inputCls =
+  "w-full border border-outline-variant bg-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60";
+
+function EditableField({
+  label, icon: Icon, hint, input, button,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  hint?: string;
+  input: React.ReactNode;
+  button: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-on-surface-variant font-manrope mb-2">
+        <Icon className="w-3.5 h-3.5 text-primary" /> {label}
+      </label>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex-1">{input}</div>
+        <div className="shrink-0">{button}</div>
+      </div>
+      {hint && <p className="text-[11px] text-on-surface-variant/70 mt-1.5">{hint}</p>}
+    </div>
+  );
+}
+
+function SaveButton({
+  onClick, type = "button", loading, disabled, label = "Save",
+}: {
+  onClick?: () => void;
+  type?: "button" | "submit";
+  loading: boolean;
+  disabled?: boolean;
+  label?: string;
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={loading || disabled}
+      className="inline-flex items-center justify-center gap-2 bg-primary text-on-primary font-bold font-manrope text-sm py-3 px-5 rounded-xl shadow-lg shadow-primary/20 hover:opacity-90 active:scale-[0.98] disabled:opacity-40 transition-all whitespace-nowrap min-w-[90px]"
+    >
+      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+      {label}
+    </button>
   );
 }

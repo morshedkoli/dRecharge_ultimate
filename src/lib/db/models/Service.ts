@@ -7,6 +7,7 @@ export interface IService extends Document<string> {
   description?: string;
   isActive: boolean;
   categoryId?: string;
+  providerId?: string;
   ussdSteps: {
     order: number;
     type: "dial" | "select" | "input" | "wait";
@@ -35,6 +36,7 @@ const ServiceSchema = new Schema<IService>(
     description: { type: String, default: "" },
     isActive: { type: Boolean, default: true },
     categoryId: { type: String, default: null },
+    providerId: { type: String, default: null },
     ussdSteps: {
       type: [
         {

@@ -1,12 +1,11 @@
 "use client";
-import { useAuth } from "@/lib/hooks/useAuth";
-import { Menu, Wallet, Settings } from "lucide-react";
+import { Menu, Wallet } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { UserMenu } from "@/components/UserMenu";
 import { useProfile } from "@/lib/hooks/user/useProfile";
 import { useState } from "react";
 
 export function UserTopbar({ onMenuClick }: { onMenuClick: () => void }) {
-  const { user } = useAuth();
   const { profile } = useProfile();
   const [searchFocused, setSearchFocused] = useState(false);
 
@@ -25,8 +24,8 @@ export function UserTopbar({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
       </div>
 
-      {/* Right: wallet balance + profile */}
-      <div className="flex items-center gap-4">
+      {/* Right: wallet balance + notifications + profile */}
+      <div className="flex items-center gap-3">
         {/* Wallet Balance */}
         {profile && (
           <div className="hidden sm:flex items-center gap-2 bg-[#E8F1EE] border border-primary/10 px-4 py-2 rounded-xl">
@@ -37,27 +36,22 @@ export function UserTopbar({ onMenuClick }: { onMenuClick: () => void }) {
           </div>
         )}
 
-        <div className="flex items-center gap-1">
-          <NotificationBell variant="user" />
-          <button className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:text-[#134235] hover:bg-white/60 transition-all">
-            <Settings className="w-5 h-5" />
-          </button>
-        </div>
+        <NotificationBell variant="user" />
 
         <div className="h-6 w-px bg-outline-variant/30" />
 
-        {/* User profile */}
-        <div className="flex items-center gap-3 cursor-pointer group">
-          <div className="text-right hidden sm:block">
-            <p className="text-sm font-bold text-[#134235] font-manrope leading-tight">
-              {user?.displayName || user?.email?.split("@")[0] || "User"}
-            </p>
-            <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold">Member</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-on-primary font-bold text-sm ring-2 ring-transparent group-hover:ring-primary/20 transition-all shadow-sm font-manrope">
-            {(user?.displayName || user?.email || "U").slice(0, 2).toUpperCase()}
-          </div>
-        </div>
+        {/* User profile dropdown */}
+        <UserMenu profileHref="/user/profile" roleLabel="Member" variant="user">
+          {profile && (
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[#E8F1EE]">
+              <Wallet className="w-4 h-4 text-primary" />
+              <span className="text-sm font-bold text-[#134235] font-manrope">
+                ৳{profile.walletBalance.toLocaleString()}
+              </span>
+              <span className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant ml-auto">Balance</span>
+            </div>
+          )}
+        </UserMenu>
       </div>
     </header>
   );

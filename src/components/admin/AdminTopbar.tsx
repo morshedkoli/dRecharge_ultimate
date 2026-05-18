@@ -1,8 +1,8 @@
 "use client";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/lib/hooks/useAuth";
-import { Menu, ChevronRight, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
+import { Menu, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { UserMenu } from "@/components/UserMenu";
 import { useSubscription } from "@/lib/hooks/useSubscription";
 
 import { Topbar, TopbarLeft, TopbarRight } from "@/components/ui/Topbar";
@@ -16,9 +16,13 @@ const ROUTE_META: Record<string, { title: string }> = {
   "/admin/history":          { title: "History" },
   "/admin/analytics":        { title: "Analytics" },
   "/admin/categories":       { title: "Categories" },
+  "/admin/providers":        { title: "Providers" },
   "/admin/services":         { title: "Services" },
   "/admin/devices":          { title: "Devices" },
   "/admin/logs":             { title: "Audit Logs" },
+  "/admin/notice":           { title: "Notices" },
+  "/admin/profile":          { title: "Profile" },
+  "/admin/settings":         { title: "Settings" },
 };
 
 function resolveRoute(pathname: string) {
@@ -39,10 +43,8 @@ interface AdminTopbarProps {
 
 export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
   const pathname = usePathname();
-  const { user } = useAuth();
   const { status: subStatus, loading: subLoading } = useSubscription();
   const route = resolveRoute(pathname);
-  const userInitials = user?.email?.slice(0, 2).toUpperCase() ?? "AD";
 
   return (
     <Topbar>
@@ -75,9 +77,7 @@ export function AdminTopbar({ onMenuClick }: AdminTopbarProps) {
         </div>
         <NotificationBell variant="admin" />
         <div className="h-5 w-px bg-outline-variant/30" />
-        <div className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground hover:bg-primary-dim transition-colors">
-          {userInitials}
-        </div>
+        <UserMenu profileHref="/admin/profile" roleLabel="Administrator" variant="admin" />
       </TopbarRight>
     </Topbar>
   );

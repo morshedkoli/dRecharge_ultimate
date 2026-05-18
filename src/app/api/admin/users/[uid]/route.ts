@@ -24,7 +24,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const { action } = body;
 
   // Self-service actions — only for self
-  if (action === "changePassword" || action === "setPin" || action === "changeUsername") {
+  const SELF_ACTIONS = [
+    "changePassword", "setPin", "changeUsername",
+    "selfChangeName", "selfChangeEmail", "selfChangePhone",
+  ];
+  if (SELF_ACTIONS.includes(action)) {
     const session = await getSession(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (session.sub !== uid) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -64,6 +68,54 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       user.username = newUsername;
       await user.save();
       return NextResponse.json({ success: true, username: newUsername });
+    }
+
+    if (action === "selfChangeName") {
+      const newName = String(body.displayName || "").trim();
+      if (newName.length < 2 || newName.length > 60) {
+        return NextResponse.json({ error: "Name must be 2–60 characters" }, { status: 400 });
+      }
+      user.displayName = newName;
+      await user.save();
+      await writeLog({ uid, action: "SELF_NAME_CHANGED", entityId: uid, meta: { newName } });
+      return NextResponse.json({ success: true, displayName: newName });
+    }
+
+    if (action === "selfChangeEmail") {
+      const newEmail = String(body.email || "").trim().toLowerCase();
+      const currentPassword = String(body.currentPassword || "");
+      if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+        return NextResponse.json({ error: "Valid email required" }, { status: 400 });
+      }
+      // Require password re-auth — email is sensitive (used for recovery)
+      const valid = await verifyPassword(currentPassword, user.passwordHash);
+      if (!valid) return NextResponse.json({ error: "Current password is incorrect" }, { status: 401 });
+
+      const existing = await User.findOne({ email: newEmail, _id: { $ne: uid } }).lean();
+      if (existing) return NextResponse.json({ error: "Email already in use by another account" }, { status: 409 });
+
+      const oldEmail = user.email;
+      user.email = newEmail;
+      await user.save();
+      await writeLog({ uid, action: "SELF_EMAIL_CHANGED", entityId: uid, severity: "warn", meta: { oldEmail, newEmail } });
+      return NextResponse.json({ success: true, email: newEmail });
+    }
+
+    if (action === "selfChangePhone") {
+      const raw = String(body.phoneNumber || "").trim();
+      // Allow empty (clearing the number) or 6–20 chars of digits/+/spaces/dashes
+      if (raw && !/^[+\d][\d\s\-]{5,19}$/.test(raw)) {
+        return NextResponse.json({ error: "Phone number format is invalid" }, { status: 400 });
+      }
+      if (raw) {
+        const existing = await User.findOne({ phoneNumber: raw, _id: { $ne: uid } }).lean();
+        if (existing) return NextResponse.json({ error: "Phone number already in use" }, { status: 409 });
+      }
+      const oldPhone = user.phoneNumber;
+      user.phoneNumber = raw || undefined;
+      await user.save();
+      await writeLog({ uid, action: "SELF_PHONE_CHANGED", entityId: uid, meta: { oldPhone, newPhone: raw } });
+      return NextResponse.json({ success: true, phoneNumber: raw });
     }
   }
 

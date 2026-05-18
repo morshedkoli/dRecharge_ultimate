@@ -147,6 +147,15 @@ export interface ServiceCategory {
   createdAt: Date | string;
 }
 
+// ─── Service Provider ────────────────────────────────────────────────────────
+export interface ServiceProvider {
+  id: string;
+  name: string;
+  logo: string;
+  order?: number;
+  createdAt: Date | string;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 export interface Service {
   id: string;
@@ -155,6 +164,7 @@ export interface Service {
   description?: string;
   isActive: boolean;
   categoryId?: string;
+  providerId?: string;
   ussdSteps: UssdStep[];               // structured step array (source of truth)
   pin: string;
   simSlot: number;

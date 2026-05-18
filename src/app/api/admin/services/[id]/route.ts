@@ -30,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const body = await request.json();
     const {
-      name, icon, description, isActive, categoryId,
+      name, icon, description, isActive, categoryId, providerId,
       ussdSteps, pin, simSlot, recipientLength, successSmsFormat,
       failureSmsTemplates, smsTimeout,
     } = body;
@@ -44,6 +44,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         description: description || "",
         isActive: isActive !== false,
         categoryId: categoryId || null,
+        providerId: providerId || null,
         ussdSteps: normalizeStructuredUssdSteps(ussdSteps),
         pin,
         simSlot,

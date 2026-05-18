@@ -1,6 +1,6 @@
 "use client";
 import { use, useEffect, useState, useCallback, useRef } from "react";
-import { Service, ServiceCategory, UssdStep, UssdStepType, SmsFailureTemplate } from "@/types";
+import { Service, ServiceCategory, ServiceProvider, UssdStep, UssdStepType, SmsFailureTemplate } from "@/types";
 import { saveService } from "@/lib/functions";
 import { relativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -9,7 +9,7 @@ import {
   Tag, Smartphone, MessageSquare, Zap, Settings, Loader2,
   CheckCircle2, AlertCircle, Info, Lock, Plus, Trash2,
   PhoneCall, Hash, Keyboard, Timer, GripVertical, Eye,
-  ArrowRight, FlaskConical,
+  ArrowRight, FlaskConical, Signal,
 } from "lucide-react";
 import Link from "next/link";
 import { ImageUpload } from "@/components/admin/ImageUpload";
@@ -371,12 +371,14 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
   const [svc, setSvc] = useState<Service | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
+  const [providers, setProviders] = useState<ServiceProvider[]>([]);
 
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("");
   const [description, setDescription] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [categoryId, setCategoryId] = useState("");
+  const [providerId, setProviderId] = useState("");
   const [ussdSteps, setUssdSteps] = useState<UssdStep[]>([]);
   const [pin, setPin] = useState("");
   const [simSlot, setSimSlot] = useState(1);
@@ -405,9 +407,11 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
     Promise.all([
       fetch(`/api/admin/services/${serviceId}`).then(r => r.json()),
       fetch("/api/admin/categories").then(r => r.json()),
-    ]).then(([svcData, catData]) => {
+      fetch("/api/admin/providers").then(r => r.json()),
+    ]).then(([svcData, catData, provData]) => {
       if (!mounted) return;
       if (catData.categories) setCategories(catData.categories);
+      if (provData.providers) setProviders(provData.providers);
       if (svcData.service) {
         const s = svcData.service;
         setSvc(s);
@@ -416,6 +420,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
         setDescription(s.description || "");
         setIsActive(s.isActive ?? true);
         setCategoryId(s.categoryId || "");
+        setProviderId(s.providerId || "");
         // Load structured steps directly
         const steps = s.ussdSteps && s.ussdSteps.length > 0 ? s.ussdSteps : [];
         setUssdSteps(steps);
@@ -463,6 +468,7 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
       await saveService({
         serviceId, name: name.trim(), icon: icon.trim(), description: description.trim(),
         isActive, categoryId: categoryId || undefined,
+        providerId: providerId || undefined,
         ussdSteps,
         pin: pin.trim(), simSlot, recipientLength,
         successSmsFormat: successSmsFormat.trim(),
@@ -554,12 +560,12 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
               placeholder="Short description shown to users" className={inputCls} />
           </div>
 
-          <div className="sm:col-span-2">
+          <div>
             <FieldLabel>Category <span className="normal-case tracking-normal font-normal text-on-surface-variant/60">optional</span></FieldLabel>
             {categories.length === 0 ? (
               <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 font-manrope font-semibold">
                 <Tag className="w-3.5 h-3.5 shrink-0" />
-                No categories yet — <Link href="/admin/categories" className="underline font-bold">create one first</Link>
+                <Link href="/admin/categories" className="underline font-bold">Create one</Link>
               </div>
             ) : (
               <div className="relative">
@@ -573,6 +579,29 @@ export default function ServiceEditorPage({ params }: { params: Promise<{ servic
                   ))}
                 </select>
                 <Tag className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <FieldLabel>Provider <span className="normal-case tracking-normal font-normal text-on-surface-variant/60">optional</span></FieldLabel>
+            {providers.length === 0 ? (
+              <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 font-manrope font-semibold">
+                <Signal className="w-3.5 h-3.5 shrink-0" />
+                <Link href="/admin/providers" className="underline font-bold">Create one</Link>
+              </div>
+            ) : (
+              <div className="relative">
+                <select value={providerId} onChange={(e) => { setProviderId(e.target.value); mark(); }}
+                  className={`${inputCls} appearance-none pr-10`}>
+                  <option value="">— No provider —</option>
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.logo && !p.logo.startsWith("http") ? `${p.logo} ` : ""}{p.name}
+                    </option>
+                  ))}
+                </select>
+                <Signal className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant pointer-events-none" />
               </div>
             )}
           </div>

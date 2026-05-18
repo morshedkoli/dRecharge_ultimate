@@ -47,7 +47,32 @@ export function buildSmsTemplateRegex(format: string): RegExp | null {
     .replace(/\\\{[^\\}]+\\\}/g,         ".*?");
 
   try {
-    return new RegExp(escaped, "i");
+    return new RegExp(escaped, "is");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Permissive variant of [buildSmsTemplateRegex] for failure-template matching.
+ *
+ * Failure templates don't need field capture — only match/no-match. Real failure
+ * SMS bodies often omit fields like `{amount}` or `{trxId}` that appear in
+ * success messages, so the strict numeric/word patterns reject them. This
+ * builder mirrors the Flutter agent's `_templateRegex`: every `{placeholder}`
+ * becomes a wildcard `.*?`, whitespace is normalised, and both `i` and `s`
+ * (dotAll) flags are set so newlines in multi-line SMS bodies don't break the
+ * match.
+ */
+export function buildPermissiveTemplateRegex(format: string): RegExp | null {
+  if (!format?.trim()) return null;
+
+  let escaped = format.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  escaped = escaped.replace(/\s+/g, "\\s+");
+  escaped = escaped.replace(/\\\{[^\\}]+\\\}/g, ".*?");
+
+  try {
+    return new RegExp(escaped, "is");
   } catch {
     return null;
   }
@@ -125,9 +150,10 @@ export function evaluateSmsAgainstTemplates(args: {
     return { outcome: "done", parsedResult };
   }
 
-  // Check each failure template
+  // Check each failure template — use permissive matching so SMS bodies
+  // that don't include amount/trxId still match (failure SMSes rarely do).
   for (const tmpl of args.failureSmsTemplates ?? []) {
-    const failureRegex = buildSmsTemplateRegex(tmpl.template);
+    const failureRegex = buildPermissiveTemplateRegex(tmpl.template);
     if (failureRegex?.test(rawSms)) {
       return {
         outcome: "failed",
