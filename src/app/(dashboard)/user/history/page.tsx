@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Transaction, Service, TxStatus, BalanceRequest, RequestStatus } from "@/types";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { History, Search, Zap, ArrowRight, Activity, Clock, CheckCircle2, XCircle, Wallet, RefreshCw } from "lucide-react";
+import { History, Search, Zap, ArrowRight, Activity, Clock, CheckCircle2, XCircle, Wallet, RefreshCw, AlertCircle, Info } from "lucide-react";
 import { relativeTime } from "@/lib/utils";
 import Link from "next/link";
 import clsx from "clsx";
@@ -185,6 +185,7 @@ export default function UserHistoryPage() {
             const svc = tx.serviceId ? servicesMap[tx.serviceId] : undefined;
             const isCredit = tx.type === "topup" || tx.type === "refund";
 
+            const hasReason = Boolean(tx.failureReason && tx.failureReason.trim());
             return (
               <div key={tx.id} className="bg-white border border-black/5 rounded-2xl p-4 premium-shadow hover:border-primary/20 hover:shadow-md transition-all">
                 <div className="flex items-center gap-4">
@@ -212,6 +213,23 @@ export default function UserHistoryPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* Failure / waiting reason from matched SMS template */}
+                {hasReason && tx.status === "failed" && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-bold font-manrope leading-snug">{tx.failureReason}</p>
+                      <p className="text-[11px] text-red-600/80 mt-0.5">৳{tx.amount.toLocaleString()} refunded to your wallet.</p>
+                    </div>
+                  </div>
+                )}
+                {hasReason && tx.status === "waiting" && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <p className="font-bold font-manrope leading-snug">{tx.failureReason}</p>
+                  </div>
+                )}
               </div>
             );
           })}
