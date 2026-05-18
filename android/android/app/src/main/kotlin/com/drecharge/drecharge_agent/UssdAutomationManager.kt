@@ -246,6 +246,11 @@ object UssdAutomationManager {
         val signature = collectTexts(root).joinToString("\n").trim()
         if (signature.isNotEmpty() && signature == activeSession.lastSignature) return
         activeSession.lastSignature = signature
+        // Always remember the last non-empty dialog so completeSession can
+        // recover it if the result screen fires a delayed/missed event.
+        if (signature.isNotEmpty()) {
+            activeSession.lastDialogText = signature
+        }
 
         if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
             // We've completed all inputs, this is the final USSD pop-up!
@@ -413,7 +418,22 @@ object UssdAutomationManager {
         activeSession.isProcessingStep = false
         session = null
 
-        if (finalMessage != null && finalMessage.isNotEmpty()) {
+        // Resolve the dialog text to record:
+        //   1. The caller's explicit finalMessage (happy path — accessibility event fired)
+        //   2. The session's lastDialogText (event fired earlier but completion was raced)
+        //   3. The accessibility service's current rootInActiveWindow text (last-ditch)
+        val resolvedResponse = when {
+            !finalMessage.isNullOrEmpty() -> finalMessage
+            activeSession.lastDialogText.isNotEmpty() -> activeSession.lastDialogText
+            else -> {
+                try {
+                    val root = UssdAccessibilityService.instance?.rootInActiveWindow
+                    if (root != null) collectTexts(root).joinToString("\n").trim().ifEmpty { null } else null
+                } catch (_: Exception) { null }
+            }
+        }
+
+        if (!resolvedResponse.isNullOrEmpty()) {
             val iso8601 = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("UTC")
             }.format(Date())
@@ -421,7 +441,7 @@ object UssdAutomationManager {
                 mapOf(
                     "order"      to activeSession.executedSteps.size + 1,
                     "type"       to "response",
-                    "value"      to finalMessage,
+                    "value"      to resolvedResponse,
                     "executedAt" to iso8601,
                     "success"    to true,
                 )
@@ -534,6 +554,13 @@ private data class UssdSession(
     var nextStepIndex: Int = 0,
     var typedStepCursor: Int = 1,
     var lastSignature: String = "",
+    /**
+     * Most recent non-empty dialog text observed via accessibility events.
+     * Used as a fallback `response` value when [completeSession] is reached
+     * with [finalMessage] = null (e.g. the final timeout fires before an
+     * accessibility event arrives for the result screen).
+     */
+    var lastDialogText: String = "",
     var timeoutRunnable: Runnable? = null,
     var isProcessingStep: Boolean = false,
 )
