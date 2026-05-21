@@ -11,7 +11,7 @@ import { ListOrdered, ArrowRight, ListChecks } from "lucide-react";
 
 import { toast } from "sonner";
 import { ExecutionJob } from "@/types";
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Activity, RefreshCw, CheckCheck, X, Undo2, Smartphone } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, AlertTriangle, Clock, Activity, RefreshCw, CheckCheck, X, Undo2, Smartphone } from "lucide-react";
 
 function StatCard({ title, value, amount, icon: Icon, bg, text, border }: any) {
   return (
@@ -440,7 +440,27 @@ function JobCard({
             </div>
           </div>
           
-          {/* USSD Response Preview */}
+          {/* Failure reason — always shown for failed jobs */}
+          {(job.status === "failed" || job.status === "cancelled") && (() => {
+            const latestLog = job.executionLogs && job.executionLogs.length > 0
+              ? [...job.executionLogs].reverse()[0]
+              : null;
+            const reason =
+              (job.parsedResult as { reason?: string } | undefined)?.reason ||
+              latestLog?.failureReason ||
+              (job.status === "cancelled" ? "Job cancelled by admin." : "Transaction could not be confirmed.");
+            return (
+              <div className="flex items-start gap-2 bg-red-50/70 border border-red-200/70 rounded-xl px-3 py-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-700/70 font-manrope mb-0.5">Reason</p>
+                  <p className="text-[12px] font-semibold text-red-900 font-inter leading-snug break-words">{reason}</p>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* USSD Response Preview (diagnostic — admin only) */}
           {(() => {
             const latestLog = job.executionLogs && job.executionLogs.length > 0
               ? [...job.executionLogs].reverse()[0]
@@ -461,9 +481,6 @@ function JobCard({
                 }`}>
                   {ussdText}
                 </pre>
-                {job.parsedResult?.reason && (
-                  <p className="text-[11px] text-amber-700 font-manrope px-1">{job.parsedResult.reason}</p>
-                )}
               </div>
             );
           })()}

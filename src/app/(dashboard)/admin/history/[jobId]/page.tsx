@@ -205,6 +205,32 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
         </div>
       </div>
 
+      {/* ── Failure reason banner (prominent for failed/cancelled jobs) ──── */}
+      {(isFailed || isCancelled) && (() => {
+        const latestLog = job.executionLogs && job.executionLogs.length > 0
+          ? [...job.executionLogs].reverse()[0]
+          : null;
+        const reason =
+          (job.parsedResult as { reason?: string } | undefined)?.reason ||
+          latestLog?.failureReason ||
+          (isCancelled ? "Job cancelled by admin." : "Transaction could not be confirmed.");
+        return (
+          <div className="bg-red-50/60 border-2 border-red-200/80 rounded-2xl px-5 py-4 flex items-start gap-3 premium-shadow">
+            <div className="p-2 rounded-xl bg-red-100 shrink-0">
+              <AlertTriangle className="w-4 h-4 text-red-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-red-700/70 font-manrope mb-1">
+                Reason for failure
+              </p>
+              <p className="text-sm font-bold text-red-900 font-inter leading-snug break-words">
+                {reason}
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Action buttons ────────────────────────────────────────────────── */}
       {canAct && (
         <div className="flex flex-wrap gap-3">

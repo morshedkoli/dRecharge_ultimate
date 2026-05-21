@@ -247,26 +247,25 @@ object UssdAutomationManager {
         if (signature.isNotEmpty() && signature == activeSession.lastSignature) return
         activeSession.lastSignature = signature
 
-        // Only cache the dialog as a possible "final response" when it looks
-        // like a result screen — not an input prompt. Intermediate prompts
-        // (Enter PIN, Enter amount, etc.) always have an editable field and a
-        // Cancel/Send button pair, and we should never report those as the
-        // USSD response.
-        val isPrompt = isInputPrompt(root)
-        if (signature.isNotEmpty() && !isPrompt) {
+        // Only cache the dialog as a possible "final response" when it is a
+        // real *result* screen. Three categories we must distinguish:
+        //   - input prompt   → editable field or Cancel/Send pair  (skip)
+        //   - progress toast → "USSD code running…", no buttons    (skip)
+        //   - result dialog  → has at least one action button      (capture)
+        val isResult = isResultDialog(root)
+        if (signature.isNotEmpty() && isResult) {
             activeSession.lastDialogText = signature
         }
 
         if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
-            // All inputs sent — the next dialog that is NOT an input prompt is
-            // the real result. Ignore any transient re-display of the input
-            // prompt so we don't mis-record "Enter Menu PIN…" as the response;
-            // keep listening for events until the real result fires or the
-            // final timeout closes the session.
-            if (!isPrompt) {
+            // All inputs sent — the next *result* dialog is the real response.
+            // Ignore input prompts (transient re-display) AND OS progress
+            // messages like "USSD code running…" — wait for the real result
+            // or the final timeout.
+            if (isResult) {
                 completeSession(success = true, errorMessage = null, finalMessage = signature)
             }
-            return // input-prompt case: just wait for the next event
+            return // not-a-result case: keep listening
         }
 
         val nextValue = activeSession.flowSegments[activeSession.nextStepIndex]
@@ -442,7 +441,7 @@ object UssdAutomationManager {
             else -> {
                 try {
                     val root = UssdAccessibilityService.instance?.rootInActiveWindow
-                    if (root != null && !isInputPrompt(root)) {
+                    if (root != null && isResultDialog(root)) {
                         collectTexts(root).joinToString("\n").trim().ifEmpty { null }
                     } else null
                 } catch (_: Exception) { null }
@@ -516,6 +515,25 @@ object UssdAutomationManager {
         val hasSend   = labels.any { it in sendLabels }
         val hasCancel = labels.any { it in cancelLabels }
         return hasSend && hasCancel
+    }
+
+    /**
+     * True when [root] is a USSD *result* dialog — the screen we want to
+     * capture as the job's `ussdResponse`. Distinguishes the three OS states:
+     *   - input prompt   (editable field OR Send/Cancel pair) → false
+     *   - progress toast ("USSD code running…", no buttons)   → false
+     *   - result dialog  (at least one action button, no input) → true
+     *
+     * Filtering out progress messages prevents the agent from recording the
+     * Android system's transient "USSD code running…" as the response when
+     * the operator never actually returns a result dialog.
+     */
+    private fun isResultDialog(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        if (isInputPrompt(root)) return false
+        val buttons = mutableListOf<AccessibilityNodeInfo>()
+        collectAllButtons(root, buttons)
+        return buttons.isNotEmpty()
     }
 
     /**
