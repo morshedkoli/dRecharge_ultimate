@@ -440,6 +440,37 @@ function JobCard({
             </div>
           </div>
           
+          {/* USSD result fields — captured from the final dialog on success */}
+          {job.status === "done" && ((job as any).providerTxId || (job as any).providerBalance) && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 bg-emerald-50/70 border border-emerald-200/70 rounded-xl px-3 py-2 text-[12px]">
+              {(job as any).providerTxId && (
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="text-[10px] uppercase tracking-wider text-emerald-700/70 font-manrope">TrxID</span>
+                  <span className="font-mono font-bold text-emerald-900">{(job as any).providerTxId}</span>
+                </div>
+              )}
+              {(job as any).providerRecipient && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-emerald-700/70 font-manrope">Recipient</span>
+                  <span className="font-mono font-bold text-emerald-900">{(job as any).providerRecipient}</span>
+                </div>
+              )}
+              {(job as any).providerAmount && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-emerald-700/70 font-manrope">Amount</span>
+                  <span className="font-mono font-bold text-emerald-900">৳{(job as any).providerAmount}</span>
+                </div>
+              )}
+              {(job as any).providerBalance && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-emerald-700/70 font-manrope">Agent Balance</span>
+                  <span className="font-mono font-bold text-emerald-900">৳{(job as any).providerBalance}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Failure reason — always shown for failed jobs */}
           {(job.status === "failed" || job.status === "cancelled") && (() => {
             const latestLog = job.executionLogs && job.executionLogs.length > 0

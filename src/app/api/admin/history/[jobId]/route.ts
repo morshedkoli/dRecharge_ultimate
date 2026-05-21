@@ -18,7 +18,19 @@ export async function GET(request: NextRequest, { params }: Params) {
     await connectDB();
     const raw = await ExecutionJob.findById(jobId).lean();
     if (!raw) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const job = { ...raw, jobId: raw._id };
+
+    // Merge the provider-captured fields from the linked transaction so the
+    // admin UI can render them alongside the job's raw response text.
+    const tx = await Transaction.findById(raw.txId).lean();
+    const job = {
+      ...raw,
+      jobId: raw._id,
+      providerTxId:      (tx as any)?.providerTxId,
+      providerAmount:    (tx as any)?.providerAmount,
+      providerRecipient: (tx as any)?.providerRecipient,
+      providerBalance:   (tx as any)?.providerBalance,
+      txFailureReason:   (tx as any)?.failureReason,
+    };
     return NextResponse.json({ job });
   });
 }

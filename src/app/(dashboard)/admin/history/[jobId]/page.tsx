@@ -205,6 +205,46 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
         </div>
       </div>
 
+      {/* ── USSD Result panel — structured fields captured from the final dialog ── */}
+      {isSuccess && (job.providerTxId || job.providerAmount || job.providerRecipient || job.providerBalance) && (
+        <div className="bg-emerald-50/40 border-2 border-emerald-200/70 rounded-2xl px-5 py-4 premium-shadow">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="p-1.5 rounded-lg bg-emerald-100">
+              <CheckCircle className="w-4 h-4 text-emerald-700" />
+            </div>
+            <p className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-emerald-900/80 font-manrope">
+              Final USSD Result
+            </p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {job.providerTxId && (
+              <div>
+                <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-emerald-800/60 font-manrope mb-1">Transaction ID</p>
+                <p className="font-mono font-bold text-sm text-emerald-950 break-all">{job.providerTxId}</p>
+              </div>
+            )}
+            {job.providerRecipient && (
+              <div>
+                <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-emerald-800/60 font-manrope mb-1">Recipient</p>
+                <p className="font-mono font-bold text-sm text-emerald-950 break-all">{job.providerRecipient}</p>
+              </div>
+            )}
+            {job.providerAmount && (
+              <div>
+                <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-emerald-800/60 font-manrope mb-1">Amount</p>
+                <p className="font-mono font-bold text-sm text-emerald-950">৳{job.providerAmount}</p>
+              </div>
+            )}
+            {job.providerBalance && (
+              <div>
+                <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-emerald-800/60 font-manrope mb-1">Agent Balance</p>
+                <p className="font-mono font-bold text-sm text-emerald-950">৳{job.providerBalance}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Failure reason banner (prominent for failed/cancelled jobs) ──── */}
       {(isFailed || isCancelled) && (() => {
         const latestLog = job.executionLogs && job.executionLogs.length > 0

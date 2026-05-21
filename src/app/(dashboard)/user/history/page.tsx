@@ -216,6 +216,27 @@ export default function UserHistoryPage() {
                   </div>
                 </div>
 
+                {/* Provider receipt — shown for completed recharges (data captured from the final USSD dialog) */}
+                {tx.status === "complete" && !isCredit && (tx.providerTxId || tx.providerBalance) && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+                    <Zap className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-600" />
+                    <div className="flex-1 flex flex-wrap gap-x-4 gap-y-1">
+                      {tx.providerTxId && (
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider text-emerald-700/60 font-manrope">TrxID </span>
+                          <span className="font-mono font-bold">{tx.providerTxId}</span>
+                        </div>
+                      )}
+                      {tx.providerBalance && (
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider text-emerald-700/60 font-manrope">Agent Balance </span>
+                          <span className="font-mono font-bold">৳{tx.providerBalance}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Failure reason — always shown for failed transactions */}
                 {tx.status === "failed" && (
                   <div className="mt-3 flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">

@@ -66,13 +66,35 @@ export async function GET(request: NextRequest) {
       return acc;
     }, {} as Record<string, { name: string; icon?: string }>);
 
-    // Map _id → jobId so the frontend type matches, and inject service info
-    const jobs = raw.map((j) => ({ 
-      ...j, 
-      jobId: j._id,
-      serviceName: serviceMap[j.serviceId]?.name || j.serviceName || j.serviceId,
-      serviceIcon: serviceMap[j.serviceId]?.icon || null,
-    }));
+    // Bulk-fetch the linked transactions so each row can show provider
+    // fields (TrxID, masked recipient, etc.) captured from the final USSD
+    // result dialog.
+    const txIds = raw.map((j) => j.txId).filter(Boolean);
+    const txs = txIds.length > 0
+      ? await Transaction.find({ _id: { $in: txIds } })
+          .select("_id providerTxId providerAmount providerRecipient providerBalance failureReason")
+          .lean()
+      : [];
+    const txMap = txs.reduce((acc, t) => {
+      acc[t._id as string] = t;
+      return acc;
+    }, {} as Record<string, any>);
+
+    // Map _id → jobId so the frontend type matches, and inject service + tx info
+    const jobs = raw.map((j) => {
+      const tx = txMap[j.txId];
+      return {
+        ...j,
+        jobId: j._id,
+        serviceName: serviceMap[j.serviceId]?.name || j.serviceName || j.serviceId,
+        serviceIcon: serviceMap[j.serviceId]?.icon || null,
+        providerTxId:      tx?.providerTxId,
+        providerAmount:    tx?.providerAmount,
+        providerRecipient: tx?.providerRecipient,
+        providerBalance:   tx?.providerBalance,
+        txFailureReason:   tx?.failureReason,
+      };
+    });
     
     return NextResponse.json({ 
       jobs,

@@ -35,6 +35,11 @@ export interface Transaction {
   status: TxStatus;
   note?: string;
   failureReason?: string;   // user-facing failure reason from matched SMS template
+  // Captured from the final USSD result dialog on success
+  providerTxId?: string;       // operator-side transaction reference
+  providerBalance?: string;    // remaining agent balance reported by provider
+  providerAmount?: string;     // amount as reported in provider response
+  providerRecipient?: string;  // recipient (often masked) as reported in provider response
   adminId?: string;
   createdAt: Date | string;
   completedAt?: Date | string;
@@ -96,6 +101,13 @@ export interface ExecutionJob {
   smsTimeout?: number;
   createdAt: Date | string;
   completedAt?: Date | string;
+  // Joined onto the job by the admin detail endpoint — captured from the
+  // final USSD result dialog and persisted on the linked Transaction.
+  providerTxId?: string;
+  providerAmount?: string;
+  providerRecipient?: string;
+  providerBalance?: string;
+  txFailureReason?: string;
 }
 
 // ─── USSD Step (structured flow) ─────────────────────────────────────────────
