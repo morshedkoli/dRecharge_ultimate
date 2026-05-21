@@ -150,14 +150,30 @@ export function evaluateSmsAgainstTemplates(args: {
     return { outcome: "done", parsedResult };
   }
 
-  // Check each failure template — use permissive matching so SMS bodies
-  // that don't include amount/trxId still match (failure SMSes rarely do).
+  // Check each failure template. Try the strict capturing regex first so we can
+  // extract the same fields as the success path ({trxId}, {amount}, {recipientNumber},
+  // {balance}). Fall back to the permissive regex when the strict one fails —
+  // real failure SMSes often omit amount/trxId, and we still want to match them.
   for (const tmpl of args.failureSmsTemplates ?? []) {
-    const failureRegex = buildPermissiveTemplateRegex(tmpl.template);
-    if (failureRegex?.test(rawSms)) {
+    const strictRegex = buildSmsTemplateRegex(tmpl.template);
+    let match = strictRegex ? rawSms.match(strictRegex) : null;
+    if (!match) {
+      const permissiveRegex = buildPermissiveTemplateRegex(tmpl.template);
+      match = permissiveRegex ? rawSms.match(permissiveRegex) : null;
+    }
+    if (match) {
+      const parsedResult: SmsTemplateResult["parsedResult"] = {
+        success: false,
+        reason: tmpl.message,
+      };
+      const { txRef, balance, smsAmount, smsRecipient } = match.groups ?? {};
+      if (txRef)        parsedResult.txRef       = txRef;
+      if (balance)      parsedResult.balance     = balance;
+      if (smsAmount)    parsedResult.smsAmount   = smsAmount.trim();
+      if (smsRecipient) parsedResult.smsRecipient = smsRecipient.trim();
       return {
         outcome: "failed",
-        parsedResult: { success: false, reason: tmpl.message },
+        parsedResult,
         failureReason: tmpl.message,
       };
     }
