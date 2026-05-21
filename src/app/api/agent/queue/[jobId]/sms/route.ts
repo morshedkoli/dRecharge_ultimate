@@ -4,11 +4,7 @@ import ExecutionJob from "@/lib/db/models/ExecutionJob";
 import Transaction from "@/lib/db/models/Transaction";
 import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
-import {
-  notifyTransactionCompleted,
-  notifyTransactionFailed,
-  notifyTransactionWaiting,
-} from "@/lib/notifications";
+import { notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
 import { evaluateSmsAgainstTemplates, loadFailureTemplates, loadSuccessFormat } from "@/lib/sms-template";
 import mongoose from "mongoose";
@@ -18,12 +14,9 @@ type Params = { params: Promise<{ jobId: string }> };
 /**
  * POST /api/agent/queue/[jobId]/sms
  *
- * Called by the Android agent when it receives an SMS after USSD execution.
- * The job must be in "processing" status (awaiting SMS confirmation).
- * This endpoint matches the SMS against the service templates and resolves
- * the job to "done" or "failed" — no timeout involved.
- *
- * Body: { txId: string; rawSms: string }
+ * Late SMS arrival path. Only acts on jobs still in "processing" — the result
+ * endpoint will normally have already resolved the job. Always lands on
+ * done or failed; never on a waiting state.
  */
 export async function POST(request: NextRequest, { params }: Params) {
   try {
@@ -46,10 +39,18 @@ export async function POST(request: NextRequest, { params }: Params) {
     await connectDB();
     const dbSession = await mongoose.startSession();
 
-    let outcome: string = "waiting";
+    let outcome = "failed" as "done" | "failed";
     let failureReason: string | undefined;
-    let finalParsedResult: { success: boolean; txRef?: string; amount?: number; reason?: string; balance?: string } = { success: false };
+    let finalParsedResult: {
+      success: boolean;
+      txRef?: string;
+      balance?: string;
+      smsAmount?: string;
+      smsRecipient?: string;
+      reason?: string;
+    } = { success: false };
     let finalTxId = txId;
+    let resolvedHere = false;
     const smsReceivedAtDate =
       typeof smsReceivedAt === "number" && Number.isFinite(smsReceivedAt)
         ? new Date(smsReceivedAt)
@@ -69,12 +70,15 @@ export async function POST(request: NextRequest, { params }: Params) {
         if (job.txId !== tx._id) throw new Error("Job and transaction do not match");
         if (job.lockedByDevice !== agentSession.deviceId) throw new Error("Job is not locked by this device");
         const assignedServices: string[] = agentSession.device.assignedServices ?? [];
-        if (!assignedServices.includes(job.serviceId)) throw new Error("Device is not assigned to this service");
+        if (!assignedServices.includes(job.serviceId)) {
+          throw new Error("Device is not assigned to this service");
+        }
         finalTxId = tx._id;
 
-        // Only process jobs that are awaiting SMS (processing / waiting)
+        // Only act on jobs still awaiting resolution. If /result already
+        // resolved the job to done/failed, ignore this late SMS.
         if (!["processing", "waiting"].includes(job.status)) {
-          return; // already resolved — ignore duplicate SMS
+          return;
         }
 
         const [successSmsFormat, failureTemplates] = await Promise.all([
@@ -88,13 +92,12 @@ export async function POST(request: NextRequest, { params }: Params) {
           successSmsFormat,
           failureSmsTemplates: failureTemplates,
         });
-        outcome = result.outcome;
-        failureReason = result.failureReason;
+        outcome = result.outcome; // "done" | "failed"
+        failureReason = outcome === "failed" ? result.failureReason : undefined;
         finalParsedResult = result.parsedResult;
+        resolvedHere = true;
 
-        // Persist resolution — keep the existing ussdResponse intact,
-        // this endpoint only delivers the SMS body.
-        job.status = outcome as any;
+        job.status = outcome;
         job.locked = false;
         job.rawSms = rawSms;
         if (typeof smsSenderNumber === "string" && smsSenderNumber.trim()) {
@@ -104,7 +107,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           (job as any).smsReceivedAt = smsReceivedAtDate;
         }
         job.parsedResult = { ...finalParsedResult, matchSource: "sms" as const };
-        job.completedAt = outcome === "waiting" ? undefined : new Date();
+        job.completedAt = new Date();
         if (!job.executionLogs) (job as any).executionLogs = [];
         (job as any).executionLogs.push({
           attempt: job.attempt,
@@ -115,15 +118,30 @@ export async function POST(request: NextRequest, { params }: Params) {
           deviceId: agentSession.deviceId,
           responseSource: "sms",
           senderNumber: smsSenderNumber,
-          smsReceivedAt: smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime()) ? smsReceivedAtDate : undefined,
+          smsReceivedAt:
+            smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime())
+              ? smsReceivedAtDate
+              : undefined,
           stepsExecuted: job.ussdStepsExecuted || [],
           executedAt: new Date(),
         });
         await job.save({ session: dbSession });
 
-        tx.status = outcome === "done" ? "complete" : outcome === "failed" ? "failed" : "waiting";
-        if (outcome === "failed" && failureReason) (tx as any).failureReason = failureReason;
-        if (outcome !== "waiting") tx.completedAt = new Date();
+        tx.status = outcome === "done" ? "complete" : "failed";
+        if (outcome === "failed" && failureReason) {
+          (tx as any).failureReason = failureReason;
+        } else {
+          (tx as any).failureReason = undefined;
+        }
+        tx.completedAt = new Date();
+
+        if (outcome === "done") {
+          const pr = finalParsedResult;
+          if (pr.txRef)        (tx as any).providerTxId      = pr.txRef;
+          if (pr.balance)      (tx as any).providerBalance   = pr.balance;
+          if (pr.smsAmount)    (tx as any).providerAmount    = pr.smsAmount;
+          if (pr.smsRecipient) (tx as any).providerRecipient = pr.smsRecipient;
+        }
         await tx.save({ session: dbSession });
 
         if (outcome === "failed") {
@@ -132,7 +150,7 @@ export async function POST(request: NextRequest, { params }: Params) {
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
             { session: dbSession }
           );
-        } else if (outcome === "done") {
+        } else {
           await User.findByIdAndUpdate(tx.userId, { walletLocked: false }, { session: dbSession });
         }
       });
@@ -140,11 +158,14 @@ export async function POST(request: NextRequest, { params }: Params) {
       await dbSession.endSession();
     }
 
-    // Re-fetch for notifications
-    const tx = await Transaction.findById(finalTxId || (await ExecutionJob.findById(jobId).lean())?.txId).lean();
+    if (!resolvedHere) {
+      return NextResponse.json({ success: true, alreadyResolved: true });
+    }
+
+    const tx = await Transaction.findById(finalTxId).lean();
 
     await writeLog({
-      action: outcome === "done" ? "TX_COMPLETED" : outcome === "failed" ? "TX_FAILED" : "TX_WAITING",
+      action: outcome === "done" ? "TX_COMPLETED" : "TX_FAILED",
       entityId: finalTxId,
       severity: outcome === "done" ? "info" : "warn",
       meta: { jobId, rawSms, outcome, failureReason },
@@ -154,10 +175,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (tx) {
         if (outcome === "done") {
           await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");
-        } else if (outcome === "failed") {
-          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         } else {
-          await notifyTransactionWaiting(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
+          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         }
       }
     } catch { /* non-critical */ }

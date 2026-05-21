@@ -1,6 +1,6 @@
 import Service from "@/lib/db/models/Service";
 
-export type TemplateOutcome = "done" | "failed" | "waiting";
+export type TemplateOutcome = "done" | "failed";
 
 export interface SmsTemplateResult {
   outcome: TemplateOutcome;
@@ -109,9 +109,9 @@ export async function loadFailureTemplates(
  * Evaluate an incoming SMS against the configured success and failure templates.
  *
  * Returns:
- *   done    → SMS matched success template  (job complete)
- *   failed  → SMS matched a failure template (job failed, refund wallet)
- *   waiting → SMS didn't match anything     (manual admin review)
+ *   done    → SMS matched success template (job complete)
+ *   failed  → either SMS matched a failure template (specific reason), or
+ *             nothing matched (generic reason). Caller always refunds on failed.
  *
  * `recipientNumber` and `amount` are accepted for call-site compatibility but
  * are NOT used for matching — the templates are format-based and work for any
@@ -136,10 +136,11 @@ export function evaluateSmsAgainstTemplates(args: {
     const { txRef, balance, smsAmount, smsRecipient } = successMatch.groups ?? {};
 
     // If template requires a transaction ID but regex couldn't capture one,
-    // send to waiting — the SMS structure is unexpected.
+    // treat the transaction as failed — the SMS structure is unexpected and we
+    // can't confidently confirm success without the txRef.
     if (successSmsFormat.includes("{trxId}") && !txRef) {
-      const reason = "Success template matched but transaction ID could not be extracted.";
-      return { outcome: "waiting", parsedResult: { success: false, reason }, failureReason: reason };
+      const reason = "Transaction could not be confirmed.";
+      return { outcome: "failed", parsedResult: { success: false, reason }, failureReason: reason };
     }
 
     if (txRef)        parsedResult.txRef        = txRef;
@@ -163,6 +164,7 @@ export function evaluateSmsAgainstTemplates(args: {
     }
   }
 
-  const reason = "SMS/USSD response did not match any configured success or failure template.";
-  return { outcome: "waiting", parsedResult: { success: false, reason }, failureReason: reason };
+  // Nothing matched — treat as a generic failure. Caller refunds the wallet.
+  const reason = "Transaction could not be confirmed.";
+  return { outcome: "failed", parsedResult: { success: false, reason }, failureReason: reason };
 }

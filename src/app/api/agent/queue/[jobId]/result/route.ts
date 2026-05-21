@@ -6,19 +6,30 @@ import User from "@/lib/db/models/User";
 import Service from "@/lib/db/models/Service";
 import AgentDevice from "@/lib/db/models/AgentDevice";
 import { writeLog } from "@/lib/db/audit";
-import { notifyTransactionCompleted, notifyTransactionFailed, notifyTransactionWaiting } from "@/lib/notifications";
+import { notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
 import { evaluateSmsAgainstTemplates, loadFailureTemplates, loadSuccessFormat } from "@/lib/sms-template";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ jobId: string }> };
 
-// Maximum infra-failure retries before escalating to "waiting"
-const MAX_INFRA_RETRIES = 5;
+type FinalOutcome = "done" | "failed";
 
-type FinalJobOutcome = "done" | "failed" | "waiting" | "queued";
+const REASON_NETWORK_BUSY = "Network busy, please try again.";
+const REASON_INFRA        = "Could not execute. Please try again.";
+const REASON_UNCONFIRMED  = "Transaction could not be confirmed.";
 
 // POST /api/agent/queue/[jobId]/result
+//
+// Only two terminal outcomes:
+//   done   → tx complete, wallet stays debited, txRef + captured fields stored
+//   failed → tx failed, wallet refunded, reason shown to user
+//
+// Failure reason precedence:
+//   1. Matched failure-template message (specific provider error)
+//   2. Generic "could not confirm" when response present but unmatched
+//   3. "Network busy" when USSD ran but no response/SMS came back
+//   4. Infra reason when the agent couldn't dial at all
 export async function POST(request: NextRequest, { params }: Params) {
   try {
     const agentSession = await extractAgentSession(request);
@@ -41,13 +52,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     } = body;
 
     await connectDB();
-
     const dbSession = await mongoose.startSession();
 
-    // Extract USSD dialog text:
-    //   1. Prefer the explicit ussdResponse field from the agent
-    //   2. Fall back to the last "response" step in ussdStepsExecuted
-    //   3. Final fallback: if rawSmsSource === "ussd", rawSms holds the dialog text
+    // ── Extract response text from agent payload ─────────────────────────────
+    // Prefer the explicit ussdResponse field; fall back to the last "response"
+    // step in ussdStepsExecuted; final fallback is rawSms when source=="ussd".
     const extractUssdResponse = (): string => {
       if (typeof bodyUssdResponse === "string" && bodyUssdResponse.trim()) {
         return bodyUssdResponse.trim();
@@ -67,28 +76,18 @@ export async function POST(request: NextRequest, { params }: Params) {
     };
 
     const ussdResponseText = extractUssdResponse();
-    // smsBody is only what came over SMS — never the USSD dialog
     const smsBodyText =
       rawSmsSource === "sms" && typeof rawSms === "string" && rawSms.trim()
         ? rawSms.trim()
         : "";
 
-    // Determine whether USSD steps actually ran on the device
     const stepsRan = Array.isArray(ussdStepsExecuted) && ussdStepsExecuted.length > 0;
     const hasAnyResponse = ussdResponseText.length > 0 || smsBodyText.length > 0;
 
-    // Infrastructure failure: agent couldn't even dial USSD.
-    // Detection: no steps ran AND no response captured AND agent reported failure.
-    const isInfraFailure =
-      !hasAnyResponse &&
-      !stepsRan &&
-      clientResult?.success === false;
-
-    let outcome: FinalJobOutcome = "waiting";
+    let outcome = "failed" as FinalOutcome;
     let isSuccess = false;
     let failureReason: string | undefined;
     let finalParsedResult: { success: boolean; [key: string]: unknown } = { success: false };
-    let requeuedDueToInfra = false;
     let alreadyResolved = false;
     const responseSource = rawSmsSource === "sms" ? "sms" : "ussd";
     const smsReceivedAtDate =
@@ -106,7 +105,12 @@ export async function POST(request: NextRequest, { params }: Params) {
         if (!tx) throw new Error("Transaction not found");
         if (job.txId !== tx._id) throw new Error("Job and transaction do not match");
         const assignedServices: string[] = agentSession.device.assignedServices ?? [];
-        if (!assignedServices.includes(job.serviceId)) throw new Error("Device is not assigned to this service");
+        if (!assignedServices.includes(job.serviceId)) {
+          throw new Error("Device is not assigned to this service");
+        }
+
+        // Duplicate-result: this job is already resolved (any prior state).
+        // Just release the device and return — never reprocess wallets.
         if (!["processing", "waiting"].includes(job.status)) {
           alreadyResolved = ["done", "failed", "cancelled"].includes(job.status);
           if (alreadyResolved) {
@@ -119,131 +123,76 @@ export async function POST(request: NextRequest, { params }: Params) {
           }
           throw new Error(`Cannot report result for job with status "${job.status}"`);
         }
-        if (job.lockedByDevice !== agentSession.deviceId) throw new Error("Job is not locked by this device");
+        if (job.lockedByDevice !== agentSession.deviceId) {
+          throw new Error("Job is not locked by this device");
+        }
 
-        // ── Infrastructure failure: requeue or escalate ──────────────────────────
-        // When the agent app lost connectivity / accessibility, we should NOT
-        // refund the user. Instead put the job back in queue for the next agent
-        // tick. After MAX_INFRA_RETRIES we escalate to "waiting" for manual review.
-        if (isInfraFailure) {
-          // Always log the infra attempt so admin can see what happened
-          const infraLogEntry = {
-            attempt: job.attempt,
-            ussdResponse: rawSms ?? "",
-            outcome: job.attempt < MAX_INFRA_RETRIES ? "queued" : "waiting",
-            failureReason: clientResult?.reason || "Agent could not execute USSD (system/permission error)",
-            deviceId: agentSession.deviceId,
-            stepsExecuted: ussdStepsExecuted || [],
-            executedAt: new Date(),
-          };
+        // ── Determine outcome ────────────────────────────────────────────────
+        let evaluatedSource: "ussd" | "sms" | null = null;
 
-          if (job.attempt < MAX_INFRA_RETRIES) {
-            // Requeue for retry
-            job.status = "queued";
-            job.locked = false;
-            (job as any).lockedAt = undefined;
-            (job as any).lockedByDevice = undefined;
-            (job as any).lockedByUser = undefined;
-            // Persist whatever we captured so admin can inspect retries
-            if (ussdResponseText) (job as any).ussdResponse = ussdResponseText;
-            if (smsBodyText) job.rawSms = smsBodyText;
-            if (!job.executionLogs) (job as any).executionLogs = [];
-            (job as any).executionLogs.push(infraLogEntry);
-            await job.save({ session: dbSession });
+        if (hasAnyResponse) {
+          const [successSmsFormat, failureTemplates] = await Promise.all([
+            loadSuccessFormat(job),
+            loadFailureTemplates(job),
+          ]);
 
-            // Release device
-            await AgentDevice.findByIdAndUpdate(
-              agentSession.deviceId,
-              { currentJob: null, lastHeartbeat: new Date(), status: "online" },
-              { session: dbSession }
-            );
-
-            requeuedDueToInfra = true;
-            return; // exit transaction — job is requeued, no wallet changes
+          let result =
+            ussdResponseText.length > 0
+              ? evaluateSmsAgainstTemplates({
+                  rawSms: ussdResponseText,
+                  recipientNumber: job.recipientNumber,
+                  amount: job.amount,
+                  successSmsFormat,
+                  failureSmsTemplates: failureTemplates,
+                })
+              : null;
+          if (result?.outcome === "done" || result?.outcome === "failed") {
+            evaluatedSource = "ussd";
           }
 
-          // Too many infra failures — escalate to waiting for manual review
-          outcome = "waiting";
+          if ((!result || result.outcome !== "done") && smsBodyText.length > 0) {
+            const smsResult = evaluateSmsAgainstTemplates({
+              rawSms: smsBodyText,
+              recipientNumber: job.recipientNumber,
+              amount: job.amount,
+              successSmsFormat,
+              failureSmsTemplates: failureTemplates,
+            });
+            // SMS wins when it confirms success the USSD couldn't, OR when USSD
+            // gave a generic failure but SMS gives a specific provider reason.
+            if (smsResult.outcome === "done" || !result) {
+              result = smsResult;
+              evaluatedSource = "sms";
+            }
+          }
+
+          // evaluateSmsAgainstTemplates always returns done/failed now
+          outcome = result!.outcome;
+          isSuccess = outcome === "done";
+          failureReason = isSuccess ? undefined : result!.failureReason;
+          finalParsedResult = {
+            ...result!.parsedResult,
+            ...(evaluatedSource ? { matchSource: evaluatedSource } : {}),
+          };
+        } else if (stepsRan) {
+          // USSD steps ran but nothing came back — operator/network issue.
+          outcome = "failed";
           isSuccess = false;
-          failureReason = `Agent could not execute the job after ${job.attempt} attempt(s). Manual review required.`;
+          failureReason = REASON_NETWORK_BUSY;
+          finalParsedResult = { success: false, reason: failureReason };
+        } else {
+          // Agent couldn't even dial. No retries — refund immediately.
+          outcome = "failed";
+          isSuccess = false;
+          failureReason = clientResult?.reason
+            ? `${REASON_INFRA} (${clientResult.reason})`
+            : REASON_INFRA;
           finalParsedResult = { success: false, reason: failureReason };
         }
 
-        // ── Template-based outcome determination ─────────────────────────────────
-        // Evaluate templates against BOTH the USSD dialog text and the SMS body.
-        // Either input can confirm/fail the job — we try USSD first (immediate
-        // confirmation), then SMS (async confirmation for SMS-only services).
-        if (!requeuedDueToInfra && !isInfraFailure) {
-          if (hasAnyResponse) {
-            const [successSmsFormat, failureTemplates] = await Promise.all([
-              loadSuccessFormat(job),
-              loadFailureTemplates(job),
-            ]);
-
-            // Try USSD dialog text first
-            let evaluatedSource: "ussd" | "sms" | null = null;
-            let result =
-              ussdResponseText.length > 0
-                ? evaluateSmsAgainstTemplates({
-                    rawSms: ussdResponseText,
-                    recipientNumber: job.recipientNumber,
-                    amount: job.amount,
-                    successSmsFormat,
-                    failureSmsTemplates: failureTemplates,
-                  })
-                : null;
-            if (result && result.outcome !== "waiting") {
-              evaluatedSource = "ussd";
-            }
-
-            // If USSD didn't conclusively match, try the SMS body
-            if ((!result || result.outcome === "waiting") && smsBodyText.length > 0) {
-              const smsResult = evaluateSmsAgainstTemplates({
-                rawSms: smsBodyText,
-                recipientNumber: job.recipientNumber,
-                amount: job.amount,
-                successSmsFormat,
-                failureSmsTemplates: failureTemplates,
-              });
-              if (smsResult.outcome !== "waiting" || !result) {
-                result = smsResult;
-                if (smsResult.outcome !== "waiting") evaluatedSource = "sms";
-              }
-            }
-
-            if (!result) {
-              // Shouldn't happen because hasAnyResponse is true, but be safe.
-              result = {
-                outcome: "waiting",
-                parsedResult: { success: false, reason: "No response to evaluate" },
-                failureReason: "No response to evaluate",
-              };
-            }
-
-            outcome = result.outcome;
-            isSuccess = result.outcome === "done";
-            failureReason = result.failureReason;
-            finalParsedResult = {
-              ...result.parsedResult,
-              ...(evaluatedSource ? { matchSource: evaluatedSource } : {}),
-            };
-          } else {
-            // USSD steps ran but nothing captured. Manual review required.
-            outcome = "waiting";
-            isSuccess = false;
-            failureReason = stepsRan
-              ? "USSD steps executed but no response dialog text or SMS was captured."
-              : "No USSD response received and no steps executed.";
-            finalParsedResult = { success: false, reason: failureReason };
-          }
-        }
-
-        if (requeuedDueToInfra) return; // already saved above
-
-        // ── Persist final outcome ────────────────────────────────────────────────
+        // ── Persist outcome on job ──────────────────────────────────────────
         job.status = outcome;
         job.locked = false;
-        // Store dialog text and SMS body separately so admin can see both.
         (job as any).ussdResponse = ussdResponseText;
         job.rawSms = smsBodyText;
         if (typeof smsSenderNumber === "string" && smsSenderNumber.trim()) {
@@ -253,20 +202,22 @@ export async function POST(request: NextRequest, { params }: Params) {
           (job as any).smsReceivedAt = smsReceivedAtDate;
         }
         job.parsedResult = finalParsedResult;
-        job.ussdStepsExecuted = ussdStepsExecuted || [];   // latest attempt steps
-        job.completedAt = outcome === "waiting" ? undefined : new Date();
+        job.ussdStepsExecuted = ussdStepsExecuted || [];
+        job.completedAt = new Date();
 
-        // Append this attempt to the execution log so admins can see full history
         const logEntry = {
           attempt: job.attempt,
           ussdResponse: ussdResponseText,
           smsBody: smsBodyText,
           outcome: outcome as string,
-          failureReason: failureReason,
+          failureReason,
           deviceId: agentSession.deviceId,
           responseSource,
           senderNumber: typeof smsSenderNumber === "string" ? smsSenderNumber : undefined,
-          smsReceivedAt: smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime()) ? smsReceivedAtDate : undefined,
+          smsReceivedAt:
+            smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime())
+              ? smsReceivedAtDate
+              : undefined,
           stepsExecuted: ussdStepsExecuted || [],
           executedAt: new Date(),
         };
@@ -275,29 +226,46 @@ export async function POST(request: NextRequest, { params }: Params) {
 
         await job.save({ session: dbSession });
 
-        // Map job outcome → transaction status
-        const txStatus = outcome === "done" ? "complete"
-                       : outcome === "failed" ? "failed"
-                       : "waiting";
-        tx.status = txStatus;
-        if (outcome !== "done" && failureReason) (tx as any).failureReason = failureReason;
-        if (outcome !== "waiting") tx.completedAt = new Date();
+        // ── Persist on transaction ──────────────────────────────────────────
+        tx.status = outcome === "done" ? "complete" : "failed";
+        if (outcome === "failed" && failureReason) {
+          (tx as any).failureReason = failureReason;
+        } else {
+          (tx as any).failureReason = undefined;
+        }
+        tx.completedAt = new Date();
+
+        // Capture txRef + extracted fields onto the transaction for success
+        if (outcome === "done") {
+          const pr = finalParsedResult as {
+            txRef?: string;
+            balance?: string;
+            smsAmount?: string;
+            smsRecipient?: string;
+          };
+          if (pr.txRef)        (tx as any).providerTxId   = pr.txRef;
+          if (pr.balance)      (tx as any).providerBalance = pr.balance;
+          if (pr.smsAmount)    (tx as any).providerAmount  = pr.smsAmount;
+          if (pr.smsRecipient) (tx as any).providerRecipient = pr.smsRecipient;
+        }
         await tx.save({ session: dbSession });
 
-        // Wallet:
-        //   done    → just unlock (money spent, service delivered)
-        //   failed  → unlock + full refund
-        //   waiting → keep locked (manual admin decision pending)
+        // ── Wallet ──────────────────────────────────────────────────────────
+        //   done   → unlock (money spent)
+        //   failed → unlock + refund
         if (outcome === "failed") {
           await User.findByIdAndUpdate(
             tx.userId,
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
             { session: dbSession }
           );
-        } else if (outcome === "done") {
-          await User.findByIdAndUpdate(tx.userId, { walletLocked: false }, { session: dbSession });
+        } else {
+          await User.findByIdAndUpdate(
+            tx.userId,
+            { walletLocked: false },
+            { session: dbSession }
+          );
         }
-        // "waiting" → wallet stays locked until admin resolves
 
         await AgentDevice.findByIdAndUpdate(
           agentSession.deviceId,
@@ -313,22 +281,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ success: true, alreadyResolved: true });
     }
 
-    // Short-circuit: job was requeued, no notifications needed
-    if (requeuedDueToInfra) {
-      await writeLog({
-        action: "JOB_REQUEUED",
-        entityId: jobId,
-        severity: "info",
-        meta: {
-          jobId,
-          deviceId: agentSession.deviceId,
-          reason: "Infrastructure failure — requeued for retry",
-        },
-      });
-      return NextResponse.json({ success: true, requeued: true });
-    }
-
-    // ── Audit log ──────────────────────────────────────────────────────────────
+    // ── Audit + notify ─────────────────────────────────────────────────────────
     const tx = await Transaction.findById(txId).lean();
     const service = tx?.serviceId ? await Service.findById(tx.serviceId).lean() : null;
     const serviceName =
@@ -349,16 +302,10 @@ export async function POST(request: NextRequest, { params }: Params) {
             ? Number(agentAmount)
             : undefined;
 
-    const finalOutcome = outcome as string;
-    const logAction =
-      finalOutcome === "done" ? "TX_COMPLETED"
-      : finalOutcome === "failed" ? "TX_FAILED"
-      : "TX_WAITING";
-
     await writeLog({
-      action: logAction,
+      action: outcome === "done" ? "TX_COMPLETED" : "TX_FAILED",
       entityId: txId,
-      severity: finalOutcome === "done" ? "info" : "warn",
+      severity: outcome === "done" ? "info" : "warn",
       meta: {
         jobId,
         serviceId: tx?.serviceId,
@@ -371,15 +318,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       },
     });
 
-    // ── User notifications ─────────────────────────────────────────────────────
     try {
       if (tx) {
-        if (finalOutcome === "done") {
+        if (outcome === "done") {
           await notifyTransactionCompleted(tx.userId, tx.amount, tx.recipientNumber ?? "");
-        } else if (finalOutcome === "failed") {
-          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         } else {
-          await notifyTransactionWaiting(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
+          await notifyTransactionFailed(tx.userId, tx.amount, tx.recipientNumber ?? "", failureReason);
         }
       }
     } catch { /* non-critical */ }
