@@ -14,6 +14,11 @@ export interface ITransaction extends Document<string> {
   status: TxStatus;
   note?: string;
   failureReason?: string;   // user-facing failure reason from matched SMS template
+  // Captured from the provider's success SMS / USSD response on completion
+  providerTxId?: string;       // operator-side transaction reference (e.g. bKash TrxID)
+  providerBalance?: string;    // remaining agent balance reported by provider
+  providerAmount?: string;     // amount as reported in provider SMS
+  providerRecipient?: string;  // recipient (often masked) as reported in provider SMS
   adminId?: string;
   createdAt: Date;
   completedAt?: Date;
@@ -35,6 +40,10 @@ const TransactionSchema = new Schema<ITransaction>(
     },
     note: { type: String },
     failureReason: { type: String },
+    providerTxId: { type: String },
+    providerBalance: { type: String },
+    providerAmount: { type: String },
+    providerRecipient: { type: String },
     adminId: { type: String },
     completedAt: { type: Date },
   },
