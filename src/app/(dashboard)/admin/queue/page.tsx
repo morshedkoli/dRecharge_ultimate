@@ -138,10 +138,7 @@ function QueueCard({ job, refetch }: { job: ExecutionJob; refetch: () => void })
 
           {/* USSD Response Preview (for waiting/processing jobs that have a response) */}
           {(() => {
-            const latestLog = job.executionLogs && job.executionLogs.length > 0
-              ? [...job.executionLogs].reverse()[0]
-              : null;
-            const ussdText = latestLog?.ussdResponse || job.rawSms || "";
+            const ussdText = (job as any).ussdResponse || job.rawSms || "";
             if (!ussdText.trim()) return null;
             const isWaiting = job.status === "waiting";
             return (

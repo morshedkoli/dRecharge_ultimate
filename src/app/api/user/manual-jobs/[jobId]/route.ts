@@ -94,17 +94,6 @@ export async function POST(request: NextRequest, { params }: Params) {
         if (!isSuccess && rawSms) job.rawSms = String(rawSms);
         job.parsedResult = parsedResult;
         job.completedAt = new Date();
-        if (!job.executionLogs) (job as any).executionLogs = [];
-        (job as any).executionLogs.push({
-          attempt: job.attempt,
-          ussdResponse: isSuccess ? (job.rawSms || rawSms || "") : (rawSms || job.rawSms || ""),
-          outcome: isSuccess ? "done" : "failed",
-          failureReason: isSuccess ? undefined : (reason || "Manually marked as failed"),
-          deviceId: session.sub,
-          responseSource: "sms",
-          stepsExecuted: job.ussdStepsExecuted || [],
-          executedAt: new Date(),
-        });
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";

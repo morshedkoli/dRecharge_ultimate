@@ -1,6 +1,6 @@
 "use client";
 import { use, useEffect, useState } from "react";
-import { ExecutionJob, ExecutionLog } from "@/types";
+import { ExecutionJob } from "@/types";
 import { StatusBadge } from "@/components/admin/StatusBadge";
 import { WalletAmount } from "@/components/admin/WalletAmount";
 import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
@@ -72,27 +72,6 @@ const stepTypeStyle: Record<string, string> = {
   input:    "bg-violet-50 text-violet-700 border border-violet-100",
   response: "bg-emerald-50 text-emerald-700 border border-emerald-100",
 };
-
-// ── Outcome pill for execution log entries ─────────────────────────────
-
-function OutcomePill({ outcome }: { outcome: string }) {
-  const styles: Record<string, { cls: string; label: string }> = {
-    done:    { cls: "bg-[#E8F1EE] text-[#134235] border border-[#134235]/10", label: "Success" },
-    failed:  { cls: "bg-red-50 text-red-700 border border-red-100", label: "Failed" },
-    waiting: { cls: "bg-amber-50 text-amber-700 border border-amber-100", label: "Waiting" },
-    queued:  { cls: "bg-blue-50 text-blue-700 border border-blue-100", label: "Requeued" },
-  };
-  const s = styles[outcome] ?? { cls: "bg-surface-container text-on-surface-variant", label: outcome };
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold font-manrope ${s.cls}`}>
-      {outcome === "done"    && <CheckCircle    className="w-3 h-3" />}
-      {outcome === "failed"  && <XCircle        className="w-3 h-3" />}
-      {outcome === "waiting" && <AlertTriangle  className="w-3 h-3" />}
-      {outcome === "queued"  && <RefreshCw      className="w-3 h-3" />}
-      {s.label}
-    </span>
-  );
-}
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
@@ -247,12 +226,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
       {/* ── Failure reason banner (prominent for failed/cancelled jobs) ──── */}
       {(isFailed || isCancelled) && (() => {
-        const latestLog = job.executionLogs && job.executionLogs.length > 0
-          ? [...job.executionLogs].reverse()[0]
-          : null;
         const reason =
           (job.parsedResult as { reason?: string } | undefined)?.reason ||
-          latestLog?.failureReason ||
           (isCancelled ? "Job cancelled by admin." : "Transaction could not be confirmed.");
         return (
           <div className="bg-red-50/60 border-2 border-red-200/80 rounded-2xl px-5 py-4 flex items-start gap-3 premium-shadow">
@@ -396,16 +371,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
       {/* ── USSD Response (Phone Dialog Preview) ─────────────────────────── */}
       {(() => {
-        // Prefer the dedicated ussdResponse field, then the latest log,
-        // then fall back to job.rawSms for legacy data.
-        const latestLog = job.executionLogs && job.executionLogs.length > 0
-          ? [...job.executionLogs].reverse()[0]
-          : null;
-        const ussdText =
-          (job as any).ussdResponse ||
-          latestLog?.ussdResponse ||
-          (!latestLog?.smsBody ? job.rawSms : "") ||
-          "";
+        const ussdText = (job as any).ussdResponse || job.rawSms || "";
         if (!ussdText.trim()) return null;
 
         // Detect success/failure from parsedResult or status
@@ -442,7 +408,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
               <div className="ml-auto flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 text-on-surface-variant/40" />
                 <span className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-on-surface-variant/40 font-manrope">
-                  {latestLog?.deviceId ? latestLog.deviceId.slice(-8) : "Device"}
+                  {job.lockedByDevice ? job.lockedByDevice.slice(-8) : "Device"}
                 </span>
               </div>
             </div>
@@ -519,19 +485,13 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
 
       {/* ── Matched SMS ──────────────────────────────────────────────────── */}
       {(() => {
-        const latestLog = job.executionLogs && job.executionLogs.length > 0
-          ? [...job.executionLogs].reverse()[0]
-          : null;
         const smsText =
-          latestLog?.smsBody ||
-          // Legacy: rawSms was used as the matched evidence; if responseSource is "sms" or matchSource is "sms", show it here
-          (latestLog?.responseSource === "sms" || job.parsedResult?.matchSource === "sms"
-            ? job.rawSms
-            : "") ||
-          "";
+          job.parsedResult?.matchSource === "sms"
+            ? (job.rawSms || "")
+            : "";
         if (!smsText.trim()) return null;
 
-        const sender = (job as any).smsSenderNumber || latestLog?.senderNumber || "";
+        const sender = (job as any).smsSenderNumber || "";
         const isSuccess = job.parsedResult?.success === true || job.status === "done";
         const isFailed  = job.status === "failed" || (job.parsedResult?.success === false && job.status !== "waiting");
 
@@ -566,141 +526,6 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
         );
       })()}
 
-      {/* ── Execution History ─────────────────────────────────────────────── */}
-      {job.executionLogs && job.executionLogs.length > 0 ? (
-        <Card title={`Execution History (${job.executionLogs.length} attempt${job.executionLogs.length !== 1 ? "s" : ""})`} icon={Terminal} iconBg="bg-violet-50">
-          <div className="py-1">
-            {[...job.executionLogs].reverse().map((log: ExecutionLog, idx: number) => (
-              <div key={idx} className="py-4 border-b border-black/[0.04] last:border-0">
-
-                {/* Header row */}
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  <div className="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center shrink-0">
-                    <span className="text-[10px] font-extrabold font-manrope text-on-surface-variant">#{log.attempt}</span>
-                  </div>
-                  <OutcomePill outcome={log.outcome} />
-                  {log.deviceId && (
-                    <span className="font-mono text-[10px] text-on-surface-variant/50 bg-surface-container px-2 py-0.5 rounded-md truncate max-w-[140px]">
-                      {log.deviceId}
-                    </span>
-                  )}
-                  <span className="ml-auto text-[10px] text-on-surface-variant/40 font-manrope shrink-0">
-                    {fullDateTime(log.executedAt)}
-                  </span>
-                </div>
-
-                {/* USSD response */}
-                <div className="mb-3">
-                  <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/40 font-manrope mb-1.5">USSD Response</p>
-                  {log.ussdResponse ? (
-                    <pre className="bg-surface-container/60 border border-black/[0.04] rounded-xl px-4 py-3 text-xs font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed">
-                      {log.ussdResponse}
-                    </pre>
-                  ) : (
-                    <pre className="bg-surface-container/30 border border-dashed border-black/[0.06] rounded-xl px-4 py-2.5 text-[11px] font-mono text-on-surface-variant/40 italic">
-                      (no response text captured)
-                    </pre>
-                  )}
-                </div>
-
-                {/* Matched SMS body (when present) */}
-                {log.smsBody && (
-                  <div className="mb-3">
-                    <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/40 font-manrope mb-1.5 flex items-center gap-1.5">
-                      <MessageSquare className="w-2.5 h-2.5" />
-                      SMS Received
-                      {log.senderNumber && (
-                        <span className="font-mono text-[10px] text-on-surface-variant/60 normal-case tracking-normal">from {log.senderNumber}</span>
-                      )}
-                    </p>
-                    <pre className="bg-blue-50/40 border border-blue-100/60 rounded-xl px-4 py-3 text-xs font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed">
-                      {log.smsBody}
-                    </pre>
-                  </div>
-                )}
-
-                {/* Failure/waiting reason */}
-                {log.failureReason && (
-                  <div className="flex items-start gap-2 px-3 py-2 bg-amber-50/60 border border-amber-100/60 rounded-lg mb-3">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                    <p className="text-[11px] text-amber-800 font-manrope leading-snug">{log.failureReason}</p>
-                  </div>
-                )}
-
-                {/* Collapsible steps */}
-                {log.stepsExecuted && log.stepsExecuted.length > 0 && (
-                  <details className="group">
-                    <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-[0.15em] text-on-surface-variant/40 font-manrope hover:text-on-surface-variant transition-colors">
-                      <Cpu className="w-3 h-3" />
-                      {log.stepsExecuted.length} step{log.stepsExecuted.length !== 1 ? "s" : ""} executed
-                      <span className="ml-1 text-[8px] group-open:rotate-90 transition-transform inline-block">▶</span>
-                    </summary>
-                    <div className="mt-2 space-y-1">
-                      {(log.stepsExecuted as any[]).map((step: any, sIdx: number) => (
-                        <div key={sIdx} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-surface-container/40">
-                          <span className="w-5 h-5 rounded-full bg-white border border-black/5 flex items-center justify-center text-[9px] font-extrabold font-manrope text-on-surface-variant shrink-0">
-                            {step.order ?? sIdx + 1}
-                          </span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold shrink-0 ${stepTypeStyle[step.type] ?? "bg-surface-container text-on-surface-variant"}`}>
-                            {step.type}
-                          </span>
-                          <span className="font-mono text-xs text-on-surface truncate flex-1">{step.value}</span>
-                          {step.success
-                            ? <CheckCircle className="w-3 h-3 text-[#134235] shrink-0" />
-                            : <XCircle    className="w-3 h-3 text-red-400 shrink-0" />
-                          }
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : (job.rawSms || job.parsedResult) && (
-        /* Fallback for older jobs that pre-date executionLogs */
-        <Card title="Execution Result" icon={MessageSquare} iconBg="bg-violet-50">
-          {job.rawSms && (
-            <div className="py-3 border-b border-black/[0.04]">
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-on-surface-variant/60 font-manrope mb-2">Raw USSD Response</p>
-              <pre className="bg-surface-container/50 border border-black/[0.04] rounded-xl px-4 py-3.5 text-xs font-mono text-on-surface whitespace-pre-wrap break-all leading-relaxed">
-                {job.rawSms}
-              </pre>
-            </div>
-          )}
-          {job.parsedResult && (
-            <div className="py-2">
-              <div className={`flex items-center gap-3 px-4 py-3 rounded-xl mt-2 mb-4 ${
-                job.status === "waiting" ? "bg-amber-50 border border-amber-100"
-                : job.parsedResult.success ? "bg-[#E8F1EE] border border-[#134235]/10"
-                : "bg-red-50 border border-red-100"
-              }`}>
-                {job.status === "waiting" ? <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                  : job.parsedResult.success ? <CheckCircle className="w-5 h-5 text-[#134235] shrink-0" />
-                  : <XCircle className="w-5 h-5 text-red-600 shrink-0" />}
-                <span className={`font-manrope font-bold text-sm ${
-                  job.status === "waiting" ? "text-amber-700"
-                  : job.parsedResult.success ? "text-[#134235]" : "text-red-700"
-                }`}>
-                  {job.status === "waiting" ? "Waiting For Manual Review"
-                    : job.parsedResult.success ? "Transaction Confirmed" : "Transaction Failed"}
-                </span>
-              </div>
-              {job.parsedResult.txRef && (
-                <Field icon={Hash} label="Transaction Ref" value={<span className="font-mono text-xs">{job.parsedResult.txRef}</span>} />
-              )}
-              {job.parsedResult.reason && (
-                <Field icon={AlertTriangle}
-                  label={job.status === "waiting" ? "Waiting Reason" : "Failure Reason"}
-                  value={<span className={job.status === "waiting" ? "text-amber-700" : "text-red-600"}>{job.parsedResult.reason}</span>}
-                />
-              )}
-            </div>
-          )}
-        </Card>
-      )}
     </div>
   );
 }

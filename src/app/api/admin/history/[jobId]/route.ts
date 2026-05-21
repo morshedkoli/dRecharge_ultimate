@@ -57,16 +57,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         job.status = "cancelled";
         job.locked = false;
         job.completedAt = new Date();
-        if (!job.executionLogs) (job as any).executionLogs = [];
-        (job as any).executionLogs.push({
-          attempt: job.attempt,
-          ussdResponse: job.rawSms || "",
-          outcome: "cancelled",
-          failureReason: reason || "Admin cancelled",
-          deviceId: session.sub,
-          stepsExecuted: job.ussdStepsExecuted || [],
-          executedAt: new Date(),
-        });
+        job.parsedResult = {
+          success: false,
+          reason: reason || "Admin cancelled",
+        };
         await job.save({ session: dbSession });
 
         tx.status = "failed";
@@ -158,18 +152,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         if (!isSuccess && rawSms) job.rawSms = String(rawSms);
         job.parsedResult = parsedResult;
         job.completedAt = new Date();
-        if (!job.executionLogs) (job as any).executionLogs = [];
-        (job as any).executionLogs.push({
-          attempt: job.attempt,
-          ussdResponse: isSuccess ? (job.rawSms || rawSms || note || "") : (rawSms || job.rawSms || ""),
-          outcome: isSuccess ? "done" : "failed",
-          failureReason: isSuccess ? undefined : failureReason,
-          deviceId: session.sub,
-          responseSource: "sms",
-          senderNumber: senderNumber || undefined,
-          stepsExecuted: job.ussdStepsExecuted || [],
-          executedAt: new Date(),
-        });
         await job.save({ session: dbSession });
 
         tx.status = isSuccess ? "complete" : "failed";
