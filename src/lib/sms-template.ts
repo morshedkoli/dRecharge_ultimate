@@ -151,20 +151,14 @@ export function evaluateSmsAgainstTemplates(args: {
     return { outcome: "done", parsedResult };
   }
 
-  // Check each failure template — use permissive matching so SMS bodies
-  // that don't include amount/trxId still match (failure SMSes rarely do).
-  for (const tmpl of args.failureSmsTemplates ?? []) {
-    const failureRegex = buildPermissiveTemplateRegex(tmpl.template);
-    if (failureRegex?.test(rawSms)) {
-      return {
-        outcome: "failed",
-        parsedResult: { success: false, reason: tmpl.message },
-        failureReason: tmpl.message,
-      };
-    }
-  }
-
-  // Nothing matched — treat as a generic failure. Caller refunds the wallet.
-  const reason = "Transaction could not be confirmed.";
-  return { outcome: "failed", parsedResult: { success: false, reason }, failureReason: reason };
+  // Failure path. Whether or not a configured failure template matches, the
+  // user-facing reason is the operator's verbatim response text — that's the
+  // most diagnostic message for both the user and the admin. Template
+  // matching is no longer surfaced; the `message` field on the failure
+  // templates is kept in the DB but ignored at runtime.
+  return {
+    outcome: "failed",
+    parsedResult: { success: false, reason: rawSms },
+    failureReason: rawSms,
+  };
 }
