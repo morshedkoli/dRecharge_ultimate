@@ -231,7 +231,7 @@ object UssdAutomationManager {
         val root = service.rootInActiveWindow ?: event.source ?: return
 
         // ── SIM picker auto-dismiss ───────────────────────────────────────────────
-        if (findFirstNodeByClass(root, "android.widget.EditText") == null) {
+        if (!isInputPrompt(root)) {
             val simButton = findSimButton(root, activeSession.simSlot)
             if (simButton != null) {
                 simButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -248,25 +248,25 @@ object UssdAutomationManager {
         activeSession.lastSignature = signature
 
         // Only cache the dialog as a possible "final response" when it looks
-        // like a result screen — i.e. the OS USSD dialog has NO input field.
-        // Intermediate prompts (Enter PIN, Enter amount, etc.) always have an
-        // EditText and a Send button, and we should never report those as the
+        // like a result screen — not an input prompt. Intermediate prompts
+        // (Enter PIN, Enter amount, etc.) always have an editable field and a
+        // Cancel/Send button pair, and we should never report those as the
         // USSD response.
-        val hasInputField = findFirstNodeByClass(root, "android.widget.EditText") != null
-        if (signature.isNotEmpty() && !hasInputField) {
+        val isPrompt = isInputPrompt(root)
+        if (signature.isNotEmpty() && !isPrompt) {
             activeSession.lastDialogText = signature
         }
 
         if (activeSession.nextStepIndex >= activeSession.flowSegments.size) {
-            // All inputs sent — the next dialog that has NO input field is the
-            // real result. Ignore any transient re-display of the input prompt
-            // so we don't mis-record "Enter Menu PIN…" as the response; keep
-            // listening for events until the real result fires or the final
-            // timeout closes the session.
-            if (!hasInputField) {
+            // All inputs sent — the next dialog that is NOT an input prompt is
+            // the real result. Ignore any transient re-display of the input
+            // prompt so we don't mis-record "Enter Menu PIN…" as the response;
+            // keep listening for events until the real result fires or the
+            // final timeout closes the session.
+            if (!isPrompt) {
                 completeSession(success = true, errorMessage = null, finalMessage = signature)
             }
-            return // input-field case: just wait for the next event
+            return // input-prompt case: just wait for the next event
         }
 
         val nextValue = activeSession.flowSegments[activeSession.nextStepIndex]
@@ -279,7 +279,7 @@ object UssdAutomationManager {
             .filter { !it.isWait }
             .getOrNull(activeSession.nextStepIndex)
 
-        val input  = findFirstNodeByClass(root, "android.widget.EditText")
+        val input  = findEditableNode(root)
         val button = findActionButton(root)
 
         if (input == null || button == null) {
@@ -305,7 +305,7 @@ object UssdAutomationManager {
                 if (s == null || s !== activeSession) return@postDelayed
 
                 val freshRoot   = service.rootInActiveWindow
-                val freshInput  = freshRoot?.let { findFirstNodeByClass(it, "android.widget.EditText") }
+                val freshInput  = freshRoot?.let { findEditableNode(it) }
                 val freshButton = freshRoot?.let { findActionButton(it) }
 
                 if (freshInput == null || freshButton == null) {
@@ -442,7 +442,7 @@ object UssdAutomationManager {
             else -> {
                 try {
                     val root = UssdAccessibilityService.instance?.rootInActiveWindow
-                    if (root != null && findFirstNodeByClass(root, "android.widget.EditText") == null) {
+                    if (root != null && !isInputPrompt(root)) {
                         collectTexts(root).joinToString("\n").trim().ifEmpty { null }
                     } else null
                 } catch (_: Exception) { null }
@@ -482,6 +482,57 @@ object UssdAutomationManager {
             values.addAll(collectTexts(node.getChild(index)))
         }
         return values
+    }
+
+    /**
+     * True when the current root represents a USSD *input prompt* (Enter PIN,
+     * Enter amount, …) rather than a result screen. We use this to avoid
+     * recording an input-dialog text as the job's USSD response.
+     *
+     * Detection is broader than a strict `android.widget.EditText` class match,
+     * because many OEMs (MIUI, OneUI, ColorOS) wrap the field in subclasses
+     * like `AppCompatEditText` or custom themes. We treat the dialog as a
+     * prompt when ANY of these hold:
+     *   1. Some descendant is editable (className contains "EditText" OR
+     *      `isEditable` is true).
+     *   2. The dialog exposes both a positive ("Send"/"Submit"/"Reply") AND
+     *      a negative ("Cancel"/"Dismiss") button — the canonical USSD
+     *      input-dialog signature. Result dialogs only have a single OK
+     *      button and thus return false here.
+     */
+    private fun isInputPrompt(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        if (findEditableNode(root) != null) return true
+
+        val buttons = mutableListOf<AccessibilityNodeInfo>()
+        collectAllButtons(root, buttons)
+        if (buttons.size < 2) return false
+
+        val labels = buttons.map {
+            (it.text?.toString() ?: it.contentDescription?.toString() ?: "").trim().lowercase()
+        }
+        val sendLabels   = setOf("send", "submit", "reply", "continue", "next")
+        val cancelLabels = setOf("cancel", "dismiss", "close", "back")
+        val hasSend   = labels.any { it in sendLabels }
+        val hasCancel = labels.any { it in cancelLabels }
+        return hasSend && hasCancel
+    }
+
+    /**
+     * Find any editable descendant — either a node whose className contains
+     * "EditText" (covers `AppCompatEditText`, OEM subclasses, etc.) or a node
+     * whose `isEditable` flag is true.
+     */
+    private fun findEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val cls = node.className?.toString() ?: ""
+        if (cls.contains("EditText", ignoreCase = true)) return node
+        if (node.isEditable) return node
+        for (i in 0 until node.childCount) {
+            val match = findEditableNode(node.getChild(i))
+            if (match != null) return match
+        }
+        return null
     }
 
     private fun findFirstNodeByClass(node: AccessibilityNodeInfo?, className: String): AccessibilityNodeInfo? {
