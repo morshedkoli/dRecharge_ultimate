@@ -473,12 +473,8 @@ function JobCard({
 
           {/* Failure reason — always shown for failed jobs */}
           {(job.status === "failed" || job.status === "cancelled") && (() => {
-            const latestLog = job.executionLogs && job.executionLogs.length > 0
-              ? [...job.executionLogs].reverse()[0]
-              : null;
             const reason =
               (job.parsedResult as { reason?: string } | undefined)?.reason ||
-              latestLog?.failureReason ||
               (job.status === "cancelled" ? "Job cancelled by admin." : "Transaction could not be confirmed.");
             return (
               <div className="flex items-start gap-2 bg-red-50/70 border border-red-200/70 rounded-xl px-3 py-2">
@@ -493,10 +489,7 @@ function JobCard({
 
           {/* USSD Response Preview (diagnostic — admin only) */}
           {(() => {
-            const latestLog = job.executionLogs && job.executionLogs.length > 0
-              ? [...job.executionLogs].reverse()[0]
-              : null;
-            const ussdText = latestLog?.ussdResponse || job.rawSms || "";
+            const ussdText = (job as any).ussdResponse || job.rawSms || "";
             if (!ussdText.trim()) return null;
             const isSuccess = job.status === "done";
             const isFailed  = job.status === "failed";

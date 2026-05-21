@@ -108,23 +108,6 @@ export async function POST(request: NextRequest, { params }: Params) {
         }
         job.parsedResult = { ...finalParsedResult, matchSource: "sms" as const };
         job.completedAt = new Date();
-        if (!job.executionLogs) (job as any).executionLogs = [];
-        (job as any).executionLogs.push({
-          attempt: job.attempt,
-          ussdResponse: (job as any).ussdResponse ?? "",
-          smsBody: rawSms,
-          outcome,
-          failureReason,
-          deviceId: agentSession.deviceId,
-          responseSource: "sms",
-          senderNumber: smsSenderNumber,
-          smsReceivedAt:
-            smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime())
-              ? smsReceivedAtDate
-              : undefined,
-          stepsExecuted: job.ussdStepsExecuted || [],
-          executedAt: new Date(),
-        });
         await job.save({ session: dbSession });
 
         tx.status = outcome === "done" ? "complete" : "failed";

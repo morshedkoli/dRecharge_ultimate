@@ -89,7 +89,6 @@ export async function POST(request: NextRequest, { params }: Params) {
     let failureReason: string | undefined;
     let finalParsedResult: { success: boolean; [key: string]: unknown } = { success: false };
     let alreadyResolved = false;
-    const responseSource = rawSmsSource === "sms" ? "sms" : "ussd";
     const smsReceivedAtDate =
       typeof smsReceivedAt === "number" && Number.isFinite(smsReceivedAt)
         ? new Date(smsReceivedAt)
@@ -204,25 +203,6 @@ export async function POST(request: NextRequest, { params }: Params) {
         job.parsedResult = finalParsedResult;
         job.ussdStepsExecuted = ussdStepsExecuted || [];
         job.completedAt = new Date();
-
-        const logEntry = {
-          attempt: job.attempt,
-          ussdResponse: ussdResponseText,
-          smsBody: smsBodyText,
-          outcome: outcome as string,
-          failureReason,
-          deviceId: agentSession.deviceId,
-          responseSource,
-          senderNumber: typeof smsSenderNumber === "string" ? smsSenderNumber : undefined,
-          smsReceivedAt:
-            smsReceivedAtDate && !Number.isNaN(smsReceivedAtDate.getTime())
-              ? smsReceivedAtDate
-              : undefined,
-          stepsExecuted: ussdStepsExecuted || [],
-          executedAt: new Date(),
-        };
-        if (!job.executionLogs) (job as any).executionLogs = [];
-        (job as any).executionLogs.push(logEntry);
 
         await job.save({ session: dbSession });
 
