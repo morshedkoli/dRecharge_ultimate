@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
     const dbSession = await mongoose.startSession();
     let txId = "";
     let jobId = "";
+    let idempotentReplay: { txId: string; jobId?: string } | null = null;
 
     try {
       await dbSession.withTransaction(async () => {
@@ -171,8 +172,37 @@ export async function POST(request: NextRequest) {
           createdAt: new Date(),
         }], { session: dbSession });
       });
+    } catch (txErr) {
+      // Race-loser path: another concurrent POST with the same Idempotency-Key
+      // committed first, tripping the unique index. Treat as idempotent replay
+      // rather than surfacing a 500. The withTransaction abort already rolled
+      // back the partial debit on this request.
+      const e = txErr as { code?: number; message?: string };
+      const isDupKey =
+        e?.code === 11000 ||
+        (typeof e?.message === "string" && e.message.includes("E11000"));
+      if (idempotencyKey && isDupKey) {
+        const prior = await Transaction.findOne({ userId: uid, idempotencyKey }).lean();
+        if (prior) {
+          const priorJob = await ExecutionJob.findOne({ txId: prior._id }).lean();
+          idempotentReplay = { txId: prior._id, jobId: priorJob?._id };
+        } else {
+          throw txErr;
+        }
+      } else {
+        throw txErr;
+      }
     } finally {
       await dbSession.endSession();
+    }
+
+    if (idempotentReplay) {
+      return NextResponse.json({
+        success: true,
+        txId: idempotentReplay.txId,
+        jobId: idempotentReplay.jobId,
+        idempotent: true,
+      });
     }
 
     await writeLog({

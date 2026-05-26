@@ -5,26 +5,30 @@
  * Usage:  node scripts/migrate-plaintext-pins.mjs
  */
 
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
+// Load .env.local if present — in CI/prod, env vars are usually injected
+// directly, so missing .env.local must not be fatal.
 const __dir = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(__dir, "../.env.local");
 
-for (const line of readFileSync(envPath, "utf8").split("\n")) {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith("#")) continue;
-  const eq = trimmed.indexOf("=");
-  if (eq === -1) continue;
-  const key = trimmed.slice(0, eq).trim();
-  let val = trimmed.slice(eq + 1).trim();
-  if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-    val = val.slice(1, -1);
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = val;
   }
-  if (!(key in process.env)) process.env[key] = val;
 }
 
 const MONGODB_URI = process.env.MONGODB_URI;
