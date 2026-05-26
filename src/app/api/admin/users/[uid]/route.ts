@@ -13,6 +13,7 @@ import { withAdminSession } from "@/lib/auth/session";
 import { getSession } from "@/lib/auth/session";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
 import { hashPin, isValidPin } from "@/lib/auth/pin";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ uid: string }> };
@@ -52,7 +53,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: "PIN must be 4-6 digits" }, { status: 400 });
       }
       user.pinHash = await hashPin(newPin);
-      user.pin = undefined;
       await user.save();
       return NextResponse.json({ success: true });
     }
@@ -163,11 +163,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: "Positive amount required" }, { status: 400 });
       }
       const dbSession = await mongoose.startSession();
+      const topupTxId = `TX_TOPUP_${Date.now()}`;
       try {
         await dbSession.withTransaction(async () => {
           await User.findByIdAndUpdate(uid, { $inc: { walletBalance: amount } }, { session: dbSession });
           await Transaction.create([{
-            _id: `TX_TOPUP_${Date.now()}`,
+            _id: topupTxId,
             userId: uid,
             type: "topup",
             amount,
@@ -178,6 +179,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
             createdAt: new Date(),
             completedAt: new Date(),
           }], { session: dbSession });
+          await writeLedger({
+            userId: uid,
+            kind: "admin_credit",
+            amount,
+            txId: topupTxId,
+            actorUid: session.sub,
+            note: note || undefined,
+            session: dbSession,
+            updateUserBalance: false,
+          });
         });
       } finally {
         await dbSession.endSession();
@@ -294,7 +305,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: "PIN must be 4–6 digits" }, { status: 400 });
       }
       user.pinHash = await hashPin(newPin);
-      user.pin = undefined;
       await user.save();
       await writeLog({
         uid: session.sub,
@@ -359,7 +369,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
         phoneNumber: user.phoneNumber,
-        hasPin: Boolean(user.pinHash || user.pin),
+        hasPin: Boolean(user.pinHash),
         canManuallyCompleteJobs: user.canManuallyCompleteJobs || false,
       },
       transactions: transactions.map(t => ({ id: t._id, ...t })),

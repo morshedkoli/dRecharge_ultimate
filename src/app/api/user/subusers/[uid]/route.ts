@@ -162,7 +162,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         return NextResponse.json({ error: "PIN must be 4–6 digits" }, { status: 400 });
       }
       targetUser.pinHash = await hashPin(newPin);
-      targetUser.pin = undefined;
       await targetUser.save();
       await writeLog({
         uid: session.sub,
@@ -221,11 +220,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         await parent.save({ session: mSession });
         await child.save({ session: mSession });
 
+        const transferTxId = `TX_TRANSFER_${Date.now()}_${uid}`;
         // Record child transaction
         await Transaction.create(
           [
             {
-              _id: `TX_TRANSFER_${Date.now()}_${uid}`,
+              _id: transferTxId,
               userId: uid,
               type: type, // "topup" or "deduct"
               amount: numAmount,
@@ -239,6 +239,32 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           ],
           { session: mSession }
         );
+
+        // Ledger entries for both sides of the transfer
+        const { writeLedger } = await import("@/lib/wallet");
+        if (type === "topup") {
+          await writeLedger({
+            userId: session.sub, kind: "transfer_out", amount: -numAmount,
+            txId: transferTxId, actorUid: session.sub, note: note || undefined,
+            session: mSession, updateUserBalance: false,
+          });
+          await writeLedger({
+            userId: uid, kind: "transfer_in", amount: numAmount,
+            txId: transferTxId, actorUid: session.sub, note: note || undefined,
+            session: mSession, updateUserBalance: false,
+          });
+        } else {
+          await writeLedger({
+            userId: uid, kind: "transfer_out", amount: -numAmount,
+            txId: transferTxId, actorUid: session.sub, note: note || undefined,
+            session: mSession, updateUserBalance: false,
+          });
+          await writeLedger({
+            userId: session.sub, kind: "transfer_in", amount: numAmount,
+            txId: transferTxId, actorUid: session.sub, note: note || undefined,
+            session: mSession, updateUserBalance: false,
+          });
+        }
 
         await mSession.commitTransaction();
 

@@ -5,6 +5,7 @@ import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
 import { notifyBalanceRequestApproved, notifyBalanceRequestRejected } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
 
 type Params = { params: Promise<{ id: string }> };
@@ -37,6 +38,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
             { $inc: { walletBalance: req.amount } },
             { session: dbSession }
           );
+          await writeLedger({
+            userId: req.userId,
+            kind: "topup_approved",
+            amount: req.amount,
+            balanceRequestId: req._id,
+            actorUid: session.sub,
+            session: dbSession,
+            updateUserBalance: false,
+          });
           req.status = "approved";
           req.adminNote = adminNote || "";
           req.approvedBy = session.sub;

@@ -17,7 +17,6 @@ export interface IUser extends Document<string> {
   createdAt: Date;
   lastLoginAt: Date;
   phoneNumber?: string;
-  pin?: string;
   pinHash?: string;
   parentId?: string;
   canManuallyCompleteJobs?: boolean;
@@ -41,7 +40,6 @@ const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     lastLoginAt: { type: Date, default: Date.now },
     phoneNumber: { type: String, default: null },
-    pin: { type: String },
     pinHash: { type: String },
     parentId: { type: String, index: true },
     canManuallyCompleteJobs: { type: Boolean, default: false },

@@ -9,7 +9,8 @@ import { getSession } from "@/lib/auth/session";
 import { withAdminSession } from "@/lib/auth/session";
 import { resolveJobUssdSteps } from "@/lib/ussd";
 import { checkSubscription } from "@/lib/subscription";
-import { hashPin, verifyPin } from "@/lib/auth/pin";
+import { verifyPin } from "@/lib/auth/pin";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 
@@ -42,6 +43,10 @@ export async function POST(request: NextRequest) {
     const isAdmin = ["admin", "super_admin", "support_admin"].includes(session.role);
     const { serviceId, recipientNumber, amount: reqAmount, pin } = await request.json();
     const amount = Number(reqAmount || 0);
+    const idempotencyKey =
+      request.headers.get("idempotency-key") ||
+      request.headers.get("Idempotency-Key") ||
+      undefined;
 
     if (isAdmin) {
       if (!serviceId || !recipientNumber) {
@@ -56,6 +61,20 @@ export async function POST(request: NextRequest) {
     const uid = session.sub;
     await connectDB();
 
+    // Idempotency: if we've seen this key for this user, return the prior result.
+    if (idempotencyKey) {
+      const prior = await Transaction.findOne({ userId: uid, idempotencyKey }).lean();
+      if (prior) {
+        const priorJob = await ExecutionJob.findOne({ txId: prior._id }).lean();
+        return NextResponse.json({
+          success: true,
+          txId: prior._id,
+          jobId: priorJob?._id,
+          idempotent: true,
+        });
+      }
+    }
+
     const service = await Service.findById(serviceId).lean();
     if (!service) return NextResponse.json({ error: "Service not found" }, { status: 404 });
     if (!service.isActive) return NextResponse.json({ error: "Service is currently inactive" }, { status: 400 });
@@ -68,6 +87,7 @@ export async function POST(request: NextRequest) {
     const dbSession = await mongoose.startSession();
     let txId = "";
     let jobId = "";
+    let idempotentReplay: { txId: string; jobId?: string } | null = null;
 
     try {
       await dbSession.withTransaction(async () => {
@@ -75,9 +95,9 @@ export async function POST(request: NextRequest) {
         if (!user || user.status !== "active") throw new Error("User not found or inactive");
 
         const submittedPin = String(pin || "");
-        const pinOk = await verifyPin(submittedPin, user.pinHash, user.pin);
+        const pinOk = await verifyPin(submittedPin, user.pinHash);
         if (!pinOk) {
-          throw new Error(user.pinHash || user.pin ? "Invalid transaction PIN" : "Set a transaction PIN before creating transactions");
+          throw new Error(user.pinHash ? "Invalid transaction PIN" : "Set a transaction PIN before creating transactions");
         }
 
         if (!isAdmin) {
@@ -94,14 +114,6 @@ export async function POST(request: NextRequest) {
           // Deduct — balance may go negative (into credit territory)
           user.walletBalance = user.walletBalance - amount;
           user.walletLocked = true;
-          if (user.pin && !user.pinHash) {
-            user.pinHash = await hashPin(user.pin);
-            user.pin = undefined;
-          }
-          await user.save({ session: dbSession });
-        } else if (user.pin && !user.pinHash) {
-          user.pinHash = await hashPin(user.pin);
-          user.pin = undefined;
           await user.save({ session: dbSession });
         }
 
@@ -123,8 +135,23 @@ export async function POST(request: NextRequest) {
           amount,
           fee: 0,
           status: "pending",
+          idempotencyKey,
           createdAt: new Date(),
         }], { session: dbSession });
+
+        // Journal entry — non-admin path is the only one that mutates balance.
+        if (!isAdmin) {
+          await writeLedger({
+            userId: uid,
+            kind: "debit",
+            amount: -amount,
+            txId,
+            jobId,
+            actorUid: uid,
+            session: dbSession,
+            updateUserBalance: false,
+          });
+        }
 
         await ExecutionJob.create([{
           _id: jobId,
@@ -145,8 +172,37 @@ export async function POST(request: NextRequest) {
           createdAt: new Date(),
         }], { session: dbSession });
       });
+    } catch (txErr) {
+      // Race-loser path: another concurrent POST with the same Idempotency-Key
+      // committed first, tripping the unique index. Treat as idempotent replay
+      // rather than surfacing a 500. The withTransaction abort already rolled
+      // back the partial debit on this request.
+      const e = txErr as { code?: number; message?: string };
+      const isDupKey =
+        e?.code === 11000 ||
+        (typeof e?.message === "string" && e.message.includes("E11000"));
+      if (idempotencyKey && isDupKey) {
+        const prior = await Transaction.findOne({ userId: uid, idempotencyKey }).lean();
+        if (prior) {
+          const priorJob = await ExecutionJob.findOne({ txId: prior._id }).lean();
+          idempotentReplay = { txId: prior._id, jobId: priorJob?._id };
+        } else {
+          throw txErr;
+        }
+      } else {
+        throw txErr;
+      }
     } finally {
       await dbSession.endSession();
+    }
+
+    if (idempotentReplay) {
+      return NextResponse.json({
+        success: true,
+        txId: idempotentReplay.txId,
+        jobId: idempotentReplay.jobId,
+        idempotent: true,
+      });
     }
 
     await writeLog({

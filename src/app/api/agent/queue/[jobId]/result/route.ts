@@ -9,7 +9,13 @@ import { writeLog } from "@/lib/db/audit";
 import { notifyTransactionCompleted, notifyTransactionFailed } from "@/lib/notifications";
 import { extractAgentSession } from "../../../_auth";
 import { evaluateSmsAgainstTemplates, loadFailureTemplates, loadSuccessFormat } from "@/lib/sms-template";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
+
+// Retry policy: transient failures (network busy, infra) get requeued up to
+// MAX_RETRIES times before refunding. Provider-confirmed failures (matched
+// failure SMS template) skip retry — they are deterministic.
+const MAX_RETRIES = 3;
 
 type Params = { params: Promise<{ jobId: string }> };
 
@@ -89,6 +95,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     let failureReason: string | undefined;
     let finalParsedResult: { success: boolean; [key: string]: unknown } = { success: false };
     let alreadyResolved = false;
+    let requeued = false;
     const smsReceivedAtDate =
       typeof smsReceivedAt === "number" && Number.isFinite(smsReceivedAt)
         ? new Date(smsReceivedAt)
@@ -189,6 +196,31 @@ export async function POST(request: NextRequest, { params }: Params) {
           finalParsedResult = { success: false, reason: failureReason };
         }
 
+        // ── Retry path: requeue for transient failures ──────────────────────
+        const isTransient =
+          outcome === "failed" &&
+          (failureReason === REASON_NETWORK_BUSY ||
+            (typeof failureReason === "string" && failureReason.startsWith(REASON_INFRA)));
+        const canRetry = isTransient && job.attempt < MAX_RETRIES;
+
+        if (canRetry) {
+          requeued = true;
+          job.status = "queued";
+          job.locked = false;
+          (job as any).lockedAt = undefined;
+          (job as any).lockedByDevice = undefined;
+          (job as any).ussdResponse = ussdResponseText;
+          job.rawSms = smsBodyText;
+          await job.save({ session: dbSession });
+          // Release device — same flow as success/fail
+          await AgentDevice.findByIdAndUpdate(
+            agentSession.deviceId,
+            { currentJob: null, lastHeartbeat: new Date(), status: "online" },
+            { session: dbSession }
+          );
+          return;
+        }
+
         // ── Persist outcome on job ──────────────────────────────────────────
         job.status = outcome;
         job.locked = false;
@@ -201,7 +233,6 @@ export async function POST(request: NextRequest, { params }: Params) {
           (job as any).smsReceivedAt = smsReceivedAtDate;
         }
         job.parsedResult = finalParsedResult;
-        job.ussdStepsExecuted = ussdStepsExecuted || [];
         job.completedAt = new Date();
 
         await job.save({ session: dbSession });
@@ -232,13 +263,23 @@ export async function POST(request: NextRequest, { params }: Params) {
 
         // ── Wallet ──────────────────────────────────────────────────────────
         //   done   → unlock (money spent)
-        //   failed → unlock + refund
+        //   failed → unlock + refund (with ledger entry)
         if (outcome === "failed") {
           await User.findByIdAndUpdate(
             tx.userId,
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
             { session: dbSession }
           );
+          await writeLedger({
+            userId: tx.userId,
+            kind: "refund",
+            amount: tx.amount,
+            txId: tx._id,
+            jobId,
+            note: failureReason,
+            session: dbSession,
+            updateUserBalance: false,
+          });
         } else {
           await User.findByIdAndUpdate(
             tx.userId,
@@ -259,6 +300,9 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     if (alreadyResolved) {
       return NextResponse.json({ success: true, alreadyResolved: true });
+    }
+    if (requeued) {
+      return NextResponse.json({ success: true, requeued: true });
     }
 
     // ── Audit + notify ─────────────────────────────────────────────────────────

@@ -6,6 +6,30 @@ import { extractAgentSession } from "../_auth";
 import { resolveJobUssdSteps } from "@/lib/ussd";
 import { loadSuccessFormat, loadFailureTemplates } from "@/lib/sms-template";
 
+// Stuck-job sweeper runs at most once per SWEEPER_INTERVAL_MS across all
+// poll requests (module-level guard — survives within a single server
+// process; serverless cold starts will rerun it, which is acceptable).
+const SWEEPER_INTERVAL_MS = 60 * 1000;
+const STUCK_THRESHOLD_MS = 10 * 60 * 1000;
+let lastSweeperRunAt = 0;
+
+async function maybeRunStuckSweeper(): Promise<void> {
+  const now = Date.now();
+  if (now - lastSweeperRunAt < SWEEPER_INTERVAL_MS) return;
+  lastSweeperRunAt = now;
+  await ExecutionJob.updateMany(
+    {
+      status: "processing",
+      locked: true,
+      lockedAt: { $lt: new Date(now - STUCK_THRESHOLD_MS) },
+    },
+    {
+      $set: { status: "queued", locked: false },
+      $unset: { lockedAt: 1, lockedByDevice: 1 },
+    }
+  );
+}
+
 // GET /api/agent/queue — fetch next queued job
 export async function GET(request: NextRequest) {
   try {
@@ -15,21 +39,7 @@ export async function GET(request: NextRequest) {
     }
 
     await connectDB();
-
-    // Auto-recover stuck jobs: if a job has been processing for >10 minutes, reset it to queued.
-    // 10 min accounts for USSD execution + up to 2-min SMS polling window.
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-    await ExecutionJob.updateMany(
-      {
-        status: "processing",
-        locked: true,
-        lockedAt: { $lt: tenMinutesAgo },
-      },
-      {
-        $set: { status: "queued", locked: false },
-        $unset: { lockedAt: 1, lockedByDevice: 1 },
-      }
-    );
+    await maybeRunStuckSweeper();
 
     // Only dispatch jobs whose service is assigned to this device
     const assignedServices: string[] = agentSession.device.assignedServices ?? [];

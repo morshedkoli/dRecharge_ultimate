@@ -5,6 +5,7 @@ import Transaction from "@/lib/db/models/Transaction";
 import { writeLog } from "@/lib/db/audit";
 import { notifyWalletCredited, notifyWalletDebited } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 
@@ -35,8 +36,9 @@ export async function POST(request: NextRequest, { params }: Params) {
           : user.walletBalance + parsedAmount;
         await user.save({ session: dbSession });
 
+        const txId = nanoid(20);
         await Transaction.create([{
-          _id: nanoid(20),
+          _id: txId,
           userId: uid,
           type: isDeduct ? "deduct" : "topup",
           amount: parsedAmount,
@@ -47,6 +49,17 @@ export async function POST(request: NextRequest, { params }: Params) {
           createdAt: new Date(),
           completedAt: new Date(),
         }], { session: dbSession });
+
+        await writeLedger({
+          userId: uid,
+          kind: isDeduct ? "admin_debit" : "admin_credit",
+          amount: isDeduct ? -parsedAmount : parsedAmount,
+          txId,
+          actorUid: session.sub,
+          note: note || undefined,
+          session: dbSession,
+          updateUserBalance: false,
+        });
       });
     } finally {
       await dbSession.endSession();
