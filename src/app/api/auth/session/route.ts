@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
         walletLocked: user.walletLocked,
         status: user.status,
         phoneNumber: user.phoneNumber,
-        hasPin: Boolean(user.pinHash || user.pin),
+        hasPin: Boolean(user.pinHash),
         parentId: user.parentId,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,

@@ -9,7 +9,8 @@ import { getSession } from "@/lib/auth/session";
 import { withAdminSession } from "@/lib/auth/session";
 import { resolveJobUssdSteps } from "@/lib/ussd";
 import { checkSubscription } from "@/lib/subscription";
-import { hashPin, verifyPin } from "@/lib/auth/pin";
+import { verifyPin } from "@/lib/auth/pin";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 
@@ -42,6 +43,10 @@ export async function POST(request: NextRequest) {
     const isAdmin = ["admin", "super_admin", "support_admin"].includes(session.role);
     const { serviceId, recipientNumber, amount: reqAmount, pin } = await request.json();
     const amount = Number(reqAmount || 0);
+    const idempotencyKey =
+      request.headers.get("idempotency-key") ||
+      request.headers.get("Idempotency-Key") ||
+      undefined;
 
     if (isAdmin) {
       if (!serviceId || !recipientNumber) {
@@ -55,6 +60,20 @@ export async function POST(request: NextRequest) {
 
     const uid = session.sub;
     await connectDB();
+
+    // Idempotency: if we've seen this key for this user, return the prior result.
+    if (idempotencyKey) {
+      const prior = await Transaction.findOne({ userId: uid, idempotencyKey }).lean();
+      if (prior) {
+        const priorJob = await ExecutionJob.findOne({ txId: prior._id }).lean();
+        return NextResponse.json({
+          success: true,
+          txId: prior._id,
+          jobId: priorJob?._id,
+          idempotent: true,
+        });
+      }
+    }
 
     const service = await Service.findById(serviceId).lean();
     if (!service) return NextResponse.json({ error: "Service not found" }, { status: 404 });
@@ -75,9 +94,9 @@ export async function POST(request: NextRequest) {
         if (!user || user.status !== "active") throw new Error("User not found or inactive");
 
         const submittedPin = String(pin || "");
-        const pinOk = await verifyPin(submittedPin, user.pinHash, user.pin);
+        const pinOk = await verifyPin(submittedPin, user.pinHash);
         if (!pinOk) {
-          throw new Error(user.pinHash || user.pin ? "Invalid transaction PIN" : "Set a transaction PIN before creating transactions");
+          throw new Error(user.pinHash ? "Invalid transaction PIN" : "Set a transaction PIN before creating transactions");
         }
 
         if (!isAdmin) {
@@ -94,14 +113,6 @@ export async function POST(request: NextRequest) {
           // Deduct — balance may go negative (into credit territory)
           user.walletBalance = user.walletBalance - amount;
           user.walletLocked = true;
-          if (user.pin && !user.pinHash) {
-            user.pinHash = await hashPin(user.pin);
-            user.pin = undefined;
-          }
-          await user.save({ session: dbSession });
-        } else if (user.pin && !user.pinHash) {
-          user.pinHash = await hashPin(user.pin);
-          user.pin = undefined;
           await user.save({ session: dbSession });
         }
 
@@ -123,8 +134,23 @@ export async function POST(request: NextRequest) {
           amount,
           fee: 0,
           status: "pending",
+          idempotencyKey,
           createdAt: new Date(),
         }], { session: dbSession });
+
+        // Journal entry — non-admin path is the only one that mutates balance.
+        if (!isAdmin) {
+          await writeLedger({
+            userId: uid,
+            kind: "debit",
+            amount: -amount,
+            txId,
+            jobId,
+            actorUid: uid,
+            session: dbSession,
+            updateUserBalance: false,
+          });
+        }
 
         await ExecutionJob.create([{
           _id: jobId,

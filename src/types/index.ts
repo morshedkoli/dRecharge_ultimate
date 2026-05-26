@@ -95,7 +95,6 @@ export interface ExecutionJob {
     matchSource?: "ussd" | "sms";
     reason?: string;
   };
-  ussdStepsExecuted?: UssdStepResult[];
   simSlot?: number;
   smsTimeout?: number;
   createdAt: Date | string;
@@ -124,14 +123,6 @@ export interface UssdStep {
 export interface SmsFailureTemplate {
   template: string;    // SMS pattern to match (same placeholder syntax as success)
   message: string;     // user-facing failure reason shown in notification + history
-}
-
-export interface UssdStepResult {
-  order: number;
-  type: "dial" | "select" | "input" | "wait" | "response";
-  value: string;
-  executedAt: Date | string;
-  success: boolean;
 }
 
 // ─── Service Category ────────────────────────────────────────────────────────

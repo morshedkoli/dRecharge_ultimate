@@ -42,7 +42,6 @@ export interface IExecutionJob extends Document<string> {
     matchSource?: "ussd" | "sms";  // which input matched the template
     reason?: string;
   };
-  ussdStepsExecuted?: object[];
   queuedAt?: Date;
   createdAt: Date;
   completedAt?: Date;
@@ -91,7 +90,6 @@ const ExecutionJobSchema = new Schema<IExecutionJob>(
     smsSenderNumber: { type: String },
     smsReceivedAt: { type: Date },
     parsedResult: { type: Schema.Types.Mixed },
-    ussdStepsExecuted: [{ type: Schema.Types.Mixed }],
     completedAt: { type: Date },
   },
   {
@@ -106,6 +104,15 @@ ExecutionJobSchema.virtual("queuedAt").get(function (this: IExecutionJob) {
 
 ExecutionJobSchema.index({ status: 1, createdAt: 1 });
 ExecutionJobSchema.index({ locked: 1, status: 1, lockedAt: 1 });
+// TTL: auto-delete terminated jobs 90 days after completedAt.
+// Active jobs (queued/processing/waiting) have no completedAt → kept forever.
+ExecutionJobSchema.index(
+  { completedAt: 1 },
+  {
+    expireAfterSeconds: 60 * 60 * 24 * 90,
+    partialFilterExpression: { status: { $in: ["done", "failed", "cancelled"] } },
+  }
+);
 
 const ExecutionJob: Model<IExecutionJob> =
   mongoose.models.ExecutionJob ||

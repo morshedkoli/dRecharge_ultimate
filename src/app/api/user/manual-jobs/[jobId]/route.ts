@@ -105,7 +105,22 @@ export async function POST(request: NextRequest, { params }: Params) {
         if (!isSuccess) userUpdate.$inc = { walletBalance: tx.amount };
         await User.findByIdAndUpdate(tx.userId, userUpdate, { session: dbSession });
 
-        await writeLog({ 
+        if (!isSuccess) {
+          const { writeLedger } = await import("@/lib/wallet");
+          await writeLedger({
+            userId: tx.userId,
+            kind: "refund",
+            amount: tx.amount,
+            txId: tx._id,
+            jobId,
+            actorUid: session.sub,
+            note: reason || "Manually marked as failed",
+            session: dbSession,
+            updateUserBalance: false,
+          });
+        }
+
+        await writeLog({
           uid: session.sub, 
           action: isSuccess ? "MANUAL_JOB_COMPLETED" : "MANUAL_JOB_FAILED", 
           entityId: jobId, 

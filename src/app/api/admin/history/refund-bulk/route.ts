@@ -6,6 +6,7 @@ import User from "@/lib/db/models/User";
 import { writeLog } from "@/lib/db/audit";
 import { notifyTransactionCancelled } from "@/lib/notifications";
 import { withAdminSession } from "@/lib/auth/session";
+import { writeLedger } from "@/lib/wallet";
 import mongoose from "mongoose";
 
 // POST /api/admin/history/refund-bulk — cancel selected waiting jobs and refund users
@@ -51,12 +52,23 @@ export async function POST(request: NextRequest) {
           tx.completedAt = new Date();
           await tx.save({ session: dbSession });
 
-          // Refund wallet + unlock
+          // Refund wallet + unlock + journal entry
           await User.findByIdAndUpdate(
             tx.userId,
             { $inc: { walletBalance: tx.amount }, walletLocked: false },
             { session: dbSession }
           );
+          await writeLedger({
+            userId: tx.userId,
+            kind: "refund",
+            amount: tx.amount,
+            txId: tx._id,
+            jobId: String(job._id),
+            actorUid: session.sub,
+            note: "Admin bulk refund",
+            session: dbSession,
+            updateUserBalance: false,
+          });
 
           refundedJobIds.push(String(job._id));
           refundedCount++;

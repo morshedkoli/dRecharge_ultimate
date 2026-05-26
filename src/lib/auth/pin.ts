@@ -1,7 +1,6 @@
 import { hashPassword, verifyPassword } from "./password";
 
 const PIN_PATTERN = /^\d{4,6}$/;
-const BCRYPT_PATTERN = /^\$2[aby]\$\d{2}\$/;
 
 export function isValidPin(pin: string): boolean {
   return PIN_PATTERN.test(pin);
@@ -14,15 +13,13 @@ export async function hashPin(pin: string): Promise<string> {
   return hashPassword(pin);
 }
 
-export async function verifyPin(
-  pin: string,
-  storedHash?: string | null,
-  legacyPlaintext?: string | null
-): Promise<boolean> {
+/**
+ * Verify a submitted PIN against the stored bcrypt hash.
+ * Plaintext fallback was removed — run scripts/migrate-plaintext-pins.ts
+ * once before deploying to convert any legacy rows.
+ */
+export async function verifyPin(pin: string, storedHash?: string | null): Promise<boolean> {
   if (!isValidPin(pin)) return false;
-  if (storedHash) return verifyPassword(pin, storedHash);
-  if (!legacyPlaintext) return false;
-  if (BCRYPT_PATTERN.test(legacyPlaintext)) return verifyPassword(pin, legacyPlaintext);
-  return legacyPlaintext === pin;
+  if (!storedHash) return false;
+  return verifyPassword(pin, storedHash);
 }
-

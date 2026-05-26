@@ -20,6 +20,7 @@ export interface ITransaction extends Document<string> {
   providerAmount?: string;     // amount as reported in provider SMS
   providerRecipient?: string;  // recipient (often masked) as reported in provider SMS
   adminId?: string;
+  idempotencyKey?: string;     // client-supplied dedup key for POST /transactions
   createdAt: Date;
   completedAt?: Date;
 }
@@ -45,6 +46,7 @@ const TransactionSchema = new Schema<ITransaction>(
     providerAmount: { type: String },
     providerRecipient: { type: String },
     adminId: { type: String },
+    idempotencyKey: { type: String },
     completedAt: { type: Date },
   },
   {
@@ -55,6 +57,10 @@ const TransactionSchema = new Schema<ITransaction>(
 TransactionSchema.index({ status: 1 });
 TransactionSchema.index({ createdAt: -1 });
 TransactionSchema.index({ userId: 1, createdAt: -1 });
+TransactionSchema.index(
+  { userId: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } }
+);
 
 const Transaction: Model<ITransaction> =
   mongoose.models.Transaction ||

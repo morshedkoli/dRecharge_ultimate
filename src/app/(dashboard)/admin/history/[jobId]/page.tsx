@@ -64,15 +64,6 @@ function Card({ title, icon: Icon, iconBg, children }: {
   );
 }
 
-// ── Step type badge ──────────────────────────────────────────────────────────
-
-const stepTypeStyle: Record<string, string> = {
-  dial:     "bg-blue-50 text-blue-700 border border-blue-100",
-  select:   "bg-amber-50 text-amber-700 border border-amber-100",
-  input:    "bg-violet-50 text-violet-700 border border-violet-100",
-  response: "bg-emerald-50 text-emerald-700 border border-emerald-100",
-};
-
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export default function JobDetailPage({ params }: { params: Promise<{ jobId: string }> }) {
@@ -329,45 +320,6 @@ export default function JobDetailPage({ params }: { params: Promise<{ jobId: str
           )}
         </Card>
       </div>
-
-      {/* ── USSD execution timeline ───────────────────────────────────────── */}
-      {job.ussdStepsExecuted && job.ussdStepsExecuted.length > 0 && (
-        <Card title="USSD Steps Executed" icon={Cpu} iconBg="bg-blue-50">
-          <div className="py-2 space-y-0">
-            {job.ussdStepsExecuted.map((step, idx) => (
-              <div
-                key={step.order}
-                className="flex items-center gap-4 py-3 border-b border-black/[0.04] last:border-0"
-              >
-                {/* Step number */}
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs font-extrabold font-manrope ${
-                  step.success
-                    ? "bg-[#E8F1EE] text-[#134235]"
-                    : "bg-red-50 text-red-600"
-                }`}>
-                  {step.order}
-                </div>
-
-                {/* Type badge */}
-                <span className={`text-[10px] px-2 py-0.5 rounded-md font-mono font-bold shrink-0 ${stepTypeStyle[step.type] ?? "bg-surface-container text-on-surface-variant"}`}>
-                  {step.type}
-                </span>
-
-                {/* Value */}
-                <span className={`font-mono text-sm text-on-surface flex-1 min-w-0 ${step.type === 'response' ? 'whitespace-pre-wrap leading-relaxed' : 'truncate'}`}>
-                  {step.value}
-                </span>
-
-                {/* Result icon */}
-                {step.success
-                  ? <CheckCircle className="w-4 h-4 text-[#134235] shrink-0" />
-                  : <XCircle    className="w-4 h-4 text-red-500 shrink-0" />
-                }
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
 
       {/* ── USSD Response (Phone Dialog Preview) ─────────────────────────── */}
       {(() => {
